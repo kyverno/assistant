@@ -372,7 +372,7 @@ A second profile for people contributing to Kyverno. It finds work worth doing, 
 and folders fit together, helps prepare evidence-backed PRs, makes review feedback understandable, and
 tracks the path from first PR toward reviewer. It reads GitHub with your own token and can write one
 thing: an issue comment after you confirm it. It cannot merge, approve, review, push, or comment on
-someone else's PR; hooks enforce that. Design: [`docs/plans/contributor-profile.md`](docs/plans/contributor-profile.md).
+someone else's PR; hooks enforce that.
 
 ```bash
 ./scripts/install.sh --profile contributor     # profile name: kyverno-contributor
@@ -412,7 +412,7 @@ profiles/contributor/    the contributor profile: same shape, plus org/org.yaml 
 scripts/install.sh       the host install: idempotent installer, --profile maintainer|contributor [NAME]
 scripts/update.sh        the host install: git pull, then re-run the installer
 scripts/openshell.sh     the host install's sandboxed terminal: setup, policy, access requests, audit
-docs/                    design, deployment and usage docs; docs/plans/ holds plans
+docs/                    design, deployment and usage docs
 ```
 
 ## Development automation
