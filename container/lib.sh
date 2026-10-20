@@ -27,7 +27,7 @@ provider_env_var() {
 # What is yours across an --upgrade: memory, chat history, your repo and username, the Copilot sign-in, the model you
 # chose. Paths under the profile directory. The profile itself (skills, hooks, plugins, settings) comes from the new image.
 # shellcheck disable=SC2034  # used by the launchers that source this file
-STATE_FILES=".env config.yaml .kyverno-model-chosen mnemosyne/data memories sessions kyverno-dashboard state.db state.db-wal state.db-shm"
+STATE_FILES=".env config.yaml .kyverno-model-chosen mnemosyne/data memories sessions kyverno-dashboard kyverno-contributor state.db state.db-wal state.db-shm"
 
 # Build the image from this checkout (--build), or pull it when it is missing or --upgrade asks for the newest.
 ensure_image() {
@@ -58,7 +58,7 @@ ensure_image() {
 # token_note_gh (printed under the gh option) and token_note_paste (printed before the paste prompt), and picks the
 # default option in TOKEN_DEFAULT (1 = gh, 2 = paste).
 acquire_github_token() {
-  [ -z "$REPO" ] && read -r -p "  Repo to manage (owner/repo) [kyverno/kyverno]: " REPO
+  [ -z "$REPO" ] && read -r -p "  ${REPO_ASK:-Repo to manage (owner/repo) [kyverno/kyverno]: }" REPO
   REPO="${REPO:-kyverno/kyverno}"
   valid_repo "$REPO" || { fail "'$REPO' is not an owner/repo name (letters, digits, dots, dashes, underscores)"; exit 1; }
   PAT=""

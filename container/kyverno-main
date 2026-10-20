@@ -3,6 +3,7 @@
 # sandbox alive; everything else (the chat) is started on demand with `openshell sandbox exec`.
 # The dashboard listens on 127.0.0.1 inside the sandbox only; the launcher forwards a port on your laptop to it
 # (Without OpenShell, a relay in the container passes it on to Docker's published port.)
+# It belongs to the maintainer profile; the contributor sandbox (kyverno-main contributor) just stays alive.
 set -u
 
 export HERMES_HOME=/opt/hermes-home/.hermes
@@ -14,6 +15,8 @@ PORT="${KYVERNO_DASHBOARD_PORT:-9219}"
 if [ "${KYVERNO_RUNTIME:-}" = docker ]; then
   for _ in $(seq 1 120); do [ -f /run/kyverno-secrets/env ] && break; sleep 1; done
 fi
+
+if [ "${1:-maintainer}" != maintainer ]; then exec sleep infinity; fi
 
 # --isolated makes the server profile-scoped, which is what makes it find this profile's Kyverno tab.
 # --skip-build serves the web UI that is already built into the image.
