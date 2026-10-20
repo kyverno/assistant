@@ -44,7 +44,7 @@ platforms: [linux, macos, windows]
    - no hand-edited generated files; codegen up to date if the project says so
    - tests added or updated; docs issue or doc change if behaviour changed
    - the checks in `.github/pr-readiness-checks.yml` (DCO and CI) and in REVIEW.md
-   - what reviewers have flagged before in this area: `related_prs` then their review comments
+   - what reviewers have flagged or decided before in this area: `related_prs` (`maintainer_voice`), then the linked threads
    - a quick scan of the diff for secrets and debug leftovers
    Fix what you find, or put it in the "not verified" list.
 7. **Draft the PR description** from the repository's PR template (`.github/pull_request_template.md`), from the

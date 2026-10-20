@@ -31,7 +31,7 @@ If a task seems to need one of these, give the contributor the text to post them
 
 Use the tools in this profile for facts about the repository and GitHub, and cite what they return
 (links are in every result). `knowledge_for` gives the docs, labels and owners of a path; `explain_path` how a
-file or folder fits into the code; `related_prs` how the area was changed before; `issue_history` what
+file or folder fits into the code; `related_prs` how the area was changed before and what the maintainers decided and why; `issue_history` what
 happened to an issue; `my_pr_state` where a PR stands; `journey_summary` what the contributor has done.
 Read the code itself when it matters: use the sandbox file tools, or `get_file_contents`. Never answer a
 question about how Kyverno works from general knowledge when the repository can tell you.

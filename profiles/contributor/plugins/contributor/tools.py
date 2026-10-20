@@ -61,14 +61,16 @@ EXPLAIN_PATH = _schema(
 
 RELATED_PRS = _schema(
     "related_prs",
-    "PRs that changed the same area as these paths or area labels, so you can study how the area was changed "
-    "before: outcome, size, overlapping files, reviewers, linked issues, review-thread and comment counts, each "
-    "with a link. Area labels come from the repository's own path rules; older PRs without labels are found by "
-    "applying those rules to their files. state: merged (default, precedents), open (who else works here), "
-    "closed (rejected attempts).",
-    {"paths": {"type": "array", "items": {"type": "string"}},
-     "areas": {"type": "array", "items": {"type": "string"}, "description": "Area labels such as area/engine."},
-     "state": {"type": "string", "enum": ["merged", "open", "closed"]}, "limit": _INT, "repo": _REPO})
+    "Earlier PRs that changed these paths, with what the maintainers said about each: the decisions and their reasons. "
+    "state merged (default) gives the precedents, from the paths' commit history; closed gives what was tried and not "
+    "accepted (stale sweeps nobody discussed are left out); open gives who is working there now. Each PR has its outcome, "
+    "size, linked issues, approvals and who asked for changes, whether another PR superseded it, and up to three "
+    "excerpts of what maintainers (people, not bots) wrote, each with a link. Call it before proposing a change to a "
+    "path, and read the linked thread behind any excerpt you rely on.",
+    {"paths": {"type": "array", "items": {"type": "string"}, "description": "Files or folders, e.g. pkg/webhooks/resource."},
+     "state": {"type": "string", "enum": ["merged", "open", "closed"]}, "limit": {"type": "integer", "description": "Default 5."},
+     "repo": _REPO},
+    required=["paths"])
 
 # -- choosing work ------------------------------------------------------------------------------------
 
@@ -149,8 +151,8 @@ def explain_path(args, **_kw):
 
 
 def related_prs(args, **_kw):
-    return _call(prs.related_prs, args, paths=args.get("paths"), areas=args.get("areas"),
-                 state=args.get("state") or "merged", limit=int(args.get("limit") or 15))
+    return _need(args, "paths") or _call(prs.related_prs, args, paths=args["paths"], state=args.get("state") or "merged",
+                                         limit=int(args.get("limit") or 5))
 
 
 def find_issues(args, **_kw):

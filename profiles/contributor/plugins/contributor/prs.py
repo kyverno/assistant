@@ -1,8 +1,9 @@
-"""PR facts: related_prs (precedents in the same area) and my_pr_state (where the contributor's PR stands)."""
+"""PR facts: related_prs (earlier PRs on the same paths, with what the maintainers said) and my_pr_state (where the
+contributor's PR stands)."""
 
 from __future__ import annotations
 
-import statistics
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -10,98 +11,155 @@ from . import rules
 from .github import excerpt
 
 
-PR_FIELDS = """
-number title url state merged mergedAt closedAt updatedAt
-author { login }
-additions deletions changedFiles
-labels(first: 20) { nodes { name } }
-files(first: 40) { nodes { path } }
-reviews(last: 15) { nodes { author { login } authorAssociation state } }
-closingIssuesReferences(first: 5) { nodes { number } }
-reviewThreads { totalCount }
-comments { totalCount }
-"""
+MAINTAINER = ("OWNER", "MEMBER", "COLLABORATOR")
+_PR_REF = re.compile(r"\(#(\d+)\)")
 
-PR_SEARCH = """
-query($q: String!, $after: String) {
-  search(query: $q, type: ISSUE, first: 20, after: $after) {
-    pageInfo { hasNextPage endCursor }
-    nodes { ... on PullRequest { %s } }
+CANDIDATES = """
+query($q: String!) {
+  search(query: $q, type: ISSUE, first: 50) {
+    nodes { ... on PullRequest { number files(first: 100) { nodes { path } } } }
   }
 }
-""" % PR_FIELDS
+"""
+
+DISCUSSION = """
+fragment F on PullRequest {
+  number title url state merged mergedAt closedAt additions deletions changedFiles
+  author { login __typename }
+  labels(first: 15) { nodes { name } }
+  closingIssuesReferences(first: 3) { nodes { number title url } }
+  reviews(first: 30) { nodes { author { login __typename } authorAssociation state body url } }
+  reviewThreads(first: 30) { totalCount nodes { comments(first: 1) { nodes { author { login __typename } authorAssociation body url } } } }
+  comments(last: 12) { nodes { author { login __typename } authorAssociation body url } }
+  timelineItems(last: 3, itemTypes: [CLOSED_EVENT]) { nodes { ... on ClosedEvent { closer { ... on PullRequest { number url } } } } }
+}
+query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { %s } }
+"""
 
 
 def label_names(node: Dict[str, Any]) -> List[str]:
     return [n["name"] for n in node["labels"]["nodes"]]
 
 
-def _pr_row(pr: Dict[str, Any], overlap: List[str], match: str) -> Dict[str, Any]:
-    reviewers: Dict[str, str] = {}
-    for r in pr["reviews"]["nodes"]:
-        login = (r.get("author") or {}).get("login")
-        if login:
-            reviewers[login] = r["authorAssociation"]
-    return {
-        "number": pr["number"], "url": pr["url"], "title": pr["title"],
-        "state": "merged" if pr["merged"] else pr["state"].lower(),
-        "merged_at": pr.get("mergedAt"), "author": (pr.get("author") or {}).get("login"),
-        "size": {"additions": pr["additions"], "deletions": pr["deletions"], "changed_files": pr["changedFiles"]},
-        "labels": label_names(pr), "overlap_files": overlap[:10], "overlap_count": len(overlap), "match": match,
-        "reviewers": [{"login": k, "association": v} for k, v in reviewers.items()],
-        "linked_issues": [n["number"] for n in pr["closingIssuesReferences"]["nodes"]],
-        "review_threads": pr["reviewThreads"]["totalCount"], "comments": pr["comments"]["totalCount"],
-    }
-
-
-def _search_prs(client, query: str, pages: int) -> List[Dict[str, Any]]:
-    out, after = [], None
-    for _ in range(pages):
-        data = client.graphql(PR_SEARCH, {"q": query, "after": after})["search"]
-        out += [n for n in data["nodes"] if n]
-        if not data["pageInfo"]["hasNextPage"]:
-            break
-        after = data["pageInfo"]["endCursor"]
-    return out
-
-
-def related_prs(client, org: Dict[str, Any], repo: str, paths: Optional[List[str]] = None,
-                areas: Optional[List[str]] = None, state: str = "merged", limit: int = 15,
-                scan_pages: int = 4, ref: Optional[str] = None) -> Dict[str, Any]:
-    """PRs that changed the same area. Labeled PRs come from a label search; older unlabeled PRs
-    are found by scanning recent PRs and applying the repository's own path rules to their files."""
-    paths, areas = list(paths or []), list(areas or [])
-    if not paths and not areas:
-        return {"success": False, "error": "give paths or areas"}
-    sha = ref
-    if not sha:
-        _, sha = client.default_branch_sha(repo)
-    label_rules = rules.label_rules_at(client, org, repo, sha)
-    if paths:
-        areas += [a for a in rules.area_labels(label_rules, org, paths) if a not in areas]
-    state_q = {"merged": "is:merged", "open": "is:open", "closed": "is:closed is:unmerged"}[state]
+def _merged_candidates(client, repo: str, sha: str, paths: List[str]) -> Dict[int, Dict[str, Any]]:
+    """Merged PRs that changed these paths, from the commit history of each path (squash commits end in `(#123)`)."""
     found: Dict[int, Dict[str, Any]] = {}
+    for path in paths:
+        for c in client.rest(f"repos/{repo}/commits?sha={sha}&path={path.strip('/')}&per_page=30"):
+            for n in _PR_REF.findall(c["commit"]["message"].splitlines()[0]):
+                row = found.setdefault(int(n), {"touched": set(), "date": c["commit"]["author"]["date"]})
+                row["touched"].add(path)
+    return found
 
-    
+
+def _search_candidates(client, org: Dict[str, Any], repo: str, sha: str, paths: List[str], state_q: str
+                       ) -> Dict[int, Dict[str, Any]]:
+    """Closed or open PRs that changed these paths: PRs under the paths' area labels, checked file by file."""
+    # The repository's path rules match files, so a folder is tried as a file inside it.
+    probes = [x for p in paths for x in (p, p.rstrip("/") + "/_")]
+    areas = list(rules.area_labels(rules.label_rules_at(client, org, repo, sha), org, probes))
+    found: Dict[int, Dict[str, Any]] = {}
     for area in areas:
-        for pr in _search_prs(client, f'repo:{repo} is:pr {state_q} label:"{area}" sort:updated-desc', 1):
+        q = f'repo:{repo} is:pr {state_q} label:"{area}" sort:updated-desc'
+        for pr in client.graphql(CANDIDATES, {"q": q})["search"]["nodes"]:
+            if not pr:
+                continue
             files = [n["path"] for n in pr["files"]["nodes"]]
-            overlap = [f for f in files if f in paths or any(f.startswith(p.rstrip("/") + "/") for p in paths)]
-            found[pr["number"]] = _pr_row(pr, overlap, "label")
-    for pr in _search_prs(client, f"repo:{repo} is:pr {state_q} sort:updated-desc", scan_pages):
-        if pr["number"] in found:
+            hit = {p for p in paths for f in files if f == p or f.startswith(p.rstrip("/") + "/")}
+            if hit:
+                found[pr["number"]] = {"touched": hit, "date": ""}
+    return found
+
+
+def _is_bot(node: Dict[str, Any], bots: List[str]) -> bool:
+    a = node.get("author") or {}
+    login = (a.get("login") or "").lower()
+    return (a.get("__typename") == "Bot" or login.endswith("bot") or login.endswith("[bot]")
+            or any(login.startswith(b.lower()) for b in bots))
+
+
+def _voice(pr: Dict[str, Any], bots: List[str], limit: int = 3) -> List[Dict[str, Any]]:
+    """What maintainers (people, not bots) said about this PR, strongest first: a review asking for changes, then
+    the closing remark on a PR that was not merged, then review threads and comments."""
+    def maintainer(n):
+        text = (n["body"] or "").strip()
+        # Bot commands (/cherry-pick ...), requests to a bot and one-word replies say nothing about why.
+        return (n["authorAssociation"] in MAINTAINER and not _is_bot(n, bots)
+                and len(text) >= 25 and not text.startswith(("/", "@copilot")))
+
+    comments = [c for c in pr["comments"]["nodes"] if maintainer(c)]
+    items = []
+    for r in pr["reviews"]["nodes"]:
+        if maintainer(r) and (r["body"] or "").strip():
+            items.append((0 if r["state"] == "CHANGES_REQUESTED" else 2, "review", r))
+    if comments and not pr["merged"]:
+        items.append((1, "closing_remark", comments[-1]))
+        comments = comments[:-1]
+    for t in pr["reviewThreads"]["nodes"]:
+        first = (t["comments"]["nodes"] or [None])[0]
+        if first and maintainer(first):
+            items.append((3, "review_thread", first))
+    items += [(4, "comment", c) for c in comments]
+    items.sort(key=lambda x: x[0])
+    return [{"by": (n["author"] or {}).get("login"), "kind": kind, **(excerpt(n["body"], n["url"], 300) or {})}
+            for _, kind, n in items[:limit] if (n["body"] or "").strip()]
+
+
+def _discussion(client, repo: str, numbers: List[int]) -> Dict[int, Dict[str, Any]]:
+    owner, name = repo.split("/", 1)
+    body = " ".join(f"p{n}: pullRequest(number: {n}) {{ ...F }}" for n in numbers)
+    data = client.graphql(DISCUSSION % body, {"owner": owner, "name": name})["repository"]
+    return {n: data[f"p{n}"] for n in numbers if data.get(f"p{n}")}
+
+
+def related_prs(client, org: Dict[str, Any], repo: str, paths: Optional[List[str]] = None, state: str = "merged",
+                limit: int = 5) -> Dict[str, Any]:
+    """Earlier PRs that changed these paths, with what the maintainers said about each: the decisions and their reasons.
+    merged = the precedents (from the paths' commit history); closed = what was tried and not accepted; open = who is
+    working here now. Bot PRs are left out, and so are closed PRs nobody discussed (stale sweeps)."""
+    paths = [p for p in (paths or []) if p.strip("/")]
+    if not paths:
+        return {"success": False, "error": "give the paths (files or folders) to look at"}
+    _, sha = client.default_branch_sha(repo)
+    if state == "merged":
+        found = _merged_candidates(client, repo, sha, paths)
+    else:
+        found = _search_candidates(client, org, repo, sha, paths, {"open": "is:open", "closed": "is:closed is:unmerged"}[state])
+    # Newest and most-overlapping first; fetch a few extra, since bots and undiscussed PRs drop out below.
+    ranked = sorted(found, key=lambda n: (len(found[n]["touched"]), found[n]["date"], n), reverse=True)[:limit * 3]
+    if not ranked:
+        return {"success": True, "repo": repo, "state": state, "count": 0, "prs": [],
+                "note": "no earlier PRs found for these paths"}
+    bots = org["review_bots"]
+    rows = []
+    for n, pr in _discussion(client, repo, ranked).items():
+        if _is_bot(pr, bots):
             continue
-        files = [n["path"] for n in pr["files"]["nodes"]]
-        hit = rules.area_labels(label_rules, org, files)
-        if any(a in hit for a in areas):
-            overlap = sorted({p for a in areas for p in hit.get(a, [])})
-            found[pr["number"]] = _pr_row(pr, overlap, "path-rules")
-    rows = sorted(found.values(), key=lambda r: (-r["overlap_count"], r["merged_at"] or ""), reverse=False)
-    rows.sort(key=lambda r: (r["overlap_count"], r["merged_at"] or ""), reverse=True)
-    return {"success": True, "repo": repo, "areas": areas, "state": state, "count": len(rows),
-            "prs": rows[:limit],
-            "note": f"label matches plus the newest {scan_pages * 20} PRs checked against {org['labels']['source']}; "
-                    "older unlabeled PRs beyond that window are not covered"}
+        voice = _voice(pr, bots)
+        author = (pr["author"] or {}).get("login")
+        discussed = voice or any(not _is_bot(c, bots) and (c["author"] or {}).get("login") != author for c in pr["comments"]["nodes"])
+        if state == "closed" and not discussed:
+            continue
+        reviews = pr["reviews"]["nodes"]
+        closer = next((e.get("closer") for e in pr["timelineItems"]["nodes"] if e and e.get("closer")), None)
+        rows.append({
+            "number": n, "url": pr["url"], "title": pr["title"], "author": author, "labels": label_names(pr)[:8],
+            "outcome": "merged" if pr["merged"] else ("open" if pr["state"] == "OPEN" else "closed_unmerged"),
+            "date": pr["mergedAt"] or pr["closedAt"],
+            "size": {"additions": pr["additions"], "deletions": pr["deletions"], "files": pr["changedFiles"]},
+            "paths_touched": sorted(found[n]["touched"]),
+            "linked_issues": [{"number": i["number"], "title": i["title"], "url": i["url"]} for i in pr["closingIssuesReferences"]["nodes"]],
+            "approvals": sum(1 for r in reviews if r["state"] == "APPROVED" and not _is_bot(r, bots)),
+            "changes_requested_by": sorted({(r["author"] or {}).get("login") for r in reviews if r["state"] == "CHANGES_REQUESTED"}),
+            "review_threads": pr["reviewThreads"]["totalCount"],
+            "superseded_by": closer["url"] if closer else None,
+            "maintainer_voice": voice,
+        })
+    rows.sort(key=lambda r: (len(r["paths_touched"]), bool(r["maintainer_voice"]), r["date"] or ""), reverse=True)
+    return {"success": True, "repo": repo, "state": state, "count": len(rows[:limit]), "prs": rows[:limit],
+            "note": "maintainer_voice quotes people with owner, member or collaborator rights, not bots; it is evidence "
+                    "of what was decided and why, so read the linked thread before relying on a one-line excerpt"
+                    + ("; found through the area labels of these paths" if state != "merged" else "")}
 
 
 # -- my_pr_state ---------------------------------------------------------------------------
@@ -109,7 +167,6 @@ def related_prs(client, org: Dict[str, Any], repo: str, paths: Optional[List[str
 
 
 
-MAINTAINER = ("OWNER", "MEMBER", "COLLABORATOR")
 FAILED = {"FAILURE", "ERROR", "TIMED_OUT", "ACTION_REQUIRED", "CANCELLED", "STALE", "STARTUP_FAILURE"}
 
 QUERY = """

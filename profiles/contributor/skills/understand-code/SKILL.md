@@ -29,10 +29,13 @@ platforms: [linux, macos, windows]
      when line numbers matter.
    - Without it: `get_file_contents`, `get_repository_tree`, `search_code`.
    Quote the lines you rely on with a permalink (`https://github.com/<repo>/blob/<sha>/<path>#L<n>`).
-4. **Study precedents.** `related_prs` (state `merged`) for the area; read the two or three closest ones:
-   the diff (`pull_request_read` get_diff), the review discussion (get_review_comments), the tests they
-   added. Point out what reviewers asked for, since that is what will be asked again. Use state `open` to
-   see who else is working in the area and `closed` for rejected attempts.
+4. **Study the decisions behind the code.** `related_prs` with the paths, state `merged` for how the area
+   was changed, `closed` for what was tried and not accepted and why (it says when another PR superseded
+   one), `open` for who is working there now. Its `maintainer_voice` excerpts are where reasons live ("we do
+   not want X because Y"); open the linked thread for any you rely on, and the diff (`pull_request_read`
+   get_diff) and tests of the two or three closest. Tell the contributor which past decisions bind their
+   change, and quote them with the link. Point out what reviewers asked for, since that is what will be
+   asked again.
 5. **Explain at the contributor's level.** Start with the purpose, then the flow, then the details. Use the
    folder and file names, not paraphrases. Say where you are unsure.
 6. **Explain-back.** Ask the contributor to say, in their own words, what the code does, why the bug happens
