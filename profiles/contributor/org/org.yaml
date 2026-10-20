@@ -1,0 +1,67 @@
+# Organisation file for the Kyverno pack. Everything specific to the organisation is stated here;
+# core plugins read it and never mention Kyverno by name. Facts that live in a repository file
+# (AGENTS.md chain, label rules, readiness checks) are read from that file, not copied here.
+name: kyverno
+
+repositories:
+  - repo: kyverno/kyverno
+    toolchain: go
+  # later phases: kyverno/website (node), kyverno/policies (kyverno-cli, chainsaw)
+
+agent_docs:               # globs, matched against the repository tree
+  - "**/AGENTS.md"
+  - ARCHITECTURE.md
+  - DEVELOPMENT.md
+  - REVIEW.md
+  - CONTRIBUTING.md
+  - .github/pr_documentation.md
+  - .github/copilot-instructions.md
+  - .github/instructions/*.instructions.md
+  - docs/context/**
+
+instructions_dir: .github/instructions    # files carry `applyTo:` globs in their frontmatter
+codeowners: CODEOWNERS
+
+labels:
+  source: .github/labels.yml               # `rules: changed-files: any-glob-to-any-file`
+  area_prefixes: ["area/"]
+  kind_prefixes: ["kind/"]
+
+readiness:
+  checks_file: .github/pr-readiness-checks.yml
+  attention_labels: [needs-author-action, merge-conflicts, stale, hold, workflow-approval-required]
+  ready_labels: [ready-for-review, needs-review]
+  # branch-wide gates and infra checks, mirrored from pr-readiness-checks.yml; not the author's to fix
+  infra_checks: ["E2E Gate", "Sync E2E Gate status", "Upload coverage to Codecov"]
+
+entry_labels: ["good first issue", "help wanted", "Contribfest"]
+# Reserved for a program with its own rules (the maintainers ask for no PRs until a mentorship begins); never offered.
+reserved_labels: ["LFX mentorship project"]
+
+review_bots:
+  - copilot-pull-request-reviewer
+  - coderabbitai
+
+ladder:
+  source_repo: kyverno/community
+  source_path: GOVERNANCE.md
+  # Blob sha of GOVERNANCE.md when the criteria below were last checked against it. Null until
+  # someone confirms them; the journey tool reports a mismatch so stale criteria are visible.
+  verified_blob_sha: null
+  roles:
+    contributor:
+      needs:
+        total_contributions: 5
+        merged_prs: 3                      # any repository in the kyverno org
+        other_contribution_kinds: [merged_pr, issue_or_pr_collaboration, blog_or_tutorial, slack_support]
+      self_reported: [slack_member, attended_meeting, mailing_list]   # only the contributor can state these
+      recognition: "PR adding yourself to CONTRIBUTORS.md; Credly badge"
+    reviewer:
+      requires: [contributor]
+      signals: [reviews_on_multiple_prs, active_in_discussions, appointed_by_maintainer]
+      recognition: "triage access, REVIEWERS.md, CODEOWNERS areas"
+    maintainer:
+      requires: [reviewer]
+      signals: [significant_merged_prs, supermajority_vote]
+      recognition: "write access"
+  org: kyverno                             # org scope for contribution counting
