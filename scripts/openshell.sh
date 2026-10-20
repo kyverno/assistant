@@ -1,23 +1,36 @@
 #!/usr/bin/env bash
 # Sets up the sandboxed terminal (NVIDIA OpenShell) and its audit trail.
 #   setup    install OpenShell, build the image, create the sandbox, add the ssh entry
-#   policy   re-apply policies/terminal.yaml to the running sandbox
+#   policy   re-apply the profile's sandbox/policy.yaml to the running sandbox
 #   status   one-line health check (exit 0 when the terminal is usable)
 #   audit    collect | summary [DATE] | tail      (see docs/openshell.md)
 #   rules    list | approve ID | reject ID [reason] | history   (access requests from the agent)
 #   remove   delete the sandbox, ssh entry and collector (keeps OpenShell and audit logs)
+# Set KYVERNO_PROFILE_KIND=contributor to manage the contributor profile's sandbox instead.
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OPENSHELL_VERSION="${OPENSHELL_VERSION:-v0.1.3}"
-SANDBOX="${KYVERNO_SANDBOX:-kyverno-terminal}"
-IMAGE="kyverno-assistant-terminal:local"
+# Which profile's sandbox this is: maintainer (default, unchanged names) or contributor.
+KIND="${KYVERNO_PROFILE_KIND:-maintainer}"
+SANDBOX_DIR="$REPO_ROOT/profiles/$KIND/sandbox"      # Dockerfile + policy.yaml
+if [ "$KIND" = "contributor" ]; then
+  SANDBOX="${KYVERNO_SANDBOX:-kyverno-contributor-terminal}"
+  IMAGE="kyverno-contributor-terminal:local"
+  AUDIT_DIR="${KYVERNO_AUDIT_DIR:-$HOME/.kyverno-contributor/audit}"
+  LABEL="io.kyverno.contributor.audit"
+  TAG="kyverno-contributor"
+else
+  SANDBOX="${KYVERNO_SANDBOX:-kyverno-terminal}"
+  IMAGE="kyverno-assistant-terminal:local"
+  AUDIT_DIR="${KYVERNO_AUDIT_DIR:-$HOME/.kyverno-assistant/audit}"
+  LABEL="io.kyverno.assistant.audit"
+  TAG="kyverno-assistant"
+fi
 SSH_HOST="openshell-${SANDBOX}.default"
-AUDIT_DIR="${KYVERNO_AUDIT_DIR:-$HOME/.kyverno-assistant/audit}"
 SSH_CONFIG="$HOME/.ssh/config"
-MARK_BEGIN="# BEGIN kyverno-assistant sandbox"
-MARK_END="# END kyverno-assistant sandbox"
-LABEL="io.kyverno.assistant.audit"
+MARK_BEGIN="# BEGIN $TAG sandbox"
+MARK_END="# END $TAG sandbox"
 
 info() { printf '  %s\n' "$*"; }
 pass() { printf '  ✓ %s\n' "$*"; }
@@ -85,7 +98,7 @@ cmd_setup() {
   openshell status >/dev/null 2>&1 || { fail "OpenShell gateway is not reachable: run 'openshell status'"; return 1; }
 
   info "building the sandbox image..."
-  docker build -q -t "$IMAGE" "$REPO_ROOT/sandbox" >/dev/null || { fail "image build failed"; return 1; }
+  docker build -q -t "$IMAGE" "$SANDBOX_DIR" >/dev/null || { fail "image build failed"; return 1; }
   pass "sandbox image built"
 
   local create_log=""
@@ -97,7 +110,7 @@ cmd_setup() {
     create_log="$(mktemp)"
     info "creating sandbox '$SANDBOX' (the first start can take a few minutes)..."
     openshell sandbox create --name "$SANDBOX" --from "$IMAGE" \
-      --policy "$REPO_ROOT/policies/terminal.yaml" --no-auto-providers -- sleep infinity \
+      --policy "$SANDBOX_DIR/policy.yaml" --no-auto-providers -- sleep infinity \
       >"$create_log" 2>&1 &
   fi
   wait_sandbox_ready || { explain_sandbox_failure "$create_log"; return 1; }
@@ -139,9 +152,9 @@ PY
 
 cmd_policy() {
   sandbox_exists || { fail "sandbox '$SANDBOX' does not exist: scripts/openshell.sh setup"; return 1; }
-  openshell policy set --policy "$REPO_ROOT/policies/terminal.yaml" --wait "$SANDBOX" >/dev/null 2>&1 \
+  openshell policy set --policy "$SANDBOX_DIR/policy.yaml" --wait "$SANDBOX" >/dev/null 2>&1 \
     && pass "policy applied to '$SANDBOX'" \
-    || { fail "policy update failed: openshell policy set --policy policies/terminal.yaml $SANDBOX"; return 1; }
+    || { fail "policy update failed: openshell policy set --policy $SANDBOX_DIR/policy.yaml $SANDBOX"; return 1; }
 }
 
 cmd_status() {
@@ -170,7 +183,8 @@ install_collector() {
   <key>ProgramArguments</key><array>
     <string>/bin/bash</string><string>$REPO_ROOT/scripts/openshell.sh</string>
     <string>audit</string><string>collect</string></array>
-  <key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>KYVERNO_PROFILE_KIND</key><string>$KIND</string></dict>
   <key>StartInterval</key><integer>300</integer>
   <key>RunAtLoad</key><true/>
 </dict></plist>

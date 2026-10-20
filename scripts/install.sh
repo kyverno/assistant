@@ -1,21 +1,48 @@
 #!/bin/bash
-# Idempotent installer for the kyverno-assistant Hermes profile. Re-run this
+# Idempotent installer for the Kyverno assistant Hermes profiles. Re-run this
 # same script after each step it asks you to do (fill in .env, etc.) — it
 # detects what's already done and only does what's left.
+#
+#   ./scripts/install.sh [--profile maintainer|contributor] [NAME]
+#
+# The profile sources live in profiles/<kind>/. Defaults: maintainer -> "kyverno",
+# contributor -> "kyverno-contributor".
 set -uo pipefail
 
-PROFILE="${1:-kyverno}"
+KIND="maintainer"
+NAME=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --profile) KIND="${2:-}"; shift 2 ;;
+    --profile=*) KIND="${1#--profile=}"; shift ;;
+    *) NAME="$1"; shift ;;
+  esac
+done
+case "$KIND" in
+  maintainer) PROFILE="${NAME:-kyverno}" ;;
+  contributor) PROFILE="${NAME:-kyverno-contributor}" ;;
+  *) echo "usage: ./scripts/install.sh [--profile maintainer|contributor] [NAME]" >&2; exit 2 ;;
+esac
+export KYVERNO_PROFILE_KIND="$KIND"      # read by scripts/openshell.sh
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SRC="$REPO_ROOT/profiles/$KIND"
 PROFILE_DIR="$HOME/.hermes/profiles/$PROFILE"
+if [ "$KIND" = "contributor" ]; then
+  SANDBOX_HOST="openshell-${KYVERNO_SANDBOX:-kyverno-contributor-terminal}.default"
+  AUDIT_HINT="~/.kyverno-contributor/audit"
+else
+  SANDBOX_HOST="openshell-${KYVERNO_SANDBOX:-kyverno-terminal}.default"
+  AUDIT_HINT="~/.kyverno-assistant/audit"
+fi
 
 pass() { printf '  \033[32m✓\033[0m %s\n' "$1"; }
 fail() { printf '  \033[31m✗\033[0m %s\n' "$1"; }
 info() { printf '  %s\n' "$1"; }
 step() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 
-cd "$REPO_ROOT" || exit 1
+cd "$SRC" 2>/dev/null || { fail "$SRC not found"; exit 1; }
 if [ ! -f distribution.yaml ]; then
-  fail "distribution.yaml not found — run this from the repo root (or via ./scripts/install.sh)"
+  fail "$SRC/distribution.yaml not found"
   exit 1
 fi
 
@@ -78,7 +105,23 @@ for k, v in (m.items() if isinstance(m, dict) else []):
   PREV_TERMINAL=$(cfg_get terminal.backend)
 fi
 
-if [ -f "$PROFILE_DIR/distribution.yaml" ]; then
+# Installs made before the profiles/ layout recorded the repo root as their source, which no longer
+# holds a distribution.yaml. Re-point those at profiles/<kind> (user data, .env and memory are kept).
+RECORDED=""
+[ -f "$PROFILE_DIR/distribution.yaml" ] && RECORDED=$(python3 -c "
+import yaml
+print((yaml.safe_load(open('$PROFILE_DIR/distribution.yaml')) or {}).get('source') or '')" 2>/dev/null)
+MIGRATE=no
+if [ -n "$RECORDED" ] && [ -d "$RECORDED" ] && [ ! -f "$RECORDED/distribution.yaml" ]; then MIGRATE=yes; fi
+
+if [ "$MIGRATE" = "yes" ]; then
+  info "profile '$PROFILE' was installed from $RECORDED, which has moved to profiles/$KIND — re-pointing it..."
+  if ! hermes profile install . --name "$PROFILE" --force -y; then
+    fail "hermes profile install --force failed — see output above"
+    exit 1
+  fi
+  pass "profile '$PROFILE' re-installed from $SRC (user data kept)"
+elif [ -f "$PROFILE_DIR/distribution.yaml" ]; then
   info "profile '$PROFILE' already installed — pulling in any repo changes (skills, config.yaml,"
   info "plugins/, cron) since the last install/update..."
   if ! hermes profile update "$PROFILE" --force-config -y; then
@@ -137,6 +180,12 @@ s = open(path).read()
 open(path, "w").write(s.replace('command: "./hooks/', 'command: "' + profile_dir + '/hooks/'))
 PY
 pass "hook scripts pinned to $PROFILE_DIR/hooks"
+
+# Hermes cron runs scripts from the profile's scripts/ directory; the contributor's background watch is one.
+if [ "$KIND" = "contributor" ]; then
+  mkdir -p "$PROFILE_DIR/scripts" && cp "$SRC/scripts/kyverno-watch.py" "$PROFILE_DIR/scripts/" \
+    && chmod +x "$PROFILE_DIR/scripts/kyverno-watch.py" && pass "background watch script installed (cron job ships paused)"
+fi
 
 step "3. Credentials"
 
@@ -210,10 +259,15 @@ fi
 if [ "$INTERACTIVE" = 1 ]; then
   info "Press Enter at any prompt to skip it and fill it in $ENV_FILE yourself."
   prompt_for REPO_GITHUB_TOKEN "GitHub token (fine-grained PAT, see README step 2): " secret
-  prompt_for MAINTAINER_GITHUB_LOGIN "Your GitHub username: "
-  prompt_for KYVERNO_REPO "Repo to manage (owner/repo): "
+  if [ "$KIND" = "contributor" ]; then
+    prompt_for CONTRIBUTOR_GITHUB_LOGIN "Your GitHub username: "
+    prompt_for KYVERNO_REPO "Repo you contribute to (owner/repo, e.g. kyverno/kyverno): "
+  else
+    prompt_for MAINTAINER_GITHUB_LOGIN "Your GitHub username: "
+    prompt_for KYVERNO_REPO "Repo to manage (owner/repo): "
+  fi
 
-  if [ -z "$(env_get SLACK_BOT_TOKEN)" ] && [ -z "$(env_get SLACK_APP_TOKEN)" ]; then
+  if [ "$KIND" = "maintainer" ] && [ -z "$(env_get SLACK_BOT_TOKEN)" ] && [ -z "$(env_get SLACK_APP_TOKEN)" ]; then
     info ""
     read -r -p "  Set up Slack now? (README step 3) [y/N]: " SLACK_CHOICE </dev/tty
     if [[ "$SLACK_CHOICE" =~ ^[Yy] ]]; then
@@ -247,7 +301,7 @@ if [ -n "$MISSING" ]; then
   info ""
   info "Fill those in, then re-run this script:"
   info "  \$EDITOR $ENV_FILE"
-  info "  ./scripts/install.sh $PROFILE"
+  info "  ./scripts/install.sh --profile $KIND $PROFILE"
   exit 0
 fi
 
@@ -342,7 +396,7 @@ with open('$ENV_FILE') as f:
             continue
         k, _, v = line.partition('=')
         values[k.strip()] = v.strip()
-for var in ('KYVERNO_REPO', 'MAINTAINER_GITHUB_LOGIN', 'SLACK_HOME_CHANNEL'):
+for var in ('KYVERNO_REPO', 'MAINTAINER_GITHUB_LOGIN', 'CONTRIBUTOR_GITHUB_LOGIN', 'SLACK_HOME_CHANNEL'):
     val = values.get(var)
     if not val:
         continue
@@ -355,6 +409,10 @@ for var in ('KYVERNO_REPO', 'MAINTAINER_GITHUB_LOGIN', 'SLACK_HOME_CHANNEL'):
 pass "skill instructions resolved to real env values"
 
 step "4. AGENTS.md cache"
+
+if [ "$KIND" = "contributor" ]; then
+  info "not needed: the contributor profile reads AGENTS.md and ARCHITECTURE.md from GitHub at the commit you work on"
+else
 
 # Discovers every AGENTS.md/ARCHITECTURE.md in the repo (not just api/AGENTS.md — kyverno/kyverno
 # has one per major package: pkg/engine, pkg/cel, pkg/webhooks, etc., plus root AGENTS.md and
@@ -450,6 +508,7 @@ else
   info "$(cat "$AGENTS_SEED_FILE.status") — skipping cache, kyverno-context will fall back to search_code"
 fi
 rm -f "$AGENTS_SEED_FILE" "$AGENTS_SEED_FILE.status"
+fi
 
 SLACK_CONFIGURED=$(python3 -c "
 values = {}
@@ -498,7 +557,7 @@ WANT_SANDBOX="${KYVERNO_SANDBOX_TERMINAL:-}"
 if [ -z "$WANT_SANDBOX" ] && [ "$INTERACTIVE" = 1 ]; then
   info "Optional: a sandboxed terminal for the assistant (installs NVIDIA OpenShell and builds a"
   info "small Docker image). It can read GitHub and run commands, but holds no tokens and cannot"
-  info "write anywhere you haven't allowed (policies/terminal.yaml)."
+  info "write anywhere you haven't allowed (profiles/$KIND/sandbox/policy.yaml)."
   read -r -p "  Set it up? [Y/n]: " WANT_SANDBOX </dev/tty
   case "$WANT_SANDBOX" in [Nn]*) WANT_SANDBOX=no ;; *) WANT_SANDBOX=yes ;; esac
 fi
@@ -514,7 +573,7 @@ if [ "$WANT_SANDBOX" = "yes" ]; then
   fi
 fi
 if [ "$WANT_SANDBOX" = "yes" ]; then
-  if ./scripts/openshell.sh setup; then
+  if "$REPO_ROOT/scripts/openshell.sh" setup; then
     python3 - "$PROFILE_DIR/config.yaml" <<'PY'
 import re, sys
 p = sys.argv[1]
@@ -524,13 +583,13 @@ for tool in ("terminal", "file"):
         s = s.replace("    - cronjob\n", "    - cronjob\n    - %s\n" % tool, 1)
 open(p, "w").write(s)
 PY
-    for kv in terminal.backend=ssh terminal.ssh_host=openshell-kyverno-terminal.default \
+    for kv in terminal.backend=ssh terminal.ssh_host=$SANDBOX_HOST \
               terminal.ssh_user=sandbox terminal.cwd=/sandbox terminal.degraded_mode=fail; do
       hermes -p "$PROFILE" config set "${kv%%=*}" "${kv#*=}" >/dev/null 2>&1
     done
     SANDBOX_TERMINAL="yes"
     pass "terminal and file tools enabled, running only in the sandbox"
-    info "Audit: ./scripts/openshell.sh audit summary   (daily logs in ~/.kyverno-assistant/audit)"
+    info "Audit: KYVERNO_PROFILE_KIND=$KIND ./scripts/openshell.sh audit summary   (daily logs in $AUDIT_HINT)"
   else
     fail "sandbox setup failed — the terminal stays off. Fix the error above and re-run this script"
   fi
@@ -609,7 +668,7 @@ step "Done"
 
 info "Model: choose one in the chat with /model, or run: hermes -p $PROFILE model  (or put a key such as ANTHROPIC_API_KEY in $ENV_FILE)"
 info "Talk to it: hermes -p $PROFILE chat  (or 'kyverno chat' if the alias took)"
-info "Dashboard: hermes -p $PROFILE dashboard  (Kyverno tab, http://127.0.0.1:9119/kyverno)"
+[ "$KIND" = "maintainer" ] && info "Dashboard: hermes -p $PROFILE dashboard  (Kyverno tab, http://127.0.0.1:9119/kyverno)"
 info ""
 info "Cron jobs ship paused — review before turning any on:"
 info "  hermes -p $PROFILE cron list"

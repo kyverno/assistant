@@ -201,7 +201,7 @@ independently-shippable phases, in this order:
   only Mnemosyne's id-keyed `remember`/`recall` and its 5-predicate triple store, neither a
   good fit for sortable dashboard state or a session-to-session diff snapshot. The dashboard
   plugin owns its own small local JSON state file instead.
-- `plugins/kyverno-fetch/fetch.py`'s GraphQL/REST helpers (search → concurrent detail pass →
+- `profiles/maintainer/plugins/kyverno-fetch/fetch.py`'s GraphQL/REST helpers (search → concurrent detail pass →
   cross-ref extraction/resolution, the `issueOrPullRequest` union lookup, the cross-reference
   regex) are directly reusable for an issue-side fetch — read, not assumed from the PR-side
   tool's shape.
@@ -214,14 +214,14 @@ independently-shippable phases, in this order:
 
 ### Phase 1 — Issue work (triage, actions, relationship graph, staleness, raising) — BUILT
 
-`fetch_issue_candidates` (`plugins/kyverno-fetch/fetch.py`/`tools.py`), `skills/issue-triage/`,
-and `skills/issue-actions/` landed 2026-10-05. `closedByPullRequestsReferences` and
+`fetch_issue_candidates` (`profiles/maintainer/plugins/kyverno-fetch/fetch.py`/`tools.py`), `profiles/maintainer/skills/issue-triage/`,
+and `profiles/maintainer/skills/issue-actions/` landed 2026-10-05. `closedByPullRequestsReferences` and
 `ClosedEvent.closer` were verified live end to end against `kyverno/kyverno` (not just schema
 introspection) — see `docs/architecture.md`. No `config.yaml` tool grant changed —
 `issue_write`/`add_issue_comment`/`issue_read`/`search_issues`/`list_issues` already covered
 triage, the decide-table, and raising an issue (`issue_write` with `method: "create"`,
 verified above — there is no separate `create_issue` tool); `discussion_comment_write` for the
-Discussion-reply piece was already granted too, and `skills/discussions` already implemented
+Discussion-reply piece was already granted too, and `profiles/maintainer/skills/discussions` already implemented
 the confirm-then-post reply flow this phase reuses rather than rebuilding. Only the
 explanatory comment on `issue_write` changed, to say `pr-actions` restricts it to `labels` for
 PRs — `issue-actions` carries no such restriction, since it operates on real issues. Relationship
@@ -229,18 +229,18 @@ surfacing and staleness housekeeping are written as on-request procedures in `is
 not yet run against a real backlog in a live session; the revert-detection heuristic there is
 explicitly best-effort.
 
-- `plugins/kyverno-fetch/fetch.py` gained `fetch_issue_candidates(repo, search_query, limit)` —
+- `profiles/maintainer/plugins/kyverno-fetch/fetch.py` gained `fetch_issue_candidates(repo, search_query, limit)` —
   same template as `fetch_pr_candidates`, swapped to `is:issue`/`... on Issue`, plus an
   issue-relevant field set (`labels`, `assignees`, `milestone`, `comments`, `closedByPullRequestsReferences`,
   `timelineItems` for closer/revert detection — field names verified live, not assumed).
-- `skills/issue-triage/`: classification guess, the issue↔PR relationship graph
+- `profiles/maintainer/skills/issue-triage/`: classification guess, the issue↔PR relationship graph
   (every PR that references or claims to close an issue, not just one — flags duplicate
   effort when more than one exists), the progress synthesis ("PR #X addresses this, currently
   `needs-author-action`, CI green"), the same Slack+Discussions context pass `pr-queue` does
   for PRs, the author-nudge recommendation, subsystem guess (or an honest "unclear"). When
   that Slack/Discussions pass turns up a user-facing problem with no open issue, flags it as
   a raise-issue candidate rather than passing over it.
-- `skills/issue-actions/`: the full decide-table — confirm bug/feature, mark
+- `profiles/maintainer/skills/issue-actions/`: the full decide-table — confirm bug/feature, mark
   duplicate, close out-of-scope, needs-more-info, assign, add-to-milestone, nudge author,
   raise an issue (drafted title/body/labels, plus a link-back reply when the source was a
   Slack message or Discussion thread — one confirmed action covering both). Confirm-then-post
@@ -295,7 +295,7 @@ additions pushed it there. The split in `docs/v3-plan.md` item 1 is still not do
 
 The tab renders live and `dashboard-sync` is wired into `pr-queue`, `issue-triage`, `author-followup`, `discussions`, `pr-actions`, and `issue-actions`. The UI is styled entirely from the host's theme tokens so it follows the active Hermes theme.
 
-New bundled plugin, `plugins/kyverno-dashboard/`:
+New bundled plugin, `profiles/maintainer/plugins/kyverno-dashboard/`:
 
 - Tool half (same `__init__.py`/`tools.py` contract as `kyverno-fetch`/`kyverno-sequencer`):
   one tool, `update_dashboard(section, data)`, writing structured JSON to a local state file.
@@ -329,7 +329,7 @@ Reads from all three other phases, so it lands last.
   triage-surfaced finding) never calls `issue_write` with `method: "create"` before the
   maintainer confirms the exact title/body; a Discussion reply triggered from issue-triage
   goes through the same
-  `discussion_comment_write` confirm-then-post flow as `skills/discussions`, not a duplicate.
+  `discussion_comment_write` confirm-then-post flow as `profiles/maintainer/skills/discussions`, not a duplicate.
 - Phase 2: `create_or_update_file` succeeds against a real PR branch with the new scope;
   Request Changes applies the review and the label together; the queue offers a walkthrough;
   a review brief offers to execute its own recommendation in the same turn.

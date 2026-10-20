@@ -34,11 +34,11 @@ RUN mkdir -p "$HOME" \
 
 # The profile, baked in and read-only under /opt/kyverno. It is installed into HERMES_HOME below, at build
 # time; the safety hooks are run from here, where the agent cannot edit them.
-COPY SOUL.md config.yaml distribution.yaml .env.example .no-bundled-skills /opt/kyverno/profiles/maintainer/
-COPY hooks   /opt/kyverno/profiles/maintainer/hooks
-COPY plugins /opt/kyverno/profiles/maintainer/plugins
-COPY skills  /opt/kyverno/profiles/maintainer/skills
-COPY cron    /opt/kyverno/profiles/maintainer/cron
+COPY profiles/maintainer/SOUL.md profiles/maintainer/config.yaml profiles/maintainer/distribution.yaml profiles/maintainer/.env.example profiles/maintainer/.no-bundled-skills /opt/kyverno/profiles/maintainer/
+COPY profiles/maintainer/hooks   /opt/kyverno/profiles/maintainer/hooks
+COPY profiles/maintainer/plugins /opt/kyverno/profiles/maintainer/plugins
+COPY profiles/maintainer/skills  /opt/kyverno/profiles/maintainer/skills
+COPY profiles/maintainer/cron    /opt/kyverno/profiles/maintainer/cron
 # The terminal runs locally inside the sandbox here, not over ssh into a second one.
 COPY container/hooks/require-sandbox-terminal.sh /opt/kyverno/profiles/maintainer/hooks/require-sandbox-terminal.sh
 RUN chmod 755 /opt/kyverno/profiles/maintainer/hooks/*.sh && chmod -R a+rX /opt/kyverno
