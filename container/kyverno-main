@@ -2,7 +2,7 @@
 # The sandbox's main process. It runs the dashboard in the background, restarting it if it stops, and keeps the
 # sandbox alive; everything else (the chat) is started on demand with `openshell sandbox exec`.
 # The dashboard listens on 127.0.0.1 inside the sandbox only; the launcher forwards a port on your laptop to it
-# (OpenShell only: with --no-openshell the dashboard is not published).
+# (Without OpenShell, a relay in the container passes it on to Docker's published port.)
 set -u
 
 export HERMES_HOME=/opt/hermes-home/.hermes
@@ -13,18 +13,26 @@ PORT="${KYVERNO_DASHBOARD_PORT:-9219}"
 # the container starts. Wait for it, so the dashboard starts with them.
 if [ "${KYVERNO_RUNTIME:-}" = docker ]; then
   for _ in $(seq 1 120); do [ -f /run/kyverno-secrets/env ] && break; sleep 1; done
-  while IFS='=' read -r k v || [ -n "$k" ]; do
-    case "$k" in REPO_GITHUB_TOKEN|ANTHROPIC_API_KEY|OPENAI_API_KEY|NVIDIA_API_KEY) export "$k=$v" ;; esac
-  done < /run/kyverno-secrets/env 2>/dev/null
 fi
 
 # --isolated makes the server profile-scoped, which is what makes it find this profile's Kyverno tab.
 # --skip-build serves the web UI that is already built into the image.
 (
   while true; do
+    # Re-read the keys on every start, so a restart after the launcher changed them picks them up.
+    if [ "${KYVERNO_RUNTIME:-}" = docker ]; then
+      # shellcheck source=container/kyverno-env
+      . /usr/local/bin/kyverno-env
+      kyverno_load_secrets
+    fi
     hermes -p kyverno dashboard --isolated --no-open --skip-build --port "$PORT" || true
     sleep 5
   done
 ) >> /tmp/dashboard.log 2>&1 &
+
+# Without OpenShell, Docker publishes the relay's port; the dashboard itself stays on 127.0.0.1 (see dashboard-relay).
+if [ "${KYVERNO_RUNTIME:-}" = docker ]; then
+  dashboard-relay "${KYVERNO_RELAY_PORT:-38219}" "$PORT" >> /tmp/dashboard-relay.log 2>&1 &
+fi
 
 exec sleep infinity

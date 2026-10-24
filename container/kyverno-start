@@ -43,13 +43,11 @@ if [ -d /run/openshell-supervisor-ca ]; then
   RUNTIME=openshell
 elif [ "${KYVERNO_RUNTIME:-}" = docker ]; then
   # container/kyverno --no-openshell: plain Docker. The launcher keeps the keys in a tmpfs file, readable only by
-  # this user; read them the same way kyverno-main does (never `source` it).
+  # this user; kyverno_load_secrets reads them (see kyverno-env).
   RUNTIME=docker
-  if [ -f /run/kyverno-secrets/env ]; then
-    while IFS='=' read -r k v || [ -n "$k" ]; do
-      case "$k" in REPO_GITHUB_TOKEN|ANTHROPIC_API_KEY|OPENAI_API_KEY|NVIDIA_API_KEY) export "$k=$v" ;; esac
-    done < /run/kyverno-secrets/env
-  fi
+  # shellcheck source=container/kyverno-env
+  . /usr/local/bin/kyverno-env
+  kyverno_load_secrets
 else
   fail "this is not running inside an OpenShell sandbox — start it with the launcher (container/kyverno)"
   exit 1

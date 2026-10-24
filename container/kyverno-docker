@@ -24,6 +24,10 @@
 #   --no-attach       set everything up but do not open the chat
 #   --reset           forget the stored GitHub token and ask for it again
 #
+# The dashboard works as with OpenShell: http://127.0.0.1:9219/kyverno?profile=kyverno (KYVERNO_DASHBOARD_PORT changes
+# the port). It listens on 127.0.0.1 in the container; a small relay passes it to a port Docker publishes on 127.0.0.1
+# of this machine, on a network only this container joins.
+#
 # Secrets file: ${KYVERNO_SECRETS_FILE:-~/.config/kyverno-assistant/secrets.env}, mode 600, KEY=value lines. The
 # launcher copies it into a tmpfs inside the container on every start (so the keys are never in the image, in
 # `docker inspect`, or on the container's disk) and the agent reads them from there.
@@ -33,6 +37,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/.." && pwd)"
 IMAGE="${KYVERNO_IMAGE:-ghcr.io/kyverno/assistant:latest}"
 NAME="kyverno-assistant-docker"
+DASH_PORT="${KYVERNO_DASHBOARD_PORT:-9219}"   # same default as the OpenShell launcher
+RELAY_PORT=38219                              # inside the container; Docker publishes it as DASH_PORT
 SECRETS_FILE="${KYVERNO_SECRETS_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/kyverno-assistant/secrets.env}"
 BUILD=0
 RESET=0
@@ -54,17 +60,13 @@ while [ $# -gt 0 ]; do
     --yes) ASSUME_YES=1; shift ;;
     --no-attach) NO_ATTACH=1; shift ;;
     --reset) RESET=1; shift ;;
-    -h|--help) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
 
-pass() { printf '  \033[32m✓\033[0m %s\n' "$1"; }
-fail() { printf '  \033[31m✗\033[0m %s\n' "$1" >&2; }
-info() { printf '  %s\n' "$1"; }
-step() { printf '\n\033[1m%s\033[0m\n' "$1"; }
-# gh's own sign-in only: a GH_TOKEN or GITHUB_TOKEN in the environment is not what we mean to store.
-gh_token() { env -u GH_TOKEN -u GITHUB_TOKEN gh auth token --hostname github.com 2>/dev/null; }
+# shellcheck source=container/lib.sh
+. "$HERE/lib.sh"
 
 # --- the secrets file on this machine ---
 secrets_get() {
@@ -92,20 +94,27 @@ secrets_unset() {
 container_exists() { docker container inspect "$NAME" >/dev/null 2>&1; }
 container_running() { [ "$(docker container inspect -f '{{.State.Running}}' "$NAME" 2>/dev/null)" = true ]; }
 
-# Copy the allowed keys into the container's tmpfs (a pipe: nothing is written to the container's disk).
+# A network of its own, so that no other container can reach the dashboard relay on the container's address.
+ensure_network() { docker network inspect "$NAME-net" >/dev/null 2>&1 || docker network create "$NAME-net" >/dev/null; }
+
+# Copy the secrets file into the container's tmpfs (a pipe: nothing is written to the container's disk; the loader in
+# the image, kyverno-env, decides which lines count). Prints
+# "changed" or "same", so that a dashboard that is already running can be restarted with new keys.
 inject_secrets() {
-  grep -E '^(REPO_GITHUB_TOKEN|ANTHROPIC_API_KEY|OPENAI_API_KEY|NVIDIA_API_KEY)=' "$SECRETS_FILE" \
-    | docker exec -i "$NAME" sh -c 'umask 077; cat > /run/kyverno-secrets/env.tmp && mv /run/kyverno-secrets/env.tmp /run/kyverno-secrets/env'
+  docker exec -i "$NAME" sh -c '
+        umask 077
+        d=/run/kyverno-secrets
+        cat > "$d/env.new"
+        if cmp -s "$d/env.new" "$d/env"; then rm -f "$d/env.new"; echo same; else mv "$d/env.new" "$d/env"; echo changed; fi' \
+    < "$SECRETS_FILE"
 }
 
 # What is yours: memory, chat history, your repo and username, the Copilot sign-in, the model you chose.
 # The profile itself (skills, hooks, plugins, settings) comes from the new image.
 save_state() {
   local dest="$1"
-  # The single quotes are deliberate: this runs inside the container, so nothing should expand here.
-  # shellcheck disable=SC2016
   docker exec "$NAME" sh -c \
-    'cd /opt/hermes-home/.hermes/profiles/kyverno && tar -cf - $(ls -d .env config.yaml .kyverno-model-chosen mnemosyne/data memories sessions kyverno-dashboard state.db state.db-wal state.db-shm 2>/dev/null)' \
+    "cd /opt/hermes-home/.hermes/profiles/kyverno && tar -cf - \$(ls -d $STATE_FILES 2>/dev/null)" \
     > "$dest/kyverno-state.tar" 2>/dev/null || return 1
   [ -s "$dest/kyverno-state.tar" ]
 }
@@ -124,26 +133,9 @@ fi
 pass "docker is running (no OpenShell: see the notes at the top of this file, or --help)"
 
 step "2. Image"
-if [ "$BUILD" = 1 ]; then
-  IMAGE="kyverno-assistant:dev"
-  info "building $IMAGE from this checkout (the first build takes several minutes)..."
-  docker build -f "$REPO_ROOT/container/Dockerfile" -t "$IMAGE" "$REPO_ROOT" || { fail "image build failed"; exit 1; }
-  if [ "$UPGRADE" != 1 ] && container_exists; then
-    info "note: '$NAME' already exists and keeps running the image it was made from; add --upgrade to switch it to this build"
-  fi
-elif [ "$UPGRADE" = 1 ] || ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
-  info "pulling $IMAGE..."
-  if ! docker pull "$IMAGE"; then
-    # An image that only exists on this machine (built with --build) cannot be pulled; that is fine.
-    if docker image inspect "$IMAGE" >/dev/null 2>&1; then
-      info "could not pull it; using the copy already on this machine"
-    else
-      fail "could not pull $IMAGE — use --build, or --image with an image you have"
-      exit 1
-    fi
-  fi
-fi
-pass "image $IMAGE"
+INSTANCE="$NAME"
+instance_exists() { container_exists; }
+ensure_image
 
 step "3. Keys"
 info "secrets file: $SECRETS_FILE"
@@ -153,71 +145,20 @@ LOGIN="${MAINTAINER_GITHUB_LOGIN:-}"
 if [ -n "$(secrets_get REPO_GITHUB_TOKEN)" ]; then
   pass "GitHub token already in the secrets file (use --reset to replace it)"
 else
-  [ -z "$REPO" ] && read -r -p "  Repo to manage (owner/repo) [kyverno/kyverno]: " REPO
-  REPO="${REPO:-kyverno/kyverno}"
-  [[ "$REPO" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+$ && "${REPO#*/}" != "." && "${REPO#*/}" != ".." ]] || { fail "'$REPO' is not an owner/repo name (letters, digits, dots, dashes, underscores)"; exit 1; }
-  PAT=""
-  METHOD="paste"
-  if command -v gh >/dev/null 2>&1; then
-    info "How do you want to authorize GitHub?"
-    info "  1) Sign in with GitHub (gh): a browser sign-in, nothing to create. gh always asks for the 'repo'"
-    info "     scope, so the token can act on every repository you have access to, private ones included, not"
+  token_note_gh() {
     info "     only $REPO. Without OpenShell the assistant holds this token itself, and nothing but the token's"
     info "     scopes stops it merging. Prefer option 2."
-    info "  2) Paste a fine-grained token (README step 1): limited to the one repository you scope it to."
-    CHOICE=""
-    read -r -p "  Choose [2]: " CHOICE </dev/tty
-    case "${CHOICE:-2}" in
-      1) METHOD="gh" ;;
-      2) ;;
-      *) fail "'$CHOICE' is not 1 or 2"; exit 1 ;;
-    esac
-  else
-    info "The GitHub CLI (gh) is not installed, so there is no browser sign-in (https://cli.github.com)."
-  fi
-  if [ "$METHOD" = gh ]; then
-    PAT=$(gh_token) || PAT=""
-    if [ -z "$PAT" ]; then
-      info "gh is not signed in. Starting its browser sign-in..."
-      env -u GH_TOKEN -u GITHUB_TOKEN gh auth login --hostname github.com --git-protocol https --web </dev/tty \
-        || { fail "the gh sign-in did not finish (re-run, or choose 2 and paste a token)"; exit 1; }
-      PAT=$(gh_token) || PAT=""
-      [ -z "$PAT" ] && { fail "gh did not give a token after signing in"; exit 1; }
-    else
-      pass "using your existing gh sign-in"
-    fi
-  else
-    info "Paste your fine-grained GitHub token (see README step 1). It is saved in the secrets file, mode 600."
-    read -r -s -p "  GitHub token: " PAT </dev/tty
-    echo
-  fi
-  [ -z "$PAT" ] && { fail "no token entered (this step needs a terminal to ask for it)"; exit 1; }
-  # Check it before storing it. The token goes in through stdin, so it never shows in a process list.
-  CODE=$(printf 'header = "Authorization: Bearer %s"\n' "$PAT" \
-         | curl -s -o /dev/null -w '%{http_code}' -K - "https://api.github.com/repos/$REPO")
-  case "$CODE" in
-    200) pass "GitHub accepts the token for $REPO" ;;
-    401) fail "GitHub rejected the token (401): wrong, expired or revoked"; exit 1 ;;
-    403|404) fail "the token cannot read $REPO ($CODE): scope it to that repo, or get the org to approve it"; exit 1 ;;
-    *) info "could not verify the token (HTTP ${CODE:-none}) — continuing" ;;
-  esac
-  if [ -z "$LOGIN" ]; then
-    LOGIN=$(printf 'header = "Authorization: Bearer %s"\n' "$PAT" \
-            | curl -s -m 10 -K - https://api.github.com/user | sed -n 's/.*"login": *"\([^"]*\)".*/\1/p' | head -n 1)
-    if [[ "$LOGIN" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]]; then pass "signed in to GitHub as $LOGIN"; else LOGIN=""; fi
-  fi
+  }
+  token_note_paste() { info "Paste your fine-grained GitHub token (see README step 1). It is saved in the secrets file, mode 600."; }
+  TOKEN_DEFAULT=2
+  acquire_github_token
   secrets_set REPO_GITHUB_TOKEN "$PAT" || { fail "could not write the secrets file"; exit 1; }
   unset PAT
   pass "token saved in the secrets file"
 fi
 
 for P in "${WANT_PROVIDERS[@]+"${WANT_PROVIDERS[@]}"}"; do
-  case "$P" in
-    anthropic) VAR=ANTHROPIC_API_KEY ;;
-    openai) VAR=OPENAI_API_KEY ;;
-    nvidia) VAR=NVIDIA_API_KEY ;;
-    *) fail "unknown model provider '$P' (use anthropic, openai or nvidia)"; exit 1 ;;
-  esac
+  VAR=$(provider_env_var "$P") || { fail "unknown model provider '$P' (use anthropic, openai or nvidia)"; exit 1; }
   if [ -n "$(secrets_get "$VAR")" ]; then
     pass "$P key already in the secrets file"
   else
@@ -232,6 +173,8 @@ for P in "${WANT_PROVIDERS[@]+"${WANT_PROVIDERS[@]}"}"; do
 done
 
 step "4. Container"
+ALREADY_RUNNING=0
+container_running && ALREADY_RUNNING=1
 if [ "$UPGRADE" = 1 ] && container_exists; then
   container_running || docker start "$NAME" >/dev/null 2>&1
   BACKUP_DIR="$(mktemp -d)"; chmod 700 "$BACKUP_DIR"
@@ -239,6 +182,7 @@ if [ "$UPGRADE" = 1 ] && container_exists; then
   save_state "$BACKUP_DIR" || { fail "could not save the state, so the container was left alone"; rm -rf "$BACKUP_DIR"; exit 1; }
   pass "state saved"
   docker rm -f "$NAME" >/dev/null 2>&1
+  ALREADY_RUNNING=0
   container_exists && { fail "the old container did not go away; your state is saved in $BACKUP_DIR"; exit 1; }
 fi
 if container_exists; then
@@ -262,12 +206,14 @@ else
     read -r -p "  Continue? [y/N] " ANSWER </dev/tty || ANSWER=""
     case "$ANSWER" in y|Y|yes|YES) ;; *) fail "not continuing (use --yes to skip this question)"; exit 1 ;; esac
   fi
-  ENV_ARGS=(-e KYVERNO_RUNTIME=docker)
+  ENV_ARGS=(-e KYVERNO_RUNTIME=docker -e "KYVERNO_DASHBOARD_PORT=$DASH_PORT" -e "KYVERNO_RELAY_PORT=$RELAY_PORT")
+  ensure_network || { fail "could not create the Docker network $NAME-net"; exit 1; }
   [ "$ALLOW_TERMINAL" = 1 ] && ENV_ARGS+=(-e KYVERNO_ALLOW_TERMINAL=1)
   info "creating '$NAME'..."
-  # --init: Hermes wants an init process above it to reap children. The keys go in through a tmpfs (mode 700, uid
+  # --init: Hermes wants an init process above it to reap children. The dashboard is published on 127.0.0.1 only.
+  # The keys go in through a tmpfs (mode 700, uid
   # 1000), which is empty again each time the container stops. Nothing from this machine is mounted.
-  docker run -d --init --name "$NAME" \
+  docker run -d --init --name "$NAME" --network "$NAME-net" -p "127.0.0.1:$DASH_PORT:$RELAY_PORT" \
     --cap-drop ALL --security-opt no-new-privileges --pids-limit 1024 \
     --tmpfs /run/kyverno-secrets:rw,noexec,nosuid,nodev,size=1m,mode=0700,uid=1000,gid=1000 \
     --tmpfs /tmp:rw,exec,nosuid,nodev,size=1g,mode=1777 \
@@ -277,8 +223,13 @@ else
 fi
 for _ in $(seq 1 30); do container_running && break; sleep 1; done
 container_running || { fail "container '$NAME' is not running — see: docker logs $NAME"; exit 1; }
-inject_secrets || { fail "could not copy the keys into the container"; exit 1; }
+KEYS="$(inject_secrets)" || { fail "could not copy the keys into the container"; exit 1; }
 pass "container '$NAME' is running; keys copied in memory only"
+# A dashboard that was already running has the old keys; its supervisor loop starts it again within seconds.
+if [ "$ALREADY_RUNNING" = 1 ] && [ "$KEYS" = changed ]; then
+  docker exec "$NAME" pkill -f 'dashboard --isolated' >/dev/null 2>&1
+  info "keys changed: restarting the dashboard"
+fi
 
 if [ -n "$BACKUP_DIR" ]; then
   info "restoring your state..."
@@ -294,5 +245,6 @@ step "5. Assistant"
 ARGS=()
 [ -n "$REPO" ] && ARGS+=(--repo "$REPO")
 [ -n "$LOGIN" ] && ARGS+=(--login "$LOGIN")
+info "dashboard: http://127.0.0.1:$DASH_PORT/kyverno?profile=kyverno"
 [ "$NO_ATTACH" = 1 ] && { pass "ready (not opening the chat: --no-attach)"; exit 0; }
 exec docker exec -it "$NAME" kyverno-start "${ARGS[@]+"${ARGS[@]}"}"

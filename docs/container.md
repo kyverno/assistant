@@ -135,7 +135,7 @@ container/kyverno --no-openshell [--build | --image IMAGE] [--provider P ...] [-
 | Tool allowlist on the GitHub MCP server | Enforced by the proxy | Hermes' own filter only |
 | Terminal and file tools | Allowed, inside the sandbox | Blocked. `--allow-terminal` turns them on, and then the container is the only boundary |
 | Audit log | `openshell logs` | None |
-| Dashboard | Forwarded to `127.0.0.1:9219` | Not published (Hermes requires authentication for any non-loopback bind) |
+| Dashboard | Forwarded to `127.0.0.1:9219` | The same address. Hermes keeps it on loopback inside the container; a small relay passes it to a port Docker publishes on `127.0.0.1` only, on a network that only this container joins |
 
 What it still does: the container runs as a non-root user with every Linux capability dropped, `no-new-privileges`
 and a process limit, and nothing from your machine is mounted. Docker is the only requirement. It was tried on Apple Silicon only.
@@ -147,6 +147,11 @@ and a process limit, and nothing from your machine is mounted. Docker is the onl
 
 **State.** It lives in the container, so it survives `docker stop` and `docker start`. `--upgrade` saves it, recreates the
 container from the new image and restores it, as with OpenShell. Removing the container by hand (`docker rm`) loses it.
+
+**Keys changed?** Re-running the launcher copies the new keys in and restarts the dashboard so it picks them up.
+
+**Removing it.** `docker rm -f kyverno-assistant-docker`, `docker network rm kyverno-assistant-docker-net`, and delete the secrets file.
+This loses the container's state.
 
 **Choosing between them later.** The two modes use different names (`kyverno-assistant` sandbox, `kyverno-assistant-docker`
 container), so they do not interfere. State is not shared between them.
