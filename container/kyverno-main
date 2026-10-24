@@ -1,12 +1,22 @@
 #!/bin/bash
 # The sandbox's main process. It runs the dashboard in the background, restarting it if it stops, and keeps the
 # sandbox alive; everything else (the chat) is started on demand with `openshell sandbox exec`.
-# The dashboard listens on 127.0.0.1 inside the sandbox only; the launcher forwards a port on your laptop to it.
+# The dashboard listens on 127.0.0.1 inside the sandbox only; the launcher forwards a port on your laptop to it
+# (OpenShell only: with --no-openshell the dashboard is not published).
 set -u
 
 export HERMES_HOME=/opt/hermes-home/.hermes
 export PATH="/opt/hermes-home/.local/bin:$PATH"
 PORT="${KYVERNO_DASHBOARD_PORT:-9219}"
+
+# Without OpenShell (container/kyverno --no-openshell) the launcher writes the keys into a tmpfs file a moment after
+# the container starts. Wait for it, so the dashboard starts with them.
+if [ "${KYVERNO_RUNTIME:-}" = docker ]; then
+  for _ in $(seq 1 120); do [ -f /run/kyverno-secrets/env ] && break; sleep 1; done
+  while IFS='=' read -r k v || [ -n "$k" ]; do
+    case "$k" in REPO_GITHUB_TOKEN|ANTHROPIC_API_KEY|OPENAI_API_KEY|NVIDIA_API_KEY) export "$k=$v" ;; esac
+  done < /run/kyverno-secrets/env 2>/dev/null
+fi
 
 # --isolated makes the server profile-scoped, which is what makes it find this profile's Kyverno tab.
 # --skip-build serves the web UI that is already built into the image.

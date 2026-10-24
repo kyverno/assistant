@@ -8,9 +8,11 @@ set -uo pipefail
 export HERMES_HOME=/opt/hermes-home/.hermes
 P="$HERMES_HOME/profiles/kyverno"
 TMP=/tmp/kyverno-restore
+# Where the launcher put the bundle: /sandbox under OpenShell; the Docker launcher (--no-openshell) sets this.
+STATE_TAR="${KYVERNO_STATE_TAR:-/sandbox/kyverno-state.tar}"
 
 rm -rf "$TMP" && mkdir -p "$TMP"
-tar -xf /sandbox/kyverno-state.tar -C "$TMP" || { echo "could not read the saved state" >&2; exit 1; }
+tar -xf "$STATE_TAR" -C "$TMP" || { echo "could not read the saved state" >&2; exit 1; }
 
 # 1. data directories and files, replaced wholesale (the new image starts with empty ones)
 for d in mnemosyne/data memories sessions kyverno-dashboard; do
@@ -75,4 +77,4 @@ PY
   echo "  restored model: $(tr '\n' ' ' < "$TMP/model.txt")"
 fi
 
-rm -rf "$TMP" /sandbox/kyverno-state.tar /sandbox/restore-state.sh
+rm -rf "$TMP" "$STATE_TAR" /sandbox/restore-state.sh "$0"
