@@ -1,14 +1,14 @@
-# OpenShell provider profile for the repo-scoped GitHub PAT. The sandbox only ever holds a
-# placeholder in REPO_GITHUB_TOKEN; the gateway's proxy swaps in the real value on requests to the
+# OpenShell provider profile for the GitHub token (a repo-scoped fine-grained PAT, or the gh sign-in's
+# token). The sandbox only ever holds a placeholder in REPO_GITHUB_TOKEN; the gateway's proxy swaps in the real value on requests to the
 # endpoints below, and only from the binaries listed. Import with:
 #   openshell profile import -f container/providers/repo-github.yaml
 id: kyverno-repo-github
 display_name: Kyverno assistant repo token
-description: Repo-scoped GitHub PAT for the Kyverno assistant (read APIs plus the GitHub MCP server)
+description: GitHub token for the Kyverno assistant (read APIs plus the GitHub MCP server)
 category: source_control
 credentials:
   - name: repo_token
-    description: Fine-grained PAT scoped to the repo the assistant manages
+    description: Fine-grained PAT scoped to the repo the assistant manages, or the gh sign-in's token
     env_vars: [REPO_GITHUB_TOKEN]
     required: true
     auth_style: bearer

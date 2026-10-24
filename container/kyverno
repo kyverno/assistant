@@ -48,6 +48,8 @@ done
 pass() { printf '  \033[32m✓\033[0m %s\n' "$1"; }
 fail() { printf '  \033[31m✗\033[0m %s\n' "$1" >&2; }
 info() { printf '  %s\n' "$1"; }
+# gh's own sign-in only: a GH_TOKEN or GITHUB_TOKEN in the environment is not what we mean to store.
+gh_token() { env -u GH_TOKEN -u GITHUB_TOKEN gh auth token --hostname github.com 2>/dev/null; }
 step() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 
 # Register a provider profile, or bring an existing one up to date: OpenShell wants the current
@@ -195,10 +197,11 @@ else
   METHOD="paste"
   if command -v gh >/dev/null 2>&1; then
     info "How do you want to authorize GitHub?"
-    info "  1) Sign in with GitHub (gh): a browser sign-in, nothing to create. Its token has broad 'repo' access,"
-    info "     wider than the fine-grained token in README step 1. It goes to OpenShell, never into the sandbox,"
-    info "     and the assistant still cannot merge."
-    info "  2) Paste a fine-grained token (README step 1)"
+    info "  1) Sign in with GitHub (gh): a browser sign-in, nothing to create. gh always asks for the 'repo'"
+    info "     scope, so the token can act on every repository you have access to, private ones included, not"
+    info "     only $REPO. It goes to OpenShell, never into the sandbox, and the assistant still cannot merge."
+    info "     gh may offer to set up git credentials on this machine; you can answer No."
+    info "  2) Paste a fine-grained token (README step 1): limited to the one repository you scope it to."
     CHOICE=""
     read -r -p "  Choose [1]: " CHOICE </dev/tty
     case "${CHOICE:-1}" in
@@ -210,12 +213,12 @@ else
     info "The GitHub CLI (gh) is not installed, so there is no browser sign-in (https://cli.github.com)."
   fi
   if [ "$METHOD" = gh ]; then
-    PAT=$(gh auth token --hostname github.com 2>/dev/null) || PAT=""
+    PAT=$(gh_token) || PAT=""
     if [ -z "$PAT" ]; then
       info "gh is not signed in. Starting its browser sign-in..."
-      gh auth login --hostname github.com --git-protocol https --web </dev/tty \
+      env -u GH_TOKEN -u GITHUB_TOKEN gh auth login --hostname github.com --git-protocol https --web </dev/tty \
         || { fail "the gh sign-in did not finish (re-run, or choose 2 and paste a token)"; exit 1; }
-      PAT=$(gh auth token --hostname github.com 2>/dev/null) || PAT=""
+      PAT=$(gh_token) || PAT=""
       [ -z "$PAT" ] && { fail "gh did not give a token after signing in"; exit 1; }
     else
       pass "using your existing gh sign-in"
@@ -235,6 +238,11 @@ else
     403|404) fail "the token cannot read $REPO ($CODE): scope it to that repo, or get the org to approve it"; exit 1 ;;
     *) info "could not verify the token (HTTP ${CODE:-none}) — continuing" ;;
   esac
+  if [ -z "$LOGIN" ]; then
+    LOGIN=$(printf 'header = "Authorization: Bearer %s"\n' "$PAT" \
+            | curl -s -m 10 -K - https://api.github.com/user | sed -n 's/.*"login": *"\([^"]*\)".*/\1/p' | head -n 1)
+    if [[ "$LOGIN" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]]; then pass "signed in to GitHub as $LOGIN"; else LOGIN=""; fi
+  fi
   REPO_GITHUB_TOKEN="$PAT" openshell provider create --name "$PROVIDER" --type "$PROVIDER" \
     --credential REPO_GITHUB_TOKEN >/dev/null 2>&1 || { fail "could not store the token in OpenShell"; exit 1; }
   unset PAT
