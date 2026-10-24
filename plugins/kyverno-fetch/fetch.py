@@ -27,7 +27,7 @@ _USER_AGENT = "kyverno-assistant-fetch-plugin"
 # top of #17695", "depends on kyverno/kyverno#17720", "Blocked by #N".
 _CROSS_REF_PATTERN = re.compile(
     r"\b(?:depends on|blocked by|requires|stack(?:s|ed)?\s+on(?:\s+top\s+of)?|parent)\b"
-    r"\s*:?\s*(?:[\w.-]+/[\w.-]+)?#(\d+)",
+    r"\s*:?\s*(?:([\w.-]+/[\w.-]+))?#(\d+)",
     re.IGNORECASE,
 )
 
@@ -489,8 +489,14 @@ def fetch_pr_candidates(
     # "please go check" note.
     fetched_numbers = {p["number"] for p in prs if "number" in p}
     refs_by_pr: dict[int, set[int]] = {}
+    current_repo = f"{owner}/{name}".lower()
     for p in prs:
-        refs = {int(m) for m in _CROSS_REF_PATTERN.findall(p.get("body") or "")}
+        refs: set[int] = set()
+        for match in _CROSS_REF_PATTERN.finditer(p.get("body") or ""):
+            repo_part, num_str = match.group(1), match.group(2)
+            if repo_part and repo_part.lower() != current_repo:
+                continue
+            refs.add(int(num_str))
         external = {r for r in refs if r not in fetched_numbers and r != p["number"]}
         if external:
             refs_by_pr[p["number"]] = external
