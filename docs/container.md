@@ -29,7 +29,7 @@ because the sandbox has no open internet and the chat screen hides first-use pro
 
 | Secret | Where it lives | What the sandbox sees |
 |---|---|---|
-| GitHub token (fine-grained PAT) | OpenShell, asked once by the launcher | A placeholder in `REPO_GITHUB_TOKEN`. The proxy swaps in the real value on requests to `api.github.com` (reads) and the GitHub MCP server, and only from Hermes' Python. |
+| GitHub token (fine-grained PAT, or the `gh` sign-in's token) | OpenShell, asked once by the launcher | A placeholder in `REPO_GITHUB_TOKEN`. The proxy swaps in the real value on requests to `api.github.com` (reads) and the GitHub MCP server, and only from Hermes' Python. |
 | Model API key (`--provider anthropic\|openai\|nvidia`) | OpenShell, asked once | A placeholder. Hermes accepts it for these providers. OpenRouter is not supported this way: Hermes requires an `sk-or-` prefix. |
 | GitHub Copilot sign-in | Created by Hermes' own device-code login inside the sandbox | The real token, in the profile's `.env`. It only grants Copilot model access. |
 
