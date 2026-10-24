@@ -118,6 +118,44 @@ earlier all-paths rule: `merge_pull_request` reached GitHub. After the change it
 `providers/repo-github.yaml`. The image build compares them and fails if they differ, so a tool added to one cannot
 silently be missing from the other.
 
+## Running without OpenShell
+
+OpenShell is the default and the way to run this. If you do not want it, `container/kyverno --no-openshell` runs the
+same image as one plain Docker container instead. It is an opt-in with weaker protection, not an equal alternative.
+
+```bash
+container/kyverno --no-openshell [--build | --image IMAGE] [--provider P ...] [--upgrade] [--reset] [--allow-terminal]
+```
+
+| | OpenShell (default) | `--no-openshell` |
+|---|---|---|
+| GitHub token and model keys | Held by the gateway. The agent sees placeholders | In the agent's environment, as real values |
+| Network | Allowlist, enforced by the proxy | Whatever Docker allows: the whole internet |
+| Merges | Refused by the proxy, whatever the token can do | Only the token's scopes stop them. Use a fine-grained token (README step 1), not the `gh` sign-in |
+| Tool allowlist on the GitHub MCP server | Enforced by the proxy | Hermes' own filter only |
+| Terminal and file tools | Allowed, inside the sandbox | Blocked. `--allow-terminal` turns them on, and then the container is the only boundary |
+| Audit log | `openshell logs` | None |
+| Dashboard | Forwarded to `127.0.0.1:9219` | The same address. Hermes keeps it on loopback inside the container; a small relay passes it to a port Docker publishes on `127.0.0.1` only, on a network that only this container joins |
+
+What it still does: the container runs as a non-root user with every Linux capability dropped, `no-new-privileges`
+and a process limit, and nothing from your machine is mounted. Docker is the only requirement. It was tried on Apple Silicon only.
+
+**Keys.** They live in `~/.config/kyverno-assistant/secrets.env` (override with `KYVERNO_SECRETS_FILE`), mode 600, as
+`KEY=value` lines. On every start the launcher copies the allowed keys (`REPO_GITHUB_TOKEN`, `ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY`, `NVIDIA_API_KEY`) into a tmpfs inside the container. They are not in the image, not in
+`docker inspect`, and not on the container's disk; the tmpfs is empty again when the container stops.
+
+**State.** It lives in the container, so it survives `docker stop` and `docker start`. `--upgrade` saves it, recreates the
+container from the new image and restores it, as with OpenShell. Removing the container by hand (`docker rm`) loses it.
+
+**Keys changed?** Re-running the launcher copies the new keys in and restarts the dashboard so it picks them up.
+
+**Removing it.** `docker rm -f kyverno-assistant-docker`, `docker network rm kyverno-assistant-docker-net`, and delete the secrets file.
+This loses the container's state.
+
+**Choosing between them later.** The two modes use different names (`kyverno-assistant` sandbox, `kyverno-assistant-docker`
+container), so they do not interfere. State is not shared between them.
+
 ## Choosing a model
 
 - **GitHub Copilot** is the default. A free account may not allow the model Hermes pre-selects. Copilot's
