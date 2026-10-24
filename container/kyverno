@@ -238,6 +238,11 @@ else
     403|404) fail "the token cannot read $REPO ($CODE): scope it to that repo, or get the org to approve it"; exit 1 ;;
     *) info "could not verify the token (HTTP ${CODE:-none}) — continuing" ;;
   esac
+  if [ -z "$LOGIN" ]; then
+    LOGIN=$(printf 'header = "Authorization: Bearer %s"\n' "$PAT" \
+            | curl -s -m 10 -K - https://api.github.com/user | sed -n 's/.*"login": *"\([^"]*\)".*/\1/p' | head -n 1)
+    if [[ "$LOGIN" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]]; then pass "signed in to GitHub as $LOGIN"; else LOGIN=""; fi
+  fi
   REPO_GITHUB_TOKEN="$PAT" openshell provider create --name "$PROVIDER" --type "$PROVIDER" \
     --credential REPO_GITHUB_TOKEN >/dev/null 2>&1 || { fail "could not store the token in OpenShell"; exit 1; }
   unset PAT

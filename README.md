@@ -165,7 +165,7 @@ It prints five numbered steps. This is what each one does and what you answer:
 | **2. Image** | Builds or pulls the image | Wait |
 | **3. GitHub token** | Asks which repo to manage, then how to authorize: sign in with `gh` (browser), or paste a token (hidden). It checks the token against that repo before keeping it, and stores it in OpenShell | Type the repo (`owner/repo`), then sign in or paste the token |
 | **4. Sandbox** | Creates the sandbox and applies its network policy (a minute or two the first time) | Wait |
-| **5. Assistant** | Asks your GitHub username. Then GitHub Copilot sign-in: it prints a page and a code | Open https://github.com/login/device in your browser, enter the code, approve. Then pick **GitHub Copilot** and a model in the picker |
+| **5. Assistant** | Takes your GitHub username from the token (it asks only if it cannot read it). Then GitHub Copilot sign-in: it prints a page and a code | Open https://github.com/login/device in your browser, enter the code, approve. Then pick **GitHub Copilot** and a model in the picker |
 
 The chat then opens. The screen takes about 30 seconds to appear, because the memory plugin loads its search
 engine; you may see some `cpuinfo` and `onnxruntime` lines first, which are harmless. The first run is the only
