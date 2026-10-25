@@ -1,0 +1,70 @@
+#!/bin/bash
+# Get a repository ready to work on inside the sandbox: clone it and install the toolchains it needs.
+#   kyverno-workspace <owner/repo>
+# The repository goes to /sandbox/<name>. What it needs is read from the repository itself (go.mod -> Go,
+# package.json -> Node.js, .chainsaw.yaml -> the Kyverno CLI and Chainsaw), at the version the repository pins, from
+# toolchains/<name>.sh. Tools land in /sandbox/.toolchains, and `source /sandbox/.toolchains/env.sh` puts them on PATH.
+# Safe to run again: it updates the clone and skips what is already installed. The first run downloads a lot (Go's
+# module and build caches for Kyverno come to about 5 GB), so it says what it is doing.
+set -uo pipefail
+
+LIB=/usr/local/lib/kyverno/toolchains
+export TOOLS=/sandbox/.toolchains
+ARCH="$(uname -m)"; case "$ARCH" in aarch64) ARCH=arm64 ;; x86_64) ARCH=amd64 ;; esac
+export ARCH
+
+pass() { printf '  \033[32m✓\033[0m %s\n' "$1"; }
+fail() { printf '  \033[31m✗\033[0m %s\n' "$1" >&2; }
+info() { printf '  %s\n' "$1"; }
+
+REPO="${1:-}"
+if [[ ! "$REPO" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+$ || "${REPO#*/}" == "." || "${REPO#*/}" == ".." ]]; then
+  echo "usage: kyverno-workspace <owner/repo>" >&2
+  exit 2
+fi
+DIR="/sandbox/${REPO#*/}"
+mkdir -p "$TOOLS"
+
+printf '\n\033[1mClone %s\033[0m\n' "$REPO"
+if [ -d "$DIR/.git" ]; then
+  git -C "$DIR" fetch --quiet origin && pass "updated $DIR (your branch and changes are untouched)" || fail "could not update $DIR"
+else
+  # Full history without file contents; git fetches a file's contents when it is first needed.
+  git clone --quiet --filter=blob:none "https://github.com/$REPO" "$DIR" && pass "cloned to $DIR" || { fail "clone failed"; exit 1; }
+fi
+
+needs=()
+[ -f "$DIR/go.mod" ] && needs+=(go)
+[ -f "$DIR/package.json" ] && needs+=(node)
+{ [ -f "$DIR/.chainsaw.yaml" ] || [ -d "$DIR/.chainsaw" ]; } && needs+=(kyverno-tools)
+
+printf '\n\033[1mToolchains\033[0m\n'
+[ "${#needs[@]}" -eq 0 ] && info "nothing to install: no go.mod, package.json or Chainsaw config in $REPO"
+rc=0
+for tc in "${needs[@]+"${needs[@]}"}"; do
+  # shellcheck source=/dev/null
+  . "$LIB/$tc.sh"
+  want="$(tc_want "$DIR")"
+  if [ -z "$want" ] || [ "$want" = null ]; then fail "$tc: could not work out the version to install"; rc=1; continue; fi
+  if tc_have "$want"; then
+    pass "$tc $want already installed"
+  else
+    info "installing $tc $want..."
+    if tc_install "$want" && tc_have "$want"; then pass "$tc $want installed"; else fail "$tc $want did not install (is the network policy letting its downloads through?)"; rc=1; fi
+  fi
+done
+
+# env.sh covers everything installed so far, not just this run's toolchains.
+: > "$TOOLS/env.sh"
+for f in "$LIB"/*.sh; do
+  tc="$(basename "$f" .sh)"
+  # shellcheck source=/dev/null
+  [ -d "$TOOLS/$tc" ] && { . "$f"; tc_env; } >> "$TOOLS/env.sh"
+done
+
+printf '\n'
+if [ "$rc" = 0 ]; then
+  info "Ready. In a new shell: cd $DIR && source $TOOLS/env.sh"
+  [ -f "$DIR/go.mod" ] && info "The first Go build downloads modules and compiles for 10 to 15 minutes; later builds are quick."
+fi
+exit "$rc"
