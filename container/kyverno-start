@@ -119,6 +119,13 @@ if [ -z "$(env_get KYVERNO_REPO)" ]; then
   env_set KYVERNO_REPO "$REPO"
 fi
 if [ -z "$(env_get "$LOGIN_VAR")" ]; then
+  # The launcher knows the username only in the run that asked for the token. Otherwise ask GitHub who the token
+  # belongs to (the proxy puts the real token in), and only ask the person if that does not work.
+  [ -z "$LOGIN" ] && LOGIN="$("$HERMES_PY" -I -c '
+import json, os, urllib.request
+req = urllib.request.Request("https://api.github.com/user", headers={"Authorization": "Bearer " + os.environ["REPO_GITHUB_TOKEN"], "User-Agent": "kyverno-assistant"})
+print(json.load(urllib.request.urlopen(req, timeout=10)).get("login", ""))' 2>/dev/null)"
+  valid_login "$LOGIN" 2>/dev/null && pass "signed in to GitHub as $LOGIN" || LOGIN=""
   [ -z "$LOGIN" ] && read -r -p "  Your GitHub username: " LOGIN
   if [ -n "$LOGIN" ]; then
     valid_login "$LOGIN" || { fail "'$LOGIN' is not a GitHub username (letters, digits and dashes)"; exit 1; }
