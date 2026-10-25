@@ -192,8 +192,10 @@ else
   token_note_paste() { info "$TOKEN_PASTE_HELP It goes to OpenShell, never into the sandbox."; }
   TOKEN_DEFAULT=1
   acquire_github_token
-  REPO_GITHUB_TOKEN="$PAT" openshell provider create --name "$PROVIDER" --type "$PROVIDER" \
-    --credential REPO_GITHUB_TOKEN >/dev/null 2>&1 || { fail "could not store the token in OpenShell"; exit 1; }
+  # The token is exported for this one command only (not an argument: it would show in the process list).
+  out="$(REPO_GITHUB_TOKEN="$PAT" openshell provider create --name "$PROVIDER" --type "$PROVIDER" \
+    --credential REPO_GITHUB_TOKEN 2>&1)" \
+    || { fail "could not store the token in OpenShell"; printf '%s\n' "$out" | sed 's/^/    /' >&2; exit 1; }
   unset PAT
   pass "token stored in OpenShell"
 fi
