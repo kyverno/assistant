@@ -105,7 +105,7 @@ build-time checks on both. What decides whether the whole thing runs is Docker, 
 | **Mac with Apple Silicon** | Tested: this is where everything was developed and checked, including real chats |
 | **Linux, x86_64** | Checked end to end on a GitHub Linux runner (Ubuntu 24.04, kernel 6.17, Docker Engine 28): OpenShell installed, the sandbox started, the token stayed a placeholder, merges were refused by the proxy, the hooks were read-only and the dashboard answered. Not tried on a real Linux laptop. The kernel needs Landlock (Linux 5.13 or newer) |
 | **Linux, arm64** | The image is built for it; the launcher has not been tried there |
-| **Intel Mac** | Not supported: OpenShell supports macOS on Apple Silicon only |
+| **Intel Mac** | Not supported with OpenShell (it supports macOS on Apple Silicon only). `container/kyverno --no-openshell` needs only Docker, with less protection (not tried on Intel): see [docs/container.md](docs/container.md#running-without-openshell) |
 | **Windows** | OpenShell supports it through WSL2 (experimental); run the launcher inside WSL2. Untested |
 
 The launcher checks your machine first and says so plainly if it is one it cannot support.

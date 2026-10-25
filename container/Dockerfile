@@ -165,7 +165,7 @@ COPY --from=build /opt/kyverno /opt/kyverno
 COPY --chown=1000:1000 container/providers/repo-github.yaml /tmp/repo-github.yaml
 COPY --from=build --chown=1000:1000 /opt/hermes-home /opt/hermes-home
 RUN ln -s /opt/hermes-home/.local/bin/hermes /usr/local/bin/hermes
-COPY --chmod=755 container/kyverno-start container/kyverno-main /usr/local/bin/
+COPY --chmod=755 container/kyverno-start container/kyverno-main container/kyverno-env container/dashboard-relay /usr/local/bin/
 
 # The image's final user must stay uid 1000: OpenShell refuses an image whose default user is root.
 USER 1000:1000

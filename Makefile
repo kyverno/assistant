@@ -7,7 +7,7 @@ DOCKERFILE := container/Dockerfile
 SHELLCHECK_IMAGE := koalaman/shellcheck@sha256:bb596a0d169b85ddd81d8b6d3a2ff6d5baf5fca10b97f575ebc647c3dff62b3d
 HADOLINT_IMAGE := hadolint/hadolint@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d
 TRIVY_IMAGE := aquasec/trivy@sha256:2416d1f74045b57274df1a340eee6b510cacd73c66a6ccb8da092b117eb7d222
-SHELL_SCRIPTS := container/kyverno container/kyverno-start container/kyverno-main \
+SHELL_SCRIPTS := container/kyverno container/kyverno-docker container/lib.sh container/kyverno-start container/kyverno-main container/kyverno-env \
 	container/setup-profile.sh container/restore-state.sh container/hooks/require-sandbox-terminal.sh
 
 .PHONY: help lint lint-shell lint-dockerfile lint-providers image test scan check run
