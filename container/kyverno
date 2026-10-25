@@ -58,22 +58,8 @@ done
 # shellcheck source=container/lib.sh
 . "$HERE/lib.sh"
 
-# What differs between the two assistants. They share the image, not the sandbox, the GitHub token or the state.
-case "$KIND" in
-  maintainer)
-    SANDBOX="${SANDBOX:-kyverno-assistant}"; HERMES_PROFILE=kyverno; PROVIDER=kyverno-repo-github
-    PROVIDER_FILE=repo-github.yaml; LOGIN_VAR=MAINTAINER_GITHUB_LOGIN
-    REPO_ASK="Repo to manage (owner/repo) [kyverno/kyverno]: "
-    TOKEN_SCOPE="the assistant still cannot merge."
-    TOKEN_PASTE_HELP="Paste your fine-grained GitHub token (see README step 1)." ;;
-  contributor)
-    SANDBOX="${SANDBOX:-kyverno-contributor}"; HERMES_PROFILE=kyverno-contributor; PROVIDER=kyverno-contributor-github
-    PROVIDER_FILE=repo-github-contributor.yaml; LOGIN_VAR=CONTRIBUTOR_GITHUB_LOGIN
-    REPO_ASK="Repo you contribute to (owner/repo) [kyverno/kyverno]: "
-    TOKEN_SCOPE="the assistant can only read and comment on issues."
-    TOKEN_PASTE_HELP="Paste a fine-grained GitHub token of your own account (public repositories, read-only, is enough; see docs/contributor.md)." ;;
-  *) echo "unknown profile '$KIND' (maintainer or contributor)" >&2; exit 2 ;;
-esac
+select_profile "$KIND"
+SANDBOX="${SANDBOX:-$DEFAULT_NAME}"
 # OpenShell limits a sandbox name to 19 characters, and 'kyverno-contributor' uses all of them.
 if [ "${#SANDBOX}" -gt 19 ] || [[ ! "$SANDBOX" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]]; then
   echo "invalid sandbox name '$SANDBOX': use at most 19 lowercase letters, digits and dashes" >&2
@@ -309,4 +295,4 @@ ARGS=()
 [ -n "$REPO" ] && ARGS+=(--repo "$REPO")
 [ -n "$LOGIN" ] && ARGS+=(--login "$LOGIN")
 [ "$NO_ATTACH" = 1 ] && { pass "ready (not opening the chat: --no-attach)"; exit 0; }
-exec openshell sandbox exec -n "$SANDBOX" --tty -- kyverno-start "${ARGS[@]+"${ARGS[@]}"}"
+exec openshell sandbox exec -n "$SANDBOX" --tty -- kyverno-start --profile "$KIND" "${ARGS[@]+"${ARGS[@]}"}"

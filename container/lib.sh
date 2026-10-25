@@ -24,6 +24,30 @@ provider_env_var() {
   esac
 }
 
+# What differs between the two assistants, for both launchers. They share the image, not the sandbox (or container),
+# the GitHub token or the state. Sets HERMES_PROFILE, PROVIDER and PROVIDER_FILE (OpenShell), TOKEN_KEY (the name the
+# token has in the secrets file without OpenShell), LOGIN_VAR, DEFAULT_NAME and DEFAULT_DOCKER_NAME, and the wording.
+# shellcheck disable=SC2034  # each launcher uses some of these, not all
+select_profile() {
+  case "$1" in
+    maintainer)
+      HERMES_PROFILE=kyverno; PROVIDER=kyverno-repo-github; PROVIDER_FILE=repo-github.yaml
+      TOKEN_KEY=REPO_GITHUB_TOKEN; LOGIN_VAR=MAINTAINER_GITHUB_LOGIN
+      DEFAULT_NAME=kyverno-assistant; DEFAULT_DOCKER_NAME=kyverno-assistant-docker
+      REPO_ASK="Repo to manage (owner/repo) [kyverno/kyverno]: "
+      TOKEN_SCOPE="the assistant still cannot merge."
+      TOKEN_PASTE_HELP="Paste your fine-grained GitHub token (see README step 1)." ;;
+    contributor)
+      HERMES_PROFILE=kyverno-contributor; PROVIDER=kyverno-contributor-github; PROVIDER_FILE=repo-github-contributor.yaml
+      TOKEN_KEY=CONTRIBUTOR_REPO_GITHUB_TOKEN; LOGIN_VAR=CONTRIBUTOR_GITHUB_LOGIN
+      DEFAULT_NAME=kyverno-contributor; DEFAULT_DOCKER_NAME=kyverno-contributor-docker
+      REPO_ASK="Repo you contribute to (owner/repo) [kyverno/kyverno]: "
+      TOKEN_SCOPE="the assistant can only read and comment on issues."
+      TOKEN_PASTE_HELP="Paste a fine-grained GitHub token of your own account (public repositories, read-only, is enough; see docs/contributor.md)." ;;
+    *) echo "unknown profile '$1' (maintainer or contributor)" >&2; exit 2 ;;
+  esac
+}
+
 # What is yours across an --upgrade: memory, chat history, your repo and username, the Copilot sign-in, the model you
 # chose. Paths under the profile directory. The profile itself (skills, hooks, plugins, settings) comes from the new image.
 # shellcheck disable=SC2034  # used by the launchers that source this file

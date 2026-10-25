@@ -1,7 +1,7 @@
 #!/bin/bash
 # Run the Kyverno assistant in plain Docker, without OpenShell. You normally start it as:
 #
-#   container/kyverno --no-openshell [options]
+#   container/kyverno --no-openshell [options]      (--profile maintainer|contributor works as without --no-openshell)
 #
 # OpenShell is the default and the safer way to run the assistant (see docs/container.md). This is the opt-in for
 # people who do not want OpenShell: the same image, run as one Docker container. What that gives up:
@@ -12,9 +12,11 @@
 # What it keeps: a non-root user, no Linux capabilities, no-new-privileges, a process limit, no host mounts, and the
 # terminal and file tools blocked (add --allow-terminal to turn them on; the container is then the only boundary).
 #
+#   --profile K       maintainer (default) or contributor, as in container/kyverno. Each has its own container, GitHub
+#                     token (in the one secrets file) and state; model keys are shared.
 #   --build           build the image from this checkout (container/Dockerfile) instead of pulling one
 #   --image IMAGE     use this image (default: $KYVERNO_IMAGE, else ghcr.io/kyverno/assistant:latest)
-#   --name NAME       container name (default: kyverno-assistant-docker)
+#   --name NAME       container name (default: kyverno-assistant-docker, or kyverno-contributor-docker)
 #   --provider P      also use model provider P (anthropic, openai or nvidia): its API key is asked once and kept in
 #                     the secrets file. Without it, the assistant uses GitHub Copilot.
 #   --upgrade         recreate the container from the (new) image and keep your state: memory, chat history, repo
@@ -36,7 +38,8 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/.." && pwd)"
 IMAGE="${KYVERNO_IMAGE:-ghcr.io/kyverno/assistant:latest}"
-NAME="kyverno-assistant-docker"
+KIND=maintainer
+NAME=""
 DASH_PORT="${KYVERNO_DASHBOARD_PORT:-9219}"   # same default as the OpenShell launcher
 RELAY_PORT=38219                              # inside the container; Docker publishes it as DASH_PORT
 SECRETS_FILE="${KYVERNO_SECRETS_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/kyverno-assistant/secrets.env}"
@@ -51,6 +54,7 @@ WANT_PROVIDERS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-openshell) shift ;;
+    --profile) KIND="${2:-}"; shift 2 ;;
     --build) BUILD=1; shift ;;
     --image) IMAGE="${2:-}"; shift 2 ;;
     --name) NAME="${2:-}"; shift 2 ;;
@@ -60,13 +64,15 @@ while [ $# -gt 0 ]; do
     --yes) ASSUME_YES=1; shift ;;
     --no-attach) NO_ATTACH=1; shift ;;
     --reset) RESET=1; shift ;;
-    -h|--help) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
 
 # shellcheck source=container/lib.sh
 . "$HERE/lib.sh"
+select_profile "$KIND"
+NAME="${NAME:-$DEFAULT_DOCKER_NAME}"
 
 # --- the secrets file on this machine ---
 secrets_get() {
@@ -97,6 +103,12 @@ container_running() { [ "$(docker container inspect -f '{{.State.Running}}' "$NA
 # A network of its own, so that no other container can reach the dashboard relay on the container's address.
 ensure_network() { docker network inspect "$NAME-net" >/dev/null 2>&1 || docker network create "$NAME-net" >/dev/null; }
 
+# The secrets file holds both profiles' GitHub tokens; a container gets only its own, as REPO_GITHUB_TOKEN.
+profile_secrets() {
+  awk -F= -v k="$TOKEN_KEY" '$1==k { sub(/^[^=]*/, "REPO_GITHUB_TOKEN"); print; next }
+                             $1=="REPO_GITHUB_TOKEN" || $1=="CONTRIBUTOR_REPO_GITHUB_TOKEN" { next } { print }' "$SECRETS_FILE"
+}
+
 # Copy the secrets file into the container's tmpfs (a pipe: nothing is written to the container's disk; the loader in
 # the image, kyverno-env, decides which lines count). Prints
 # "changed" or "same", so that a dashboard that is already running can be restarted with new keys.
@@ -106,7 +118,7 @@ inject_secrets() {
         d=/run/kyverno-secrets
         cat > "$d/env.new"
         if cmp -s "$d/env.new" "$d/env"; then rm -f "$d/env.new"; echo same; else mv "$d/env.new" "$d/env"; echo changed; fi' \
-    < "$SECRETS_FILE"
+    < <(profile_secrets)
 }
 
 # What is yours: memory, chat history, your repo and username, the Copilot sign-in, the model you chose.
@@ -114,7 +126,7 @@ inject_secrets() {
 save_state() {
   local dest="$1"
   docker exec "$NAME" sh -c \
-    "cd /opt/hermes-home/.hermes/profiles/kyverno && tar -cf - \$(ls -d $STATE_FILES 2>/dev/null)" \
+    "cd /opt/hermes-home/.hermes/profiles/$HERMES_PROFILE && tar -cf - \$(ls -d $STATE_FILES 2>/dev/null)" \
     > "$dest/kyverno-state.tar" 2>/dev/null || return 1
   [ -s "$dest/kyverno-state.tar" ]
 }
@@ -122,7 +134,7 @@ restore_state() {
   local src="$1"
   docker exec -i "$NAME" sh -c 'cat > /tmp/kyverno-state.tar' < "$src/kyverno-state.tar" || return 1
   docker exec -i "$NAME" sh -c 'cat > /tmp/restore-state.sh' < "$HERE/restore-state.sh" || return 1
-  docker exec -e KYVERNO_STATE_TAR=/tmp/kyverno-state.tar "$NAME" bash /tmp/restore-state.sh
+  docker exec -e KYVERNO_STATE_TAR=/tmp/kyverno-state.tar "$NAME" bash /tmp/restore-state.sh "$HERMES_PROFILE"
 }
 
 step "1. Docker"
@@ -139,20 +151,20 @@ ensure_image
 
 step "3. Keys"
 info "secrets file: $SECRETS_FILE"
-[ "$RESET" = 1 ] && secrets_unset REPO_GITHUB_TOKEN
+[ "$RESET" = 1 ] && secrets_unset "$TOKEN_KEY"
 REPO="${KYVERNO_REPO:-}"
-LOGIN="${MAINTAINER_GITHUB_LOGIN:-}"
-if [ -n "$(secrets_get REPO_GITHUB_TOKEN)" ]; then
+LOGIN="${!LOGIN_VAR:-}"
+if [ -n "$(secrets_get "$TOKEN_KEY")" ]; then
   pass "GitHub token already in the secrets file (use --reset to replace it)"
 else
   token_note_gh() {
     info "     only $REPO. Without OpenShell the assistant holds this token itself, and nothing but the token's"
     info "     scopes stops it merging. Prefer option 2."
   }
-  token_note_paste() { info "Paste your fine-grained GitHub token (see README step 1). It is saved in the secrets file, mode 600."; }
+  token_note_paste() { info "$TOKEN_PASTE_HELP It is saved in the secrets file, mode 600."; }
   TOKEN_DEFAULT=2
   acquire_github_token
-  secrets_set REPO_GITHUB_TOKEN "$PAT" || { fail "could not write the secrets file"; exit 1; }
+  secrets_set "$TOKEN_KEY" "$PAT" || { fail "could not write the secrets file"; exit 1; }
   unset PAT
   pass "token saved in the secrets file"
 fi
@@ -213,12 +225,14 @@ else
   # --init: Hermes wants an init process above it to reap children. The dashboard is published on 127.0.0.1 only.
   # The keys go in through a tmpfs (mode 700, uid
   # 1000), which is empty again each time the container stops. Nothing from this machine is mounted.
-  docker run -d --init --name "$NAME" --network "$NAME-net" -p "127.0.0.1:$DASH_PORT:$RELAY_PORT" \
+  # Only the maintainer container has a dashboard to publish (two containers could not share the port anyway).
+  PUBLISH=(); [ "$KIND" = maintainer ] && PUBLISH=(-p "127.0.0.1:$DASH_PORT:$RELAY_PORT")
+  docker run -d --init --name "$NAME" --network "$NAME-net" "${PUBLISH[@]+"${PUBLISH[@]}"}" \
     --cap-drop ALL --security-opt no-new-privileges --pids-limit 1024 \
     --tmpfs /run/kyverno-secrets:rw,noexec,nosuid,nodev,size=1m,mode=0700,uid=1000,gid=1000 \
     --tmpfs /tmp:rw,exec,nosuid,nodev,size=1g,mode=1777 \
     --label "kyverno.allow-terminal=$ALLOW_TERMINAL" \
-    "${ENV_ARGS[@]}" "$IMAGE" kyverno-main >/dev/null \
+    "${ENV_ARGS[@]}" "$IMAGE" kyverno-main "$KIND" >/dev/null \
     || { fail "could not create the container"; exit 1; }
 fi
 for _ in $(seq 1 30); do container_running && break; sleep 1; done
@@ -245,6 +259,6 @@ step "5. Assistant"
 ARGS=()
 [ -n "$REPO" ] && ARGS+=(--repo "$REPO")
 [ -n "$LOGIN" ] && ARGS+=(--login "$LOGIN")
-info "dashboard: http://127.0.0.1:$DASH_PORT/kyverno?profile=kyverno"
+[ "$KIND" = maintainer ] && info "dashboard: http://127.0.0.1:$DASH_PORT/kyverno?profile=kyverno"
 [ "$NO_ATTACH" = 1 ] && { pass "ready (not opening the chat: --no-attach)"; exit 0; }
-exec docker exec -it "$NAME" kyverno-start "${ARGS[@]+"${ARGS[@]}"}"
+exec docker exec -it "$NAME" kyverno-start --profile "$KIND" "${ARGS[@]+"${ARGS[@]}"}"
