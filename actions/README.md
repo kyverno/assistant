@@ -4,12 +4,9 @@ Composite GitHub Actions that any organisation can use, with no assistant, conta
 action is deterministic, reads its repo-specific settings from a config file in the **caller's** repository, and
 defaults to a dry run.
 
-| Action | What it does | Status |
-| --- | --- | --- |
-| [`pr-management`](pr-management/README.md) | Path labels, readiness classification, stale-author handling, label sync | Ported from kyverno/kyverno#18275 |
-| `flaky-tests` | Detect, track and quarantine flaky tests from workflow history | Planned |
-| `security-triage` | Summarise and route code-scanning, secret-scanning and Dependabot alerts | Planned |
-| `vuln-scan` | Scan dependencies and images, de-duplicate findings, open or update tracking issues | Planned |
+| Action | What it does |
+| --- | --- |
+| [`pr-management`](pr-management/README.md) | Path labels, readiness classification, stale-author handling, label sync (ported from kyverno/kyverno#18275) |
 
-Conventions every action follows are in [`docs/generalisation.md`](../docs/generalisation.md#conventions-for-actions).
-Ready-to-copy caller workflows and config are in [`examples/ci/`](../examples/ci/).
+To adopt it, see [`docs/adopting-actions.md`](../docs/adopting-actions.md): one script opens the PR. Caller
+workflows and config templates are in [`examples/ci/`](../examples/ci/).

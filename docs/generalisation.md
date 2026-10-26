@@ -57,6 +57,8 @@ config key is an error, not ignored; every mutating mode defaults to dry run.
 
 ## Roadmap for the actions
 
+Only `pr-management` exists. The others are possible later work, deliberately not started.
+
 | Action | Sketch | Config keys (all repo-owned) | Output other layers use |
 | --- | --- | --- | --- |
 | `pr-management` | Done: ported as is from #18275; only a comment was changed | see its README | labels `needs-author-action`, `stale`, `ready-for-review` |
@@ -91,10 +93,11 @@ The assistants stay human-invoked and still cannot merge; none of this changes t
 
 ## Order of work
 
-1. **Done in this change:** `actions/pr-management` ported, `examples/ci/` caller workflows and config,
+1. **Done in this change:** `actions/pr-management` ported, `examples/ci/` caller workflows and config, `scripts/adopt-ci.sh`,
    `NOTICE` for the Apache-2.0 source, this document.
-2. Wire this repo's own `.github/` to use `actions/pr-management` in dry run, as the first adopter.
-3. `security-triage`, then `flaky-tests`, then `vuln-scan`, each with README, example config, `validate` mode.
+2. **Done:** `scripts/adopt-ci.sh`, one command that opens the adoption PR in each named repository; see
+   [`adopting-actions.md`](adopting-actions.md).
+3. Later, only if wanted: `security-triage`, `flaky-tests`, `vuln-scan`.
 4. After `feat/profiles-contributor` merges: neutral names, `ASSISTANT_REPOS`, `repo-context` skill, plugin
    renames, and `contexts/kyverno/`.
 5. Move Kyverno repos from #18275's copy to `kyverno/assistant/actions/pr-management@<sha>` once it is merged
