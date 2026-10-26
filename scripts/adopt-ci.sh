@@ -55,7 +55,7 @@ fi
 gh api "repos/${source_repo}/commits/${ref}" --jq .sha > /dev/null 2>&1 \
   || die "commit ${ref} is not in ${source_repo}; push this checkout or pass --ref with a pushed commit"
 
-templates="$here/examples/ci"
+templates="$here/adopt-ci-templates"
 workflows=(pr-management check-pr-management pr-labelling sync-labels)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -135,7 +135,7 @@ adopt() {
     add_file "$templates/pr-readiness-checks.yml" .github/pr-readiness-checks.yml
     add_file "$templates/labels.yml" .github/labels.yml
     for label in needs-author-action ready-for-review workflow-approval-required stale; do
-      grep -q "^${label}:" .github/labels.yml || echo "  warning: .github/labels.yml has no '${label}' entry; add it from examples/ci/labels.yml"
+      grep -q "^${label}:" .github/labels.yml || echo "  warning: .github/labels.yml has no '${label}' entry; add it from adopt-ci-templates/labels.yml"
     done
 
     [[ ${#added[@]} -gt 0 ]] || { echo "  already adopted, nothing to add"; exit 0; }

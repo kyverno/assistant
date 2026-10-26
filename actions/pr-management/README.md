@@ -130,7 +130,7 @@ Readiness checks map identifiers to jq `test` and `message` strings evaluated
 against the fetched PR, with `$author` bound to its login. The optional
 `infra_checks` identifier is advisory, not blocking. **Which checks count as
 infrastructure is repository-specific**: maintain exclusions and explanations in
-the caller's YAML, never in the generic scripts. See `examples/ci/pr-readiness-checks.yml` for a starting point.
+the caller's YAML, never in the generic scripts. See `adopt-ci-templates/pr-readiness-checks.yml` for a starting point.
 
 ## Safety and rollout
 

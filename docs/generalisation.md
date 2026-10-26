@@ -93,7 +93,7 @@ The assistants stay human-invoked and still cannot merge; none of this changes t
 
 ## Order of work
 
-1. **Done in this change:** `actions/pr-management` ported, `examples/ci/` caller workflows and config, `scripts/adopt-ci.sh`,
+1. **Done in this change:** `actions/pr-management` ported, `adopt-ci-templates/` caller workflows and config, `scripts/adopt-ci.sh`,
    `NOTICE` for the Apache-2.0 source, this document.
 2. **Done:** `scripts/adopt-ci.sh`, one command that opens the adoption PR in each named repository; see
    [`adopting-actions.md`](adopting-actions.md).
