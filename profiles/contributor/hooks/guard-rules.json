@@ -1,20 +1,4 @@
 {
-  "comment_commands": [
-    "lgtm",
-    "approve",
-    "milestone",
-    "assign",
-    "unassign",
-    "cherry-pick",
-    "hold",
-    "retest",
-    "ok-to-test",
-    "close",
-    "reopen",
-    "label",
-    "kind",
-    "area"
-  ],
   "comment_command_exceptions": [
     {
       "command": "assign",

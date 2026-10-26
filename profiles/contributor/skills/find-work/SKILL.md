@@ -15,9 +15,15 @@ platforms: [linux, macos, windows]
 
 ## Steps
 
-1. **Open PRs first.** From `journey_summary`, if the contributor has open PRs that need them
-   (`my_pr_state`), say so. Finishing one is usually better than starting another.
-2. **Candidates.** `find_issues` with `known_areas` from `journey_summary` (the `area/...` labels). Tiers:
+1. **Start from their GitHub history, not from memory.** `journey_summary` reads GitHub, so it works with
+   no open PR and no notes. Read `stage`, `in_this_repo` (merged PRs and the issues they closed, PRs closed
+   without merge, `touched_paths`, issues they wrote or commented on) and `known_areas`. Say in one line what
+   they have worked on and where. If they have open PRs that need them (`my_pr_state`), say so: finishing one
+   is usually better than starting another. If `stage` is `first_time`, prefer small, well-scoped work.
+   Once there is a merged PR, `review_opportunities` lists open PRs by others in the paths they know:
+   offer reviewing one as an equally good next step (`review-loop`).
+2. **Candidates.** `find_issues` with `known_areas` from `journey_summary` (the `area/...` labels). Skip
+   issues already in `in_this_repo` (closed by their merged PRs) and check their `issues_commented_on`. Tiers:
    `free` (no assignee, no open PR), `claimed` (assigned: the claim may be idle), `has_open_pr`.
    Real projects often have no free entry-level issue; do not stop at `free`.
 3. **History before any recommendation.** For each issue you might suggest (at most 3), call `issue_history`.

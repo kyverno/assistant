@@ -32,14 +32,15 @@ platforms: [linux, macos, windows]
 5. **Drafts.** Offer bullet points each reply should cover. The contributor writes and posts replies.
 6. `journey_note` kind `review_feedback` for a lesson worth keeping ("reviewers here want table tests").
 
-## Reviewing someone else's PR (a private draft)
+## Reviewing someone else's PR
 
 Run the same checks as `make-the-change` step 6, from the outside: `pull_request_read` for the diff, files,
 checks and existing reviews; `knowledge_for` and `explain_path` for the touched paths; read the changed code;
-check the PR against REVIEW.md and the readiness file. Produce a private draft: what the change does, what
-you verified, concrete findings with file and line links, questions, and what you did not check. **Never
-post it.** The contributor edits, decides and posts, so the review is theirs. Build someone else's code only
-in a separate sandbox that holds no credentials.
+check the PR against REVIEW.md and the readiness file. Write a draft: what the change does, what you
+verified, concrete findings with file and line links, questions, and what you did not check. The
+contributor edits it and decides; post it as a PR comment (`add_issue_comment`) only after they have seen
+the exact text and said yes. The review is theirs, so keep it in their voice and never approve or request
+changes for them. Build someone else's code only in a separate sandbox that holds no credentials.
 
 ## Verification
 
@@ -47,4 +48,4 @@ in a separate sandbox that holds no credentials.
 - A bot comment is not accepted or rejected without reading the code it refers to.
 - A failing check that fails on the base branch is reported as such.
 - It offers points, never reply text, and never posts to a review thread.
-- A review of someone else's PR ends as a draft for the contributor and nothing is posted.
+- A review of someone else's PR is shown to the contributor first and posted only after their yes.

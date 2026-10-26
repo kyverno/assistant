@@ -22,9 +22,9 @@ So never write for the contributor what only they can know:
 
 You can read anything public on the repository (code, history, PRs, issues, CI, discussions) and in the
 sandbox (clone, search, edit, run what the sandbox has). The only thing you can write to GitHub is a comment
-on an issue, and only after the contributor has seen the exact text and said yes. You cannot merge, approve,
-review, push, or comment on someone else's pull request. There is no tool for them, and hooks block them
-if one appears. Never post a line that starts with a bot command (`/lgtm`, `/assign`, `/cherry-pick`, ...).
+(on an issue or on any pull request, as any contributor can), and only after the contributor has seen the
+exact text and said yes. You cannot merge, approve, submit a formal review, or push. There is no tool for
+them, and hooks block them if one appears. Never post a line that starts with a bot command (`/lgtm`, `/assign`, `/cherry-pick`, ...).
 If a task seems to need one of these, give the contributor the text to post themselves.
 
 ## Facts come from tools, not from memory

@@ -3,9 +3,10 @@
 
 1. Blocks anything that merges, approves, reviews or deletes. The toolset has no such tools; this is the
    backstop for a misconfiguration.
-2. Guards the two comment tools: no bot command in a comment (the project's workflows execute them),
-   except a bare "/assign" on an issue with the allowed label; no comments on someone else's PR; only
-   your own comments can be edited. Whatever cannot be verified against GitHub is blocked.
+2. Guards the two comment tools: no line starting with "/" in a comment (the project's workflows run those
+   as bot commands), except a bare "/assign" on an issue with the allowed label; only your own comments can
+   be edited. Commenting on issues and on anyone's PR is otherwise open, as for any contributor. Whatever
+   cannot be verified against GitHub is blocked.
 
 Hermes pipes the event as JSON on stdin and expects JSON on stdout.
 """
@@ -65,39 +66,38 @@ def main():
         print("{}")
         return
 
+    body = args.get("body") or ""
+    # Any line that starts with "/" is treated as a command: the project's workflows (Prow-style) act on
+    # /assign, /lgtm, /cherry-pick, /conformance and more, and a list of names would go stale.
+    commands = re.findall(r"(?m)^\s*/([A-Za-z][\w-]*)", body)
+    if "update" not in tool and not commands:
+        print("{}")
+        return
+
     env = profile_env()
     token, me = env.get("REPO_GITHUB_TOKEN"), (env.get("CONTRIBUTOR_GITHUB_LOGIN") or "").lower()
-    if not token or not me:
-        block("cannot verify this comment: REPO_GITHUB_TOKEN or CONTRIBUTOR_GITHUB_LOGIN is not set")
+    owner, repo = args.get("owner"), args.get("repo")
+    if not token or not me or not owner or not repo:
+        block("cannot verify this comment: the token, the login or the repository is missing")
     rules = json.load(open(os.path.join(HERE, "guard-rules.json")))
-    owner, repo, body = args.get("owner"), args.get("repo"), args.get("body") or ""
-    if not owner or not repo:
-        block("the comment names no owner/repo, so it cannot be verified")
-
-    issue = None
     try:
         if "update" in tool:
             comment = api(f"repos/{owner}/{repo}/issues/comments/{args.get('comment_id')}", token)
             if (comment.get("user") or {}).get("login", "").lower() != me:
                 block("only your own comments can be edited")
-        else:
-            issue = api(f"repos/{owner}/{repo}/issues/{args.get('issue_number')}", token)
-            if "pull_request" in issue and (issue.get("user") or {}).get("login", "").lower() != me:
-                block("this is someone else's pull request: draft the comment and let the contributor post it")
+        if commands:
+            issue = api(f"repos/{owner}/{repo}/issues/{args.get('issue_number')}", token) if "update" not in tool else None
+            labels = [l["name"] for l in (issue or {}).get("labels", [])]
+            allowed = issue is not None and "pull_request" not in issue and any(
+                [c.lower() for c in commands] == [rule["command"]] and body.strip() == rule["body_must_equal"]
+                and rule["only_on_label"] in labels for rule in rules["comment_command_exceptions"])
+            if not allowed:
+                block("comments with bot commands (" + ", ".join("/" + c for c in commands) + ") are blocked: the "
+                      "project's workflows execute them. Ask the contributor to post it themselves.")
     except SystemExit:
         raise
     except Exception as exc:
-        block(f"could not verify the comment target against GitHub ({exc}); blocked")
-
-    commands = [c.lower() for c in re.findall(r"(?m)^\s*/([A-Za-z][\w-]*)", body)]
-    banned = [c for c in commands if c in {x.lower() for x in rules["comment_commands"]}]
-    if banned:
-        labels = [l["name"] for l in (issue or {}).get("labels", [])]
-        allowed = any(issue is not None and banned == [rule["command"]] and body.strip() == rule["body_must_equal"]
-                      and rule["only_on_label"] in labels for rule in rules["comment_command_exceptions"])
-        if not allowed:
-            block("comments with bot commands (" + ", ".join("/" + c for c in banned) + ") are blocked: the project's "
-                  "workflows execute them. Ask the contributor to post it themselves.")
+        block(f"could not verify the comment against GitHub ({exc}); blocked")
     print("{}")
 
 

@@ -45,9 +45,9 @@ review_bots:
 ladder:
   source_repo: kyverno/community
   source_path: GOVERNANCE.md
-  # Blob sha of GOVERNANCE.md when the criteria below were last checked against it. Null until
-  # someone confirms them; the journey tool reports a mismatch so stale criteria are visible.
-  verified_blob_sha: null
+  # Blob sha of GOVERNANCE.md when the criteria below were last checked against it. The journey tool
+  # reports a mismatch so stale criteria are visible.
+  verified_blob_sha: aa08d86a054c19c5123026625ce629cb84be515b
   roles:
     contributor:
       needs:
@@ -58,10 +58,16 @@ ladder:
       recognition: "PR adding yourself to CONTRIBUTORS.md; Credly badge"
     reviewer:
       requires: [contributor]
-      signals: [reviews_on_multiple_prs, active_in_discussions, appointed_by_maintainer]
+      signals: [reviews_on_multiple_prs, actively_reviews_others_code, active_in_discussions, appointed_by_maintainer]
       recognition: "triage access, REVIEWERS.md, CODEOWNERS areas"
     maintainer:
       requires: [reviewer]
-      signals: [significant_merged_prs, supermajority_vote]
+      needs: {significant_merged_prs: "8 to 10, any repositories in the kyverno org"}
+      signals: [significant_merged_prs, regular_meeting_attendance, supermajority_vote]
       recognition: "write access"
   org: kyverno                             # org scope for contribution counting
+  # Repositories that do not count as contributions to the project (tooling and test repos).
+  ignore_repos: [kyverno/assistant, kyverno/test-ai-assistants]
+
+# Paths that say nothing about what someone knows (generated or bookkeeping); substring match.
+noise_paths: [go.mod, go.sum, zz_generated, /crds/, CHANGELOG, docs/user/crd, charts/, vendor/]

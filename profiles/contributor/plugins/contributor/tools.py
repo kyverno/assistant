@@ -110,9 +110,12 @@ MY_PR_STATE = _schema(
 
 JOURNEY_SUMMARY = _schema(
     "journey_summary",
-    "The contributor's record: merged and open PRs, areas they have worked in (area labels), reviews and comments "
-    "on others' work, progress against the organisation's role ladder with what only they can confirm (Slack, "
-    "meeting, mailing list), and recent private notes. Use it to choose the next step; never claim eligibility.",
+    "The contributor's record read from GitHub, centred on the repository: PRs merged here (with the issues they "
+    "closed and the directories they changed), PRs closed without merge, PRs they reviewed, issues they wrote or "
+    "commented on, open PRs, known areas, their stage (first_time, early, contributor), open PRs by others that "
+    "touch what they know (review_opportunities, only after a first merged PR), organisation-wide totals and "
+    "progress against the role ladder with what only they can confirm (Slack, meeting, mailing list), plus recent "
+    "private notes. Works with no open PR and no notes: GitHub is the source. Never claim eligibility.",
     {"login": {"type": "string", "description": "GitHub login. Omit to use CONTRIBUTOR_GITHUB_LOGIN."}, "repo": _REPO})
 
 JOURNEY_NOTE = _schema(

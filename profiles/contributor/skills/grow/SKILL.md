@@ -15,8 +15,8 @@ platforms: [linux, macos, windows]
 
 ## Steps
 
-1. `journey_summary`: merged PRs, `known_areas` (and how many PRs each), `reviewed_areas`, reviews and
-   comments on others' work, and `ladder`. Read `ladder.criteria_status`: if it says unverified or changed,
+1. `journey_summary`: `stage`, merged PRs here and org-wide, `known_areas` (and how many PRs each),
+   `reviewed_areas`, reviews and comments on others' work, `review_opportunities`, and `ladder`. Read `ladder.criteria_status`: if it says unverified or changed,
    tell the contributor to re-read the source (`ladder.source`) before relying on the numbers.
 2. **Where they stand.** For the contributor role report the merged-PR count against the requirement and the
    collaboration items GitHub shows. State what only they can confirm (Slack, meeting, mailing list, blog
@@ -28,8 +28,9 @@ platforms: [linux, macos, windows]
    - **Deepen**: another issue in the same area (`find_issues` with the area) that reuses what they learned;
    - **Widen**: an adjacent package: `explain_path` on their area, then the folders it imports or that import
      it, and issues there;
-   - **Review**: for the reviewer path, help them review PRs in their known area (`review-loop`); reviews on
-     others' PRs are what the reviewer step asks for;
+   - **Review**: the reviewer step asks them to actively review others' code. Only when `stage` is not
+     `first_time`: offer the PRs in `review_opportunities` (open, in paths they know) and help them review one
+     with `review-loop`; they may post the comment, as any contributor can;
    - **Teach**: docs, a tutorial or a blog post about what they learned also counts as a contribution.
    Say why each fits them, what it will teach, and what the step after it could be.
 5. **Evidence pack** when they decide to ask for a role: the list of merged PRs, reviews and collaboration

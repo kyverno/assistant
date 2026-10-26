@@ -371,8 +371,8 @@ These are not available in the sandbox yet. They work in the [host install](docs
 A second profile for people contributing to Kyverno. It finds work worth doing, explains how the code
 and folders fit together, helps prepare evidence-backed PRs, makes review feedback understandable, and
 tracks the path from first PR toward reviewer. It reads GitHub with your own token and can write one
-thing: an issue comment after you confirm it. It cannot merge, approve, review, push, or comment on
-someone else's PR; hooks enforce that.
+thing: a comment on an issue or a PR after you confirm it. It cannot merge, approve, submit a formal
+review, or push; hooks enforce that.
 
 ```bash
 ./scripts/install.sh --profile contributor     # profile name: kyverno-contributor

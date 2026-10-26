@@ -42,8 +42,8 @@ select_profile() {
       TOKEN_KEY=CONTRIBUTOR_REPO_GITHUB_TOKEN; LOGIN_VAR=CONTRIBUTOR_GITHUB_LOGIN
       DEFAULT_NAME=kyverno-contributor; DEFAULT_DOCKER_NAME=kyverno-contributor-docker
       REPO_ASK="Repo you contribute to (owner/repo) [kyverno/kyverno]: "
-      TOKEN_SCOPE="the assistant can only read and comment on issues."
-      TOKEN_PASTE_HELP="Paste a fine-grained GitHub token of your own account (public repositories, read-only, is enough; see docs/contributor.md)." ;;
+      TOKEN_SCOPE="the assistant can only read, and comment on issues and PRs."
+      TOKEN_PASTE_HELP="Paste a fine-grained GitHub token of your own account (public repositories, read-only, is enough to read; commenting on kyverno repositories needs a token that can write there)." ;;
     *) echo "unknown profile '$1' (maintainer or contributor)" >&2; exit 2 ;;
   esac
 }

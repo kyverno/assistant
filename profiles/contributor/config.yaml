@@ -1,7 +1,7 @@
 # kyverno-contributor: Hermes profile config for a contributor to the Kyverno project.
 #
 # Security-critical, hand-edited only. The contributor profile can read GitHub widely and write exactly one
-# thing: a comment on an issue (add_issue_comment), checked by hooks/contributor-guard.py. It has no tool to
+# thing: a comment on an issue or PR (add_issue_comment), checked by hooks/contributor-guard.py. It has no tool to
 # merge, approve, review, push or delete, and replies to reviewers are drafts the contributor posts.
 #
 #   1. mcp_servers.github.headers (X-MCP-Tools): the hosted server never advertises any other tool.
