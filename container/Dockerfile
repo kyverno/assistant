@@ -49,6 +49,8 @@ COPY profiles/contributor/scripts /opt/kyverno/profiles/contributor/scripts
 # The terminal runs locally inside the sandbox here, not over ssh into a second one.
 COPY container/hooks/require-sandbox-terminal.sh /opt/kyverno/profiles/maintainer/hooks/require-sandbox-terminal.sh
 COPY container/hooks/require-sandbox-terminal.sh /opt/kyverno/profiles/contributor/hooks/require-sandbox-terminal.sh
+# The memory plugin's approval gate has a gap that the maintainer profile's hook closes; both profiles use that one hook.
+COPY profiles/maintainer/hooks/block-mnemosyne-triples.sh /opt/kyverno/profiles/contributor/hooks/block-mnemosyne-triples.sh
 RUN chmod 755 /opt/kyverno/profiles/*/hooks/* && chmod -R a+rX /opt/kyverno
 
 # Install the profiles and the memory plugin (mnemosyne) now, while the network is open. The sandbox

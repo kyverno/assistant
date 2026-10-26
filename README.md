@@ -396,8 +396,7 @@ Background updates (new reviews, failing checks, merged PRs) are a paused cron j
 | `journey_summary`, `journey_note`, `journey_self_report` | What you have done, areas, ladder progress, private notes |
 | `inbox_read` | What the background watch found |
 
-Skills: `contributor-context`, `find-work`, `understand-code`, `make-the-change`, `review-loop`, `grow`,
-`sandbox-access`. Not built yet: Go and the module proxy in the sandbox image, and pushing to your fork.
+Skills: `find-work`, `understand-code`, `make-the-change`, `review-loop`, `grow`. Not built yet: Go and the module proxy in the sandbox image, and pushing to your fork.
 
 ## Repository layout
 

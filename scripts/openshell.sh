@@ -1,36 +1,24 @@
 #!/usr/bin/env bash
 # Sets up the sandboxed terminal (NVIDIA OpenShell) and its audit trail.
 #   setup    install OpenShell, build the image, create the sandbox, add the ssh entry
-#   policy   re-apply the profile's sandbox/policy.yaml to the running sandbox
+#   policy   re-apply profiles/maintainer/sandbox/policy.yaml to the running sandbox
 #   status   one-line health check (exit 0 when the terminal is usable)
 #   audit    collect | summary [DATE] | tail      (see docs/openshell.md)
 #   rules    list | approve ID | reject ID [reason] | history   (access requests from the agent)
 #   remove   delete the sandbox, ssh entry and collector (keeps OpenShell and audit logs)
-# Set KYVERNO_PROFILE_KIND=contributor to manage the contributor profile's sandbox instead.
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SANDBOX_DIR="$REPO_ROOT/profiles/maintainer/sandbox"      # Dockerfile + policy.yaml
 OPENSHELL_VERSION="${OPENSHELL_VERSION:-v0.1.3}"
-# Which profile's sandbox this is: maintainer (default, unchanged names) or contributor.
-KIND="${KYVERNO_PROFILE_KIND:-maintainer}"
-SANDBOX_DIR="$REPO_ROOT/profiles/$KIND/sandbox"      # Dockerfile + policy.yaml
-if [ "$KIND" = "contributor" ]; then
-  SANDBOX="${KYVERNO_SANDBOX:-kyverno-contributor-terminal}"
-  IMAGE="kyverno-contributor-terminal:local"
-  AUDIT_DIR="${KYVERNO_AUDIT_DIR:-$HOME/.kyverno-contributor/audit}"
-  LABEL="io.kyverno.contributor.audit"
-  TAG="kyverno-contributor"
-else
-  SANDBOX="${KYVERNO_SANDBOX:-kyverno-terminal}"
-  IMAGE="kyverno-assistant-terminal:local"
-  AUDIT_DIR="${KYVERNO_AUDIT_DIR:-$HOME/.kyverno-assistant/audit}"
-  LABEL="io.kyverno.assistant.audit"
-  TAG="kyverno-assistant"
-fi
+SANDBOX="${KYVERNO_SANDBOX:-kyverno-terminal}"
+IMAGE="kyverno-assistant-terminal:local"
 SSH_HOST="openshell-${SANDBOX}.default"
+AUDIT_DIR="${KYVERNO_AUDIT_DIR:-$HOME/.kyverno-assistant/audit}"
 SSH_CONFIG="$HOME/.ssh/config"
-MARK_BEGIN="# BEGIN $TAG sandbox"
-MARK_END="# END $TAG sandbox"
+MARK_BEGIN="# BEGIN kyverno-assistant sandbox"
+MARK_END="# END kyverno-assistant sandbox"
+LABEL="io.kyverno.assistant.audit"
 
 info() { printf '  %s\n' "$*"; }
 pass() { printf '  ✓ %s\n' "$*"; }
@@ -183,8 +171,7 @@ install_collector() {
   <key>ProgramArguments</key><array>
     <string>/bin/bash</string><string>$REPO_ROOT/scripts/openshell.sh</string>
     <string>audit</string><string>collect</string></array>
-  <key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
-    <key>KYVERNO_PROFILE_KIND</key><string>$KIND</string></dict>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
   <key>StartInterval</key><integer>300</integer>
   <key>RunAtLoad</key><true/>
 </dict></plist>
