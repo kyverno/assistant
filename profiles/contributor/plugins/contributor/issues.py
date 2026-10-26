@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -11,6 +12,9 @@ from .github import excerpt
 
 
 MAINTAINER_ASSOCIATIONS = ("OWNER", "MEMBER", "COLLABORATOR")
+# Words that claim an issue in a comment (Kyverno's bot only handles /assign on some issues, so people also just ask).
+_CLAIM = re.compile(r"(?i)(^\s*/assign\b|\b(can|could|may) i (take|work|pick|try|have)|\bi(?:'d| would| will|'ll)? (like|love|want) to (work|take|pick|fix|tackle|try)"
+                    r"|\bi(?:'m| am) (working|going to work|on it)|\bworking on (this|it)\b|\bassign (this|it|me)\b|\bi can (take|work|fix|pick)|\btaking this\b)")
 
 QUERY = """
 query($owner: String!, $name: String!, $number: Int!) {
@@ -31,7 +35,7 @@ query($owner: String!, $name: String!, $number: Int!) {
                 author { login } authorAssociation
                 additions deletions changedFiles reviewDecision mergeable
                 labels(first: 20) { nodes { name } }
-                files(first: 100) { nodes { path } }
+                files(first: 50) { nodes { path } }
                 comments(last: 15) { nodes { author { login } authorAssociation body createdAt url } }
                 reviews(last: 15) { nodes { author { login } authorAssociation state submittedAt } }
                 closedBy: timelineItems(last: 3, itemTypes: [CLOSED_EVENT]) {
@@ -110,6 +114,25 @@ def summarise_pr(pr: Dict[str, Any], now: datetime) -> Dict[str, Any]:
     }
 
 
+def _claims(comments: List[Dict[str, Any]], issue_author: Optional[str]) -> List[Dict[str, Any]]:
+    """Comments that claim the issue, by people other than maintainers: the claim a bot never sees."""
+    return [{"by": _name(c), "at": c["createdAt"], "url": c["url"], **(excerpt(c.get("body"), c["url"], 200) or {})}
+            for c in comments
+            if c.get("authorAssociation") not in MAINTAINER_ASSOCIATIONS and _CLAIM.search(c.get("body") or "")][-3:]
+
+
+def _assignee_activity(assignees: List[str], comments: List[Dict[str, Any]], prs_: List[Dict[str, Any]],
+                       now: datetime) -> List[Dict[str, Any]]:
+    out = []
+    for a in assignees:
+        theirs = [c["createdAt"] for c in comments if _name(c) == a]
+        mine = [p for p in prs_ if p["author"] == a]
+        last = max(theirs + [p["last_activity_at"] for p in mine], default=None)
+        out.append({"login": a, "last_activity_here_at": last, "days_since_activity": _days(last, now),
+                    "prs_here": [{"number": p["number"], "state": p["state"]} for p in mine]})
+    return out
+
+
 def issue_history(client, org: Dict[str, Any], repo: str, number: int, me: Optional[str] = None,
                   inactive_days: int = 30, now: Optional[datetime] = None) -> Dict[str, Any]:
     now = now or datetime.now(timezone.utc)
@@ -137,6 +160,9 @@ def issue_history(client, org: Dict[str, Any], repo: str, number: int, me: Optio
     ][-5:]
 
     open_prs = [p for p in prs if p["state"] == "open"]
+    merged_prs = [p for p in prs if p["state"] == "merged"]
+    claims = _claims(issue["comments"]["nodes"], _name(issue))
+    activity = _assignee_activity(assignees, issue["comments"]["nodes"], prs, now)
     attention = set(org["readiness"]["attention_labels"])
     adoptable = []
     for p in prs:
@@ -178,21 +204,35 @@ def issue_history(client, org: Dict[str, Any], repo: str, number: int, me: Optio
             sig("assigned_to_someone_else", ", ".join(others))
         if me in assignees:
             sig("assigned_to_you", me)
+    for a in activity:
+        if not a["prs_here"] and (a["days_since_activity"] is None or a["days_since_activity"] >= inactive_days):
+            sig("assignee_looks_idle", f"{a['login']}: " + (f"{a['days_since_activity']} days since their last comment or PR here"
+                                                          if a["days_since_activity"] is not None else "no comment or PR here"))
     if not assignees:
         sig("unassigned", "no assignee")
+    for c in claims:
+        sig("claimed_in_a_comment", f"{c['by']} asked to take it ({c['at'][:10]})", c["url"])
+    for p in merged_prs:
+        sig("merged_pr_references_it", f"#{p['number']} merged {p['merged_at'][:10]}"
+            + (" and was meant to close it" if p["will_close_issue"] else ": check whether it already fixed this"), p["url"])
     entry = [l for l in labels if l in org["entry_labels"]]
     if entry:
         sig("entry_level_label", ", ".join(entry))
     reserved = [l for l in labels if l in org.get("reserved_labels", [])]
     if reserved:
         sig("reserved_for_a_program", ", ".join(reserved) + ": the maintainers run this program with its own rules; do not start without it")
+    not_accepted = [l for l in labels if l in org.get("ai_policy", {}).get("not_accepted_labels", [])]
+    if not_accepted:
+        sig("not_accepted_yet", "labelled " + ", ".join(not_accepted) + ": the project's AI policy allows AI-generated code "
+            "only for accepted issues; ask a maintainer to accept it first", org["ai_policy"]["source"])
     if not maintainer_comments:
         sig("no_maintainer_comment", "no comment from an owner, member or collaborator")
 
     return {"success": True, "repo": repo,
             "issue": {"number": issue["number"], "title": issue["title"], "state": issue["state"], "url": src,
                       "labels": labels, "assignees": assignees, "created_at": issue["createdAt"]},
-            "prs": prs, "maintainer_comments": maintainer_comments, "adoptable": adoptable,
+            "prs": prs, "maintainer_comments": maintainer_comments, "claims_in_comments": claims,
+            "assignee_activity": activity, "adoptable": adoptable,
             "signals": signals,
             "note": "signals are facts with sources; the decision on whether to start is the contributor's"}
 
@@ -206,8 +246,9 @@ query($q: String!) {
         labels(first: 20) { nodes { name } }
         assignees(first: 5) { nodes { login } }
         comments { totalCount }
+        recent: comments(last: 5) { nodes { author { login } authorAssociation body createdAt url } }
         timelineItems(first: 50, itemTypes: [CROSS_REFERENCED_EVENT]) {
-          nodes { ... on CrossReferencedEvent { source { ... on PullRequest { number state merged url } } } }
+          nodes { ... on CrossReferencedEvent { willCloseTarget source { ... on PullRequest { number state merged url } } } }
         }
       }
     }
@@ -226,8 +267,8 @@ def _topic(area: str, prefixes: List[str]) -> str:
 def find_issues(client, org: Dict[str, Any], repo: str, known_areas: Optional[List[str]] = None,
                 labels: Optional[List[str]] = None, limit: int = 15) -> Dict[str, Any]:
     """Open issues carrying an entry-level label, minus the labels the organisation reserves for other programs.
-    Tier: `free` (no assignee, no open PR), `claimed` (assigned but no open PR: check how active the assignee is),
-    `has_open_pr`. Known areas rank first inside a tier; an issue matches an area when one of its labels equals or
+    Tier: `free` (no assignee, no claiming comment, no open PR), `claimed` (assigned or claimed in a comment:
+    check how active they are), `has_open_pr`, `probably_fixed` (a merged PR references it). Known areas rank first inside a tier; an issue matches an area when one of its labels equals or
     contains the area's name (`area/mutation` matches the issue label `mutation`)."""
     entry = labels or org["entry_labels"]
     topics = {_topic(a, org["labels"]["area_prefixes"]): a for a in (known_areas or [])}
@@ -236,25 +277,34 @@ def find_issues(client, org: Dict[str, Any], repo: str, known_areas: Optional[Li
     base = f"repo:{repo} is:issue is:open label:{include} {exclude} sort:updated-desc"
     # Most entry-level issues are assigned, so unassigned ones would be crowded out of one search's 50 results.
     found: Dict[int, Dict[str, Any]] = {}
-    for q in (base + " no:assignee", base):
-        for n in client.graphql(ISSUE_SEARCH, {"q": q})["search"]["nodes"]:
+    for nodes in client.parallel(*[(lambda q=q: client.graphql(ISSUE_SEARCH, {"q": q})["search"]["nodes"])
+                                   for q in (base + " no:assignee", base)]):
+        for n in nodes:
             if n:
                 found.setdefault(n["number"], n)
     rows = []
     for n in found.values():
         linked = [e["source"] for e in n["timelineItems"]["nodes"] if e and e.get("source") and "number" in e["source"]]
+        merged = [p for p in linked if p["merged"]]
         open_prs = [p for p in linked if p["state"] == "OPEN"]
+        claims = _claims(n["recent"]["nodes"], None)
         closed = [p for p in linked if p["state"] == "CLOSED" and not p["merged"]]
         names = prs.label_names(n)
-        matched = sorted({topics[t] for t in topics for l in names if l.lower() == t or t in l.lower()})
+        title = n["title"].lower()
+        # Issues rarely carry area/* labels: match the area's name in a label or in the title.
+        matched = sorted({topics[t] for t in topics for l in names + [title] if l.lower() == t or t in l.lower()})
         rows.append({
             "number": n["number"], "url": n["url"], "title": n["title"], "labels": names,
             "created_at": n["createdAt"], "updated_at": n["updatedAt"], "comments": n["comments"]["totalCount"],
             "matches_known_areas": matched, "open_prs": [{"number": p["number"], "url": p["url"]} for p in open_prs],
             "closed_unmerged_prs": len(closed), "assignees": [a["login"] for a in n["assignees"]["nodes"]],
-            "tier": "has_open_pr" if open_prs else ("claimed" if n["assignees"]["nodes"] else "free"),
+            "accepted": not set(names) & set(org.get("ai_policy", {}).get("not_accepted_labels", [])),
+            "merged_prs": [{"number": p["number"], "url": p["url"]} for p in merged],
+            "claimed_in_comment_by": sorted({c["by"] for c in claims if c["by"]}),
+            "tier": ("probably_fixed" if merged else "has_open_pr" if open_prs
+                     else "claimed" if n["assignees"]["nodes"] or claims else "free"),
         })
-    order = {"free": 0, "claimed": 1, "has_open_pr": 2}
-    rows.sort(key=lambda r: (order[r["tier"]], not r["matches_known_areas"], r["closed_unmerged_prs"]))
+    order = {"free": 0, "claimed": 1, "has_open_pr": 2, "probably_fixed": 3}
+    rows.sort(key=lambda r: (order[r["tier"]], not r["accepted"], not r["matches_known_areas"], r["closed_unmerged_prs"]))
     return {"success": True, "repo": repo, "count": min(len(rows), limit), "issues": rows[:limit],
             "note": "claimed and has_open_pr issues may still be workable (collaborate, or the claim is idle): run issue_history before recommending any"}

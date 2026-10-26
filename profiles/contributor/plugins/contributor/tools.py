@@ -30,6 +30,8 @@ def _call(fn: Callable[..., Dict[str, Any]], args: Dict[str, Any], **kw) -> str:
         return json.dumps(fn(github.Client(), rules.load_org(), repo, **kw))
     except (github.GitHubError, rules.OrgFileError) as exc:
         return json.dumps({"success": False, "error": str(exc)})
+    except Exception as exc:        # a surprise in GitHub's data must not take the chat turn down
+        return json.dumps({"success": False, "error": f"{fn.__name__} failed: {type(exc).__name__}: {exc}"})
 
 
 def _need(args: Dict[str, Any], *keys: str):
@@ -154,7 +156,10 @@ def explain_path(args, **_kw):
 
 
 def related_prs(args, **_kw):
-    return _need(args, "paths") or _call(prs.related_prs, args, paths=args["paths"], state=args.get("state") or "merged",
+    state = args.get("state") or "merged"
+    if state not in ("merged", "closed", "open"):
+        return json.dumps({"success": False, "error": "state must be merged, closed or open"})
+    return _need(args, "paths") or _call(prs.related_prs, args, paths=args["paths"], state=state,
                                          limit=int(args.get("limit") or 5))
 
 

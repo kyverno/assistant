@@ -9,15 +9,23 @@ import base64
 import http.client
 import json
 import os
+import re
 import ssl
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
 
 API = "https://api.github.com"
 USER_AGENT = "kyverno-contributor-assistant"
+HEAD_TTL = 60                                    # seconds the default branch's head is remembered
+
+_HEAD: Dict[str, Tuple[float, str, str]] = {}    # repo -> (when, branch, sha)
+_BLOBS: Dict[Tuple[str, str, str], Optional[str]] = {}   # (repo, commit, path) -> text; commits are immutable
+_TREES: Dict[Tuple[str, str, str], list] = {}
+_TMP: Dict[Tuple[str, str, str], Any] = {}       # answers for a moving ref (a branch name): used once, never trusted later
 
 
 class GitHubError(RuntimeError):
@@ -161,35 +169,75 @@ class Client:
         return payload["data"]
 
     # -- repository helpers --------------------------------------------------
+    # Files and directories are fetched in one GraphQL call per batch and remembered by commit (a commit never
+    # changes), and the default branch's head is remembered for a minute: a tool call that used to make a dozen
+    # sequential requests now makes one or two.
     def default_branch_sha(self, repo: str) -> Tuple[str, str]:
-        info = self.rest(f"repos/{repo}")
-        branch = info["default_branch"]
-        ref = self.rest(f"repos/{repo}/commits/{branch}")
-        return branch, ref["sha"]
+        hit = _HEAD.get(repo)
+        if hit and time.time() - hit[0] < HEAD_TTL:
+            return hit[1], hit[2]
+        owner, name = repo.split("/", 1)
+        ref = self.graphql("query($o: String!, $n: String!) { repository(owner: $o, name: $n) "
+                           "{ defaultBranchRef { name target { oid } } } }", {"o": owner, "n": name})["repository"]["defaultBranchRef"]
+        if not ref:
+            raise GitHubError(f"{repo} has no default branch")
+        _HEAD[repo] = (time.time(), ref["name"], ref["target"]["oid"])
+        return ref["name"], ref["target"]["oid"]
+
+    def fetch(self, repo: str, ref: str, files=(), dirs=(), texts_in=()) -> None:
+        """Load files (text), directory listings and, for `texts_in`, a directory's files with their text, in one
+        GraphQL call. Results are remembered; get_file and listing then answer without a request."""
+        want_f = [f for f in dict.fromkeys(files) if (repo, ref, f) not in _BLOBS]
+        want_d = [d for d in dict.fromkeys([*dirs, *texts_in]) if (repo, ref, d) not in _TREES]
+        if not want_f and not want_d:
+            return
+        owner, name = repo.split("/", 1)
+        variables: Dict[str, Any] = {"o": owner, "n": name}
+        decls, fields = [], []
+        for i, f in enumerate(want_f):
+            variables[f"f{i}"] = f"{ref}:{f}"
+            decls.append(f", $f{i}: String!")
+            fields.append(f"f{i}: object(expression: $f{i}) {{ ... on Blob {{ text }} }}")
+        for i, d in enumerate(want_d):
+            variables[f"d{i}"] = f"{ref}:{d}"
+            decls.append(f", $d{i}: String!")
+            body = "name path type object { ... on Blob { text } }" if d in texts_in else "name path type"
+            fields.append(f"d{i}: object(expression: $d{i}) {{ ... on Tree {{ entries {{ {body} }} }} }}")
+        query = "query($o: String!, $n: String!%s) { repository(owner: $o, name: $n) { %s } }" % ("".join(decls), " ".join(fields))
+        data = self.graphql(query, variables)["repository"]
+        pin = bool(re.fullmatch(r"[0-9a-f]{40}", ref))      # only a commit id is immutable
+        for i, f in enumerate(want_f):
+            text = (data.get(f"f{i}") or {}).get("text")
+            if pin:
+                _BLOBS[(repo, ref, f)] = text
+            else:
+                _TMP[(repo, ref, f)] = text
+        for i, d in enumerate(want_d):
+            tree = data.get(f"d{i}")
+            entries = [{"name": e["name"], "path": e["path"], "type": "dir" if e["type"] == "tree" else "file"}
+                       for e in (tree or {}).get("entries", [])]
+            (_TREES if pin else _TMP)[(repo, ref, d)] = entries
+            if d in texts_in:
+                for e in (tree or {}).get("entries", []):
+                    (_BLOBS if pin else _TMP)[(repo, ref, e["path"])] = (e.get("object") or {}).get("text")
 
     def get_file(self, repo: str, path: str, ref: Optional[str] = None) -> Optional[str]:
-        """File text at `ref`, or None when the file does not exist."""
-        suffix = f"?ref={ref}" if ref else ""
-        try:
-            data = self.rest(f"repos/{repo}/contents/{path}{suffix}")
-        except GitHubError as exc:
-            if " 404 " in f" {exc} ":
-                return None
-            raise
-        if isinstance(data, list) or data.get("encoding") != "base64":
-            return None
-        return base64.b64decode(data["content"]).decode("utf-8", "replace")
+        """File text at `ref` (default branch head when omitted), or None when the file does not exist."""
+        ref = ref or self.default_branch_sha(repo)[1]
+        self.fetch(repo, ref, files=[path])
+        return _BLOBS.get((repo, ref, path), _TMP.get((repo, ref, path)))
 
     def listing(self, repo: str, path: str, ref: str) -> list:
         """Entries of one directory ([{name, type, path}]); [] when `path` is not a directory."""
-        try:
-            data = self.rest(f"repos/{repo}/contents/{path}?ref={ref}")
-        except GitHubError as exc:
-            if " 404 " in f" {exc} ":
-                return []
-            raise
-        return data if isinstance(data, list) else []
+        self.fetch(repo, ref, dirs=[path])
+        return _TREES.get((repo, ref, path), _TMP.get((repo, ref, path))) or []
 
+    def parallel(self, *calls: Callable[[], Any]) -> list:
+        """Run independent requests at the same time; results come back in order, the first error is raised."""
+        if len(calls) == 1:
+            return [calls[0]()]
+        with ThreadPoolExecutor(max_workers=min(len(calls), 8)) as pool:
+            return [f.result() for f in [pool.submit(c) for c in calls]]
 
 
 # -- untrusted text -----------------------------------------------------------------------

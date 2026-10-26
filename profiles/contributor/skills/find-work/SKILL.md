@@ -25,7 +25,9 @@ platforms: [linux, macos, windows]
 2. **Candidates.** `find_issues` with `known_areas` from `journey_summary` (the `area/...` labels). Skip
    issues already in `in_this_repo` (closed by their merged PRs) and check their `issues_commented_on`. Tiers:
    `free` (no assignee, no open PR), `claimed` (assigned: the claim may be idle), `has_open_pr`.
-   Real projects often have no free entry-level issue; do not stop at `free`.
+   Real projects often have no free entry-level issue; do not stop at `free`. `probably_fixed` means a merged
+   PR references the issue: check it before suggesting anything. Prefer `accepted` issues (no `triage` label):
+   the AI policy allows AI-generated code only for accepted ones. Mention `open_pr_limit` if they are near it.
 3. **History before any recommendation.** For each issue you might suggest (at most 3), call `issue_history`.
    Report from it, with links:
    - every earlier PR: how it ended, who closed it, the closing comment (quote it), approvals, size, tests;

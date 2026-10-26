@@ -4,15 +4,11 @@ relates to the rest of the code). Logic only; tools.py wraps these for Hermes.""
 from __future__ import annotations
 
 import re
-import urllib.parse
 from collections import Counter
 from typing import Any, Dict, List, Optional
 
 from . import rules
-from .github import GitHubError, doc_text, excerpt
-
-_CACHE: Dict[tuple, Any] = {}      # (repo, sha, path) -> text or listing; commits are immutable
-
+from .github import doc_text, excerpt
 
 def resolve(client, repo: str, ref: Optional[str]):
     if ref and re.fullmatch(r"[0-9a-f]{40}", ref):
@@ -24,31 +20,34 @@ def resolve(client, repo: str, ref: Optional[str]):
 
 
 def _text(client, repo: str, sha: str, path: str) -> Optional[str]:
-    key = (repo, sha, path)
-    if key not in _CACHE:
-        text = client.get_file(repo, path, sha)
-        if text is None:
-            return None
-        _CACHE[key] = text
-    return _CACHE[key]
+    return client.get_file(repo, path, sha)          # remembered by commit in the client
 
 
 def _dir(client, repo: str, sha: str, directory: str) -> List[Dict[str, Any]]:
-    key = (repo, sha, "dir:" + directory)
-    if key not in _CACHE:
-        _CACHE[key] = client.listing(repo, directory, sha)
-    return _CACHE[key]
+    return client.listing(repo, directory, sha)
 
 
 def _names(client, repo: str, sha: str, directory: str) -> set:
     return {e["name"] for e in _dir(client, repo, sha, directory) if e["type"] == "file"}
 
 
+def prefetch(client, org: Dict[str, Any], repo: str, sha: str, paths: List[str]) -> None:
+    """Everything knowledge_for reads, in one request: the label rules, CODEOWNERS, the top-level guides, every
+    AGENTS.md that could apply to these paths, and the instruction files with their text."""
+    files = {org["labels"]["source"], org.get("codeowners", "CODEOWNERS"), "ARCHITECTURE.md", "REVIEW.md", "DEVELOPMENT.md"}
+    for p in paths:
+        parts = p.split("/")[:-1]
+        files.update("/".join(parts[:n] + ["AGENTS.md"]) for n in range(len(parts) + 1))
+    instr = org.get("instructions_dir", "")
+    client.fetch(repo, sha, files=sorted(files), texts_in=[instr] if instr else [])
+
+
 def agents_chain(client, repo: str, sha: str, path: str) -> List[str]:
     """AGENTS.md files from the repo root down to the directory holding `path` (those that exist)."""
     parts = path.split("/")[:-1]
     dirs = [""] + ["/".join(parts[:n]) for n in range(1, len(parts) + 1)]
-    return [(d + "/" if d else "") + "AGENTS.md" for d in dirs if "AGENTS.md" in _names(client, repo, sha, d)]
+    found = [(d + "/" if d else "") + "AGENTS.md" for d in dirs]
+    return [f for f in found if _text(client, repo, sha, f) is not None]
 
 
 def _apply_to(frontmatter_text: str) -> List[str]:
@@ -77,6 +76,7 @@ def _doc(client, repo: str, sha: str, path: str, with_content: bool, limit: int 
 def knowledge_for(client, org: Dict[str, Any], repo: str, paths: List[str], ref: Optional[str] = None,
                   with_content: bool = True) -> Dict[str, Any]:
     ref_name, sha = resolve(client, repo, ref)
+    prefetch(client, org, repo, sha, paths)
     label_rules = rules.label_rules_at(client, org, repo, sha)
     owners = rules.codeowners_at(client, org, repo, sha)
     instr_dir = org.get("instructions_dir", "")
@@ -95,7 +95,7 @@ def knowledge_for(client, org: Dict[str, Any], repo: str, paths: List[str], ref:
         return path
 
     top_docs = {k: p for k, p in (("architecture", "ARCHITECTURE.md"), ("review", "REVIEW.md"),
-                                  ("development", "DEVELOPMENT.md")) if p in _names(client, repo, sha, "")}
+                                  ("development", "DEVELOPMENT.md")) if _text(client, repo, sha, p) is not None}
     for p in paths:
         entry: Dict[str, Any] = {"path": p}
         chain = [need(c) for c in agents_chain(client, repo, sha, p)]
@@ -130,15 +130,6 @@ _EXPORT = re.compile(r"^(?:func\s+(?:\([^)]*\)\s*)?([A-Z]\w*)|type\s+([A-Z]\w*)\
 _PR_REF = re.compile(r"\(#(\d+)\)")
 
 
-def _blobs(client, repo: str, sha: str, paths: List[str]) -> Dict[str, str]:
-    """Several file contents in one GraphQL call."""
-    owner, name = repo.split("/", 1)
-    fields = " ".join(f'f{i}: object(expression: "{sha}:{p}") {{ ... on Blob {{ text }} }}' for i, p in enumerate(paths))
-    data = client.graphql("query($o: String!, $n: String!) { repository(owner: $o, name: $n) { %s } }" % fields,
-                          {"o": owner, "n": name})["repository"]
-    return {p: (data.get(f"f{i}") or {}).get("text") or "" for i, p in enumerate(paths)}
-
-
 def go_summary(sources: Dict[str, str], module: Optional[str]) -> Dict[str, Any]:
     """Package name, what it imports and what it exports, from Go source text (no compiler needed)."""
     imports: Counter = Counter()
@@ -158,14 +149,15 @@ def go_summary(sources: Dict[str, str], module: Optional[str]) -> Dict[str, Any]
 
 
 def explain_path(client, org: Dict[str, Any], repo: str, path: str, ref: Optional[str] = None,
-                 max_importers: int = 12, max_commits: int = 10) -> Dict[str, Any]:
-    """Facts about a file or folder: what is in it, what it imports and exports (Go), which packages
-    import it, its tests, the docs/labels/owners that govern it, and who has changed it recently."""
+                 max_commits: int = 10) -> Dict[str, Any]:
+    """Facts about a file or folder: what is in it, what it imports and exports (Go), its tests, the docs, labels
+    and owners that govern it, and who has changed it recently. About three requests, two of them at once."""
     path = path.strip("/")
     ref_name, sha = resolve(client, repo, ref)
+    parent = path.rsplit("/", 1)[0] if "/" in path else ""
+    client.fetch(repo, sha, dirs=[path, parent])
     entries = _dir(client, repo, sha, path)
     is_dir = bool(entries)
-    parent = path.rsplit("/", 1)[0] if "/" in path else ""
     if not is_dir and path.rsplit("/", 1)[-1] not in _names(client, repo, sha, parent):
         return {"success": False, "error": f"{path} does not exist at {ref_name} ({sha[:7]})"}
     directory = path if is_dir else parent
@@ -173,51 +165,49 @@ def explain_path(client, org: Dict[str, Any], repo: str, path: str, ref: Optiona
     files = sorted(e["path"] for e in listing if e["type"] == "file")
     subdirs = sorted(e["name"] for e in listing if e["type"] == "dir")
     go_files = [f for f in files if f.endswith(".go") and not f.endswith("_test.go")]
-    tests = [f for f in files if f.endswith("_test.go")]
+    tests = [f for f in files if f.endswith("_test.go") or f.endswith(("kyverno-test.yaml", "chainsaw-test.yaml"))]
+    kinds = Counter(f.rsplit(".", 1)[-1] if "." in f.rsplit("/", 1)[-1] else "(none)" for f in files)
 
     out: Dict[str, Any] = {
         "success": True, "repo": repo, "ref": ref_name, "sha": sha, "path": path, "kind": "folder" if is_dir else "file",
         "url": rules.blob_url(repo, sha, path), "directory": directory,
         "files_here": [{"path": f, "url": rules.blob_url(repo, sha, f)} for f in files[:40]],
+        "file_types": dict(kinds.most_common(8)),
         "subfolders": subdirs[:60],
         "tests_here": tests[:20], "go_files": len(go_files),
     }
     code = [f for f in files if not f.endswith(".md")]
     rep = path if not is_dir else (code[0] if code else path + "/x")   # a real source file, not AGENTS.md
-    # one call for two views: the docs chain of the folder, and the labels/owners of a real file in it
+    picked = (go_files if is_dir else ([path] if path.endswith(".go") else go_files))[:15]
+
+    def commits():
+        return client.rest(f"repos/{repo}/commits?sha={sha}&path={path}&per_page=30")
+
+    def source():
+        if not picked:
+            return None
+        client.fetch(repo, sha, files=["go.mod", *picked])
+        return {f: client.get_file(repo, f, sha) or "" for f in picked}
+
+    # the history and the Go source are independent of each other and of the docs: fetch them together
+    history, sources = client.parallel(commits, source)
     chain, real = knowledge_for(client, org, repo, [directory + "/_" if is_dir else path, rep], ref=sha,
                                 with_content=False)["paths"][:2]
     out["governing_docs"] = {**chain, "path": path, "area_labels": real["area_labels"], "owners": real["owners"]}
-
-    if go_files:
-        gomod = _text(client, repo, sha, "go.mod") or ""
-        m = re.search(r"^module\s+(\S+)", gomod, re.M)
-        module = m.group(1) if m else None
-        picked = (go_files if is_dir else ([path] if path.endswith(".go") else go_files))[:15]
-        out["go"] = go_summary(_blobs(client, repo, sha, picked), module)
+    if sources:
+        m = re.search(r"^module\s+(\S+)", _text(client, repo, sha, "go.mod") or "", re.M)
+        out["go"] = go_summary(sources, m.group(1) if m else None)
         out["go"]["analysed_files"] = len(picked)
-        if module and directory:
-            try:
-                query = urllib.parse.quote(f'"{module}/{directory}" repo:{repo} language:go')
-                hits = client.rest(f"search/code?q={query}&per_page=50")
-                dirs = Counter(h["path"].rsplit("/", 1)[0] for h in hits.get("items", [])
-                               if not h["path"].startswith(directory + "/") and "_test" not in h["path"])
-                out["imported_by"] = {"directories": [{"directory": d, "files": n} for d, n in dirs.most_common(max_importers)],
-                                      "complete": False,
-                                      "note": "from GitHub code search on the default branch: files containing the import path "
-                                              "(sub-packages match too), capped at 50 results"}
-            except GitHubError:
-                out["imported_by"] = {"directories": [], "complete": False, "note": "code search unavailable (rate limit?)"}
-
-    commits = client.rest(f"repos/{repo}/commits?sha={sha}&path={path}&per_page=30")
-    authors = Counter(((c.get("author") or {}).get("login") or c["commit"]["author"]["name"]) for c in commits)
+        out["imported_by"] = {"note": "not available here: who imports this package needs the whole code base on disk; "
+                                      "in the sandbox, grep the module path in a clone instead"}
+    commits_ = history
+    authors = Counter(((c.get("author") or {}).get("login") or c["commit"]["author"]["name"]) for c in commits_)
     out["history"] = {
         "recent_commits": [{"sha": c["sha"][:7], "url": c["html_url"], "date": c["commit"]["author"]["date"],
                             "author": (c.get("author") or {}).get("login") or c["commit"]["author"]["name"],
                             "title": excerpt(c["commit"]["message"].splitlines()[0], c["html_url"], 160),
                             "prs": [int(n) for n in _PR_REF.findall(c["commit"]["message"].splitlines()[0])]}
-                           for c in commits[:max_commits]],
+                           for c in commits_[:max_commits]],
         "most_active_authors_last_30_commits": [{"login": a, "commits": n} for a, n in authors.most_common(5)],
         "note": "people who changed this recently are who to ask or read; they are not its owners (see governing_docs.owners)"}
     return out
-

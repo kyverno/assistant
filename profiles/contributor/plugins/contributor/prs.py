@@ -16,8 +16,8 @@ _PR_REF = re.compile(r"\(#(\d+)\)")
 
 CANDIDATES = """
 query($q: String!) {
-  search(query: $q, type: ISSUE, first: 50) {
-    nodes { ... on PullRequest { number files(first: 100) { nodes { path } } } }
+  search(query: $q, type: ISSUE, first: 30) {
+    nodes { ... on PullRequest { number files(first: 50) { nodes { path } } } }
   }
 }
 """
@@ -28,8 +28,8 @@ fragment F on PullRequest {
   author { login __typename }
   labels(first: 15) { nodes { name } }
   closingIssuesReferences(first: 3) { nodes { number title url } }
-  reviews(first: 30) { nodes { author { login __typename } authorAssociation state body url } }
-  reviewThreads(first: 30) { totalCount nodes { comments(first: 1) { nodes { author { login __typename } authorAssociation body url } } } }
+  reviews(first: 20) { nodes { author { login __typename } authorAssociation state body url } }
+  reviewThreads(first: 20) { totalCount nodes { comments(first: 1) { nodes { author { login __typename } authorAssociation body url } } } }
   comments(last: 12) { nodes { author { login __typename } authorAssociation body url } }
   timelineItems(last: 3, itemTypes: [CLOSED_EVENT]) { nodes { ... on ClosedEvent { closer { ... on PullRequest { number url } } } } }
 }
@@ -44,8 +44,10 @@ def label_names(node: Dict[str, Any]) -> List[str]:
 def _merged_candidates(client, repo: str, sha: str, paths: List[str]) -> Dict[int, Dict[str, Any]]:
     """Merged PRs that changed these paths, from the commit history of each path (squash commits end in `(#123)`)."""
     found: Dict[int, Dict[str, Any]] = {}
-    for path in paths:
-        for c in client.rest(f"repos/{repo}/commits?sha={sha}&path={path.strip('/')}&per_page=30"):
+    histories = client.parallel(*[(lambda p=p: client.rest(f"repos/{repo}/commits?sha={sha}&path={p.strip('/')}&per_page=30"))
+                                  for p in paths])
+    for path, commits in zip(paths, histories):
+        for c in commits:
             for n in _PR_REF.findall(c["commit"]["message"].splitlines()[0]):
                 row = found.setdefault(int(n), {"touched": set(), "date": c["commit"]["author"]["date"]})
                 row["touched"].add(path)
@@ -59,9 +61,10 @@ def _search_candidates(client, org: Dict[str, Any], repo: str, sha: str, paths: 
     probes = [x for p in paths for x in (p, p.rstrip("/") + "/_")]
     areas = list(rules.area_labels(rules.label_rules_at(client, org, repo, sha), org, probes))
     found: Dict[int, Dict[str, Any]] = {}
-    for area in areas:
-        q = f'repo:{repo} is:pr {state_q} label:"{area}" sort:updated-desc'
-        for pr in client.graphql(CANDIDATES, {"q": q})["search"]["nodes"]:
+    results = client.parallel(*[(lambda a=a: client.graphql(
+        CANDIDATES, {"q": f'repo:{repo} is:pr {state_q} label:"{a}" sort:updated-desc'})["search"]["nodes"]) for a in areas]) if areas else []
+    for nodes in results:
+        for pr in nodes:
             if not pr:
                 continue
             files = [n["path"] for n in pr["files"]["nodes"]]
@@ -106,10 +109,19 @@ def _voice(pr: Dict[str, Any], bots: List[str], limit: int = 3) -> List[Dict[str
 
 
 def _discussion(client, repo: str, numbers: List[int]) -> Dict[int, Dict[str, Any]]:
+    """The discussion on each PR. GitHub works through the PRs of one query one by one, so they go out as small
+    queries at the same time."""
     owner, name = repo.split("/", 1)
-    body = " ".join(f"p{n}: pullRequest(number: {n}) {{ ...F }}" for n in numbers)
-    data = client.graphql(DISCUSSION % body, {"owner": owner, "name": name})["repository"]
-    return {n: data[f"p{n}"] for n in numbers if data.get(f"p{n}")}
+    chunks = [numbers[i:i + 3] for i in range(0, len(numbers), 3)]
+
+    def one(chunk):
+        body = " ".join(f"p{n}: pullRequest(number: {n}) {{ ...F }}" for n in chunk)
+        return client.graphql(DISCUSSION % body, {"owner": owner, "name": name})["repository"]
+
+    out: Dict[int, Dict[str, Any]] = {}
+    for chunk, data in zip(chunks, client.parallel(*[(lambda c=c: one(c)) for c in chunks])):
+        out.update({n: data[f"p{n}"] for n in chunk if data.get(f"p{n}")})
+    return {n: out[n] for n in numbers if n in out}
 
 
 def related_prs(client, org: Dict[str, Any], repo: str, paths: Optional[List[str]] = None, state: str = "merged",
