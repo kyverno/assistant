@@ -71,11 +71,3 @@ ladder:
 
 # Paths that say nothing about what someone knows (generated or bookkeeping); substring match.
 noise_paths: [go.mod, go.sum, zz_generated, /crds/, CHANGELOG, docs/user/crd, charts/, vendor/]
-
-# The project's AI policy (kyverno/community AI_USAGE_POLICY.md): facts the tools report and the skills follow.
-ai_policy:
-  source: https://github.com/kyverno/community/blob/main/AI_USAGE_POLICY.md
-  max_open_prs: 8                      # per contributor, across all repositories
-  needs_accepted_issue: true           # PRs with AI-generated code only for issues not labelled "triage"
-  not_accepted_labels: [triage]
-  disclosure: "a commit trailer such as 'Assisted-by: <tool> <email>' or 'Co-authored-by: <tool> <email>'"

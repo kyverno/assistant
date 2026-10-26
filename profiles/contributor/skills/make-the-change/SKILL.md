@@ -37,10 +37,7 @@ platforms: [linux, macos, windows]
    (formatting, vet, unit tests for the touched packages, codegen) and list the rest for the contributor or
    the fork's CI. A reproduction before the fix and the same command after it is the best evidence.
 5. **Commit with sign-off.** `git commit -s` for every commit (the project's CI requires a DCO per commit).
-   Conventional, specific commit messages. The project's AI policy (`ai_policy` in the org file) asks for a
-   disclosure trailer on AI-assisted commits, e.g. `Assisted-by: <tool> <email>` (REVIEW.md says the same):
-   offer to add it, and let the contributor decide the wording. Before starting, check the issue is accepted
-   (`accepted` in `find_issues`, no `triage` label) and that `journey_summary.open_pr_limit` leaves room.
+   Conventional, specific commit messages; no AI-assistance trailer unless the org file says so.
 6. **Self-review against the project.** Before the PR, check and report, with commands:
    - every commit signed off: `git log --format='%h %(trailers:key=Signed-off-by,valueonly)' origin/HEAD..`
    - diff size and scope: `git diff --stat origin/HEAD..` vs the issue; anything unrelated
@@ -53,7 +50,7 @@ platforms: [linux, macos, windows]
 7. **Draft the PR description** from the repository's PR template (`.github/pull_request_template.md`), from the
    ledger: the issue link, what and why, before and after behaviour for user-visible changes, how it was
    tested (copy commands and results from the ledger), risks. **Leave the AI-assistance line and any
-   statement of understanding for the contributor** to write, and remind them the trailer should match it.
+   statement of understanding for the contributor**, with a note that they are theirs to write.
 8. **Deliver.** There is no push tool. Produce the patch with `git format-patch origin/HEAD..` and tell the
    contributor how to fetch it (`scp sandbox@<ssh host>:/sandbox/<name>/*.patch .`) and push it from their
    own fork. Once they open the PR, continue in `review-loop`.

@@ -282,8 +282,6 @@ def journey_summary(client, org: Dict[str, Any], repo: str, login: str) -> Dict[
         },
         "known_areas": [{"area": a, "merged_prs": c} for a, c in areas.most_common()],
         "reviewed_areas": [{"area": a, "reviews": c} for a, c in reviewed_areas.most_common()],
-        "open_pr_limit": {"open_now": len(data["open"]["nodes"]), "max": org.get("ai_policy", {}).get("max_open_prs"),
-                          "note": "the project's AI policy caps open PRs per contributor across all repositories"},
         "open_prs": [{"number": n["number"], "repo": n["repository"]["nameWithOwner"], "title": n["title"], "url": n["url"],
                       "updated_at": n["updatedAt"]} for n in data["open"]["nodes"] if n],
         "review_opportunities": {

@@ -221,10 +221,6 @@ def issue_history(client, org: Dict[str, Any], repo: str, number: int, me: Optio
     reserved = [l for l in labels if l in org.get("reserved_labels", [])]
     if reserved:
         sig("reserved_for_a_program", ", ".join(reserved) + ": the maintainers run this program with its own rules; do not start without it")
-    not_accepted = [l for l in labels if l in org.get("ai_policy", {}).get("not_accepted_labels", [])]
-    if not_accepted:
-        sig("not_accepted_yet", "labelled " + ", ".join(not_accepted) + ": the project's AI policy allows AI-generated code "
-            "only for accepted issues; ask a maintainer to accept it first", org["ai_policy"]["source"])
     if not maintainer_comments:
         sig("no_maintainer_comment", "no comment from an owner, member or collaborator")
 
@@ -298,13 +294,12 @@ def find_issues(client, org: Dict[str, Any], repo: str, known_areas: Optional[Li
             "created_at": n["createdAt"], "updated_at": n["updatedAt"], "comments": n["comments"]["totalCount"],
             "matches_known_areas": matched, "open_prs": [{"number": p["number"], "url": p["url"]} for p in open_prs],
             "closed_unmerged_prs": len(closed), "assignees": [a["login"] for a in n["assignees"]["nodes"]],
-            "accepted": not set(names) & set(org.get("ai_policy", {}).get("not_accepted_labels", [])),
             "merged_prs": [{"number": p["number"], "url": p["url"]} for p in merged],
             "claimed_in_comment_by": sorted({c["by"] for c in claims if c["by"]}),
             "tier": ("probably_fixed" if merged else "has_open_pr" if open_prs
                      else "claimed" if n["assignees"]["nodes"] or claims else "free"),
         })
     order = {"free": 0, "claimed": 1, "has_open_pr": 2, "probably_fixed": 3}
-    rows.sort(key=lambda r: (order[r["tier"]], not r["accepted"], not r["matches_known_areas"], r["closed_unmerged_prs"]))
+    rows.sort(key=lambda r: (order[r["tier"]], not r["matches_known_areas"], r["closed_unmerged_prs"]))
     return {"success": True, "repo": repo, "count": min(len(rows), limit), "issues": rows[:limit],
             "note": "claimed and has_open_pr issues may still be workable (collaborate, or the claim is idle): run issue_history before recommending any"}
