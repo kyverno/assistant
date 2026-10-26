@@ -45,15 +45,17 @@ else
 fi
 
 # Pushing, when the launcher was run with --push-to-fork: the sandbox then holds a placeholder for the push token (the
-# real one stays in OpenShell, which swaps it in for pushes to your own forks only) and the name of your account.
-if [ -n "${GIT_PUSH_TOKEN:-}" ] && [ -n "${GIT_PUSH_OWNER:-}" ]; then
+# real one stays in OpenShell, which swaps it in for pushes to your own forks only).
+# Your account name: kyverno-start keeps your GitHub username in the profile's .env (the launcher read it from your token).
+OWNER="$(sed -n 's/^[A-Z_]*GITHUB_LOGIN=//p' /opt/hermes-home/.hermes/profiles/*/.env 2>/dev/null | head -n 1)"
+if [ -n "${GIT_PUSH_TOKEN:-}" ] && [ -n "$OWNER" ]; then
   # shellcheck disable=SC2016  # $GIT_PUSH_TOKEN is meant to expand later, when git runs the helper
   git config --global credential.https://github.com.helper \
     '!f() { echo username=x-access-token; echo "password=$GIT_PUSH_TOKEN"; }; f'
   git -C "$DIR" remote get-url fork >/dev/null 2>&1 \
-    || git -C "$DIR" remote add fork "https://github.com/$GIT_PUSH_OWNER/${REPO#*/}"
+    || git -C "$DIR" remote add fork "https://github.com/$OWNER/${REPO#*/}"
   git -C "$DIR" config remote.pushDefault fork
-  pass "pushes go to your fork: git push fork <branch> ($GIT_PUSH_OWNER/${REPO#*/})"
+  pass "pushes go to your fork: git push fork <branch> ($OWNER/${REPO#*/})"
 else
   info "pushing is off (container/kyverno --push-to-fork turns it on); the assistant hands you a patch instead"
 fi

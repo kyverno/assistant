@@ -77,13 +77,17 @@ test -x /usr/local/bin/kyverno-workspace
 for f in /usr/local/lib/kyverno/toolchains/*.sh /usr/local/bin/kyverno-workspace; do bash -n "$f"; done
 test -f "$HERMES_HOME/profiles/kyverno/skills/workspace/SKILL.md"
 test -f "$HERMES_HOME/profiles/kyverno-contributor/skills/workspace/SKILL.md"
-# The push guard refuses a force push and a push to main, and lets a normal push to the fork through.
+# The push guard refuses a force push, a push to main and a push to an unknown remote, and lets a normal push to the
+# fork through; a contributor may not push to origin, a maintainer may.
 for kind in maintainer contributor; do
   GUARD=/opt/kyverno/profiles/$kind/hooks/git-push-guard.py
-  echo '{"tool_name":"terminal","tool_input":{"command":"git push --force fork x"}}' | python3 -I "$GUARD" | grep -q '"action": "block"'
-  echo '{"tool_name":"terminal","tool_input":{"command":"git push fork main"}}' | python3 -I "$GUARD" | grep -q '"action": "block"'
-  echo '{"tool_name":"terminal","tool_input":{"command":"git push origin x"}}' | python3 -I "$GUARD" | grep -q '"action": "block"'
-  test "$(echo '{"tool_name":"terminal","tool_input":{"command":"git push -u fork fix/x"}}' | python3 -I "$GUARD")" = '{}'
+  profile=kyverno; [ "$kind" = contributor ] && profile=kyverno-contributor
+  guard() { echo "{\"tool_name\":\"terminal\",\"tool_input\":{\"command\":\"$1\"}}" | HERMES_HOME=$HERMES_HOME/profiles/$profile python3 -I "$GUARD"; }
+  guard "git push --force fork x" | grep -q '"action": "block"'
+  guard "git push fork main" | grep -q '"action": "block"'
+  guard "git push https://example.com/x/y.git x" | grep -q '"action": "block"'
+  test "$(guard "git push -u fork fix/x")" = '{}'
+  if [ "$kind" = contributor ]; then guard "git push origin fix/x" | grep -q '"action": "block"'; else test "$(guard "git push origin fix/x")" = '{}'; fi
 done
 # The tools it downloads are fetched at run time (the build has no network); everything it needs to do that is here.
 for tool in curl jq tar xz sha256sum git make; do command -v "$tool" >/dev/null; done

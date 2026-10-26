@@ -313,6 +313,9 @@ openshell provider delete kyverno-anthropic         # model keys you added, if a
 docker rmi kyverno-assistant:dev                    # the image, if you built it yourself
 ```
 
+If you used `--push-to-fork`, also `openshell provider delete kyverno-git-push` (or run the launcher with `--no-push`). With `--no-openshell`, the clones and toolchains live in a Docker volume that outlives the container:
+`docker volume rm kyverno-assistant-docker-workspace` (the name follows the container's).
+
 ## What it does
 
 | Area | Capabilities |

@@ -193,6 +193,8 @@ COPY --chmod=755 container/kyverno-start container/kyverno-main container/kyvern
 # Clone a repository and install the toolchains it declares (Go, Node, the Kyverno CLI), for building and testing in the sandbox.
 COPY --chmod=755 container/kyverno-workspace /usr/local/bin/kyverno-workspace
 COPY --chmod=755 container/toolchains /usr/local/lib/kyverno/toolchains
+# The workspace folder the agent's terminal starts in. OpenShell makes it itself; plain Docker needs it to exist and be writable.
+RUN install -d -o 1000 -g 1000 /sandbox
 
 # The image's final user must stay uid 1000: OpenShell refuses an image whose default user is root.
 USER 1000:1000

@@ -248,7 +248,7 @@ if [ "$PUSH" = 1 ]; then
   rm -rf "$tmp"
   if [ -n "$PUSH_TOKEN" ]; then
     out="$(GIT_PUSH_TOKEN="$PUSH_TOKEN" openshell provider create --name "$PUSH_PROVIDER" --type "$PUSH_PROVIDER" \
-      --credential GIT_PUSH_TOKEN --config "GIT_PUSH_OWNER=$PUSH_LOGIN" 2>&1)" \
+      --credential GIT_PUSH_TOKEN 2>&1)" \
       || { fail "could not store the push token in OpenShell"; printf '%s\n' "$out" | sed 's/^/    /' >&2; exit 1; }
     unset PUSH_TOKEN
   fi

@@ -3,7 +3,9 @@ relates to the rest of the code). Logic only; tools.py wraps these for Hermes.""
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 from collections import Counter
 from typing import Any, Dict, List, Optional
 
@@ -148,6 +150,27 @@ def go_summary(sources: Dict[str, str], module: Optional[str]) -> Dict[str, Any]
             "exported_types": sorted(set(types))[:30], "exported_funcs": sorted(set(exports))[:40]}
 
 
+def _importers(repo: str, module: Optional[str], directory: str, sha: str) -> Dict[str, Any]:
+    """Who imports this Go package, from the clone `kyverno-workspace` made in the sandbox (GitHub's code search is too
+    slow and incomplete for this). The clone may be at another commit than the one analysed; the answer says which."""
+    clone = os.path.join(os.environ.get("KYVERNO_WORKSPACE_ROOT", "/sandbox"), repo.split("/", 1)[1])
+    if not module or not os.path.isdir(os.path.join(clone, ".git")):
+        return {"available": False, "note": "no clone in the sandbox yet: run `kyverno-workspace %s`, then ask again" % repo}
+    package = module + ("/" + directory if directory else "")
+    try:
+        head = subprocess.run(["git", "-C", clone, "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10).stdout.strip()
+        found = subprocess.run(["git", "-C", clone, "grep", "-l", "-F", "-e", '"%s"' % package, "--", "*.go"],
+                               capture_output=True, text=True, timeout=30).stdout.split()
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"available": False, "note": "could not search the clone: %s" % exc}
+    outside = [f for f in found if os.path.dirname(f) != directory]
+    folders = Counter(os.path.dirname(f) for f in outside if not f.endswith("_test.go"))
+    return {"available": True, "package": package, "clone_commit": head[:7], "same_commit_as_analysed": head == sha,
+            "importing_folders": [{"folder": d, "files": n} for d, n in folders.most_common(40)],
+            "folders_total": len(folders), "test_files_importing": sum(1 for f in outside if f.endswith("_test.go")),
+            "note": "from `git grep` in the clone's working tree; blank imports and generated files are included"}
+
+
 def explain_path(client, org: Dict[str, Any], repo: str, path: str, ref: Optional[str] = None,
                  max_commits: int = 10) -> Dict[str, Any]:
     """Facts about a file or folder: what is in it, what it imports and exports (Go), its tests, the docs, labels
@@ -198,8 +221,7 @@ def explain_path(client, org: Dict[str, Any], repo: str, path: str, ref: Optiona
         m = re.search(r"^module\s+(\S+)", _text(client, repo, sha, "go.mod") or "", re.M)
         out["go"] = go_summary(sources, m.group(1) if m else None)
         out["go"]["analysed_files"] = len(picked)
-        out["imported_by"] = {"note": "not available here: who imports this package needs the whole code base on disk; "
-                                      "in the sandbox, grep the module path in a clone instead"}
+        out["imported_by"] = _importers(repo, m.group(1) if m else None, directory, sha)
     commits_ = history
     authors = Counter(((c.get("author") or {}).get("login") or c["commit"]["author"]["name"]) for c in commits_)
     out["history"] = {

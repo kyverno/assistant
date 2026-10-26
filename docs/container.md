@@ -138,6 +138,8 @@ container/kyverno --no-openshell [--build | --image IMAGE] [--provider P ...] [-
 | Merges | Refused by the proxy, whatever the token can do | Only the token's scopes stop them. Use a fine-grained token (README step 1), not the `gh` sign-in |
 | Tool allowlist on the GitHub MCP server | Enforced by the proxy | Hermes' own filter only |
 | Terminal and file tools | Allowed, inside the sandbox | Blocked. `--allow-terminal` turns them on, and then the container is the only boundary |
+| Coding environment (`kyverno-workspace`) | Downloads only from the allowed toolchain hosts | The same scripts and checksums, but the container can reach anything, so the host allowlist is not there. Needs `--allow-terminal` |
+| Pushing (`--push-to-fork`) | Token held by the gateway, pushes limited to your forks | Not available: the launcher refuses it. The assistant hands over patches |
 | Audit log | `openshell logs` | None |
 | Dashboard | Forwarded to `127.0.0.1:9219` | The same address. Hermes keeps it on loopback inside the container; a small relay passes it to a port Docker publishes on `127.0.0.1` only, on a network that only this container joins |
 

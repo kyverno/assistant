@@ -30,6 +30,8 @@ download hosts for Go, Node, Go modules, npm packages and the Kyverno CLI and Ch
    run what its CI runs: `git fetch origin pull/<n>/head:pr-<n> && git switch pr-<n>`. Read the project's
    `DEVELOPMENT.md` and CI workflow for the exact commands. Run the narrowest thing that shows the problem
    (`go test ./pkg/<package>/...`, one Chainsaw test, one `kyverno test` folder), not the whole repository.
+   For a failing check, read its log first (`actions_get`, then `get_job_logs` for the failed job) to get the exact
+   command and error, then run that command here; say if it fails only in CI and not in the sandbox.
    Show the command and the output; a reproduction that you did not run is not a reproduction.
    Memory is limited by Docker (check `free -m`): build the packages you need, not `./...`, and say so if a
    build is killed for lack of memory (the user can raise Docker's memory).

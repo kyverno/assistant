@@ -64,6 +64,10 @@ while [ $# -gt 0 ]; do
     --yes) ASSUME_YES=1; shift ;;
     --no-attach) NO_ATTACH=1; shift ;;
     --reset) RESET=1; shift ;;
+    --push-to-fork|--no-push)
+      echo "$1 needs OpenShell: its proxy keeps the push token out of the sandbox and limits which repositories a push can reach." >&2
+      echo "Without OpenShell the assistant hands you patches instead (see the workspace skill)." >&2
+      exit 2 ;;
     -h|--help) sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
@@ -231,6 +235,7 @@ else
     --cap-drop ALL --security-opt no-new-privileges --pids-limit 1024 \
     --tmpfs /run/kyverno-secrets:rw,noexec,nosuid,nodev,size=1m,mode=0700,uid=1000,gid=1000 \
     --tmpfs /tmp:rw,exec,nosuid,nodev,size=1g,mode=1777 \
+    -v "$NAME-workspace:/sandbox" \
     --label "kyverno.allow-terminal=$ALLOW_TERMINAL" \
     "${ENV_ARGS[@]}" "$IMAGE" kyverno-main "$KIND" >/dev/null \
     || { fail "could not create the container"; exit 1; }

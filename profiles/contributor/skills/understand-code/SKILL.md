@@ -21,7 +21,8 @@ platforms: [linux, macos, windows]
    AGENTS.md chain, instructions, ARCHITECTURE/REVIEW sections, labels). Read the docs it points to first:
    nested AGENTS.md files are the project's own ground truth and often list generated zones and gotchas.
 2. **Map the neighbourhood.** To explain how things relate, walk the import edges both ways: `explain_path` on
-   a folder gives `imports_internal` (what it depends on) and `imported_by` (who depends on it). Follow two
+   a folder gives `imports_internal` (what it depends on) and `imported_by` (who depends on it; it reads the clone in the sandbox, so if it says `available: false`, run
+   `kyverno-workspace <owner/repo>` once and ask again, and mention when the clone is at another commit). Follow two
    or three hops, not the whole graph. State clearly what is computed (imports) and what you infer.
 3. **Read the code.** Do not explain code you have not read.
    - With the sandbox: `git clone --depth 1 https://github.com/<repo>.git /sandbox/<name>` once, then use
