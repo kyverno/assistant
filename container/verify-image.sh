@@ -72,4 +72,12 @@ org = rules.load_org()
 print("organisation file loads:", org["name"], "|", len(tools.TOOLS), "tools")
 PYEOF
 
+echo "== workspace: script, toolchains and the shared skill"
+test -x /usr/local/bin/kyverno-workspace
+for f in /usr/local/lib/kyverno/toolchains/*.sh /usr/local/bin/kyverno-workspace; do bash -n "$f"; done
+test -f "$HERMES_HOME/profiles/kyverno/skills/workspace/SKILL.md"
+test -f "$HERMES_HOME/profiles/kyverno-contributor/skills/workspace/SKILL.md"
+# The tools it downloads are fetched at run time (the build has no network); everything it needs to do that is here.
+for tool in curl jq tar xz sha256sum git make; do command -v "$tool" >/dev/null; done
+
 rm -rf /tmp/providers

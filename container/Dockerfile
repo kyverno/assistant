@@ -39,6 +39,9 @@ COPY profiles/maintainer/hooks   /opt/kyverno/profiles/maintainer/hooks
 COPY profiles/maintainer/plugins /opt/kyverno/profiles/maintainer/plugins
 COPY profiles/maintainer/skills  /opt/kyverno/profiles/maintainer/skills
 COPY profiles/maintainer/cron    /opt/kyverno/profiles/maintainer/cron
+# The skill both profiles share for working on code (one source, installed with each profile).
+COPY container/skills/workspace /opt/kyverno/profiles/maintainer/skills/workspace
+COPY container/skills/workspace /opt/kyverno/profiles/contributor/skills/workspace
 COPY profiles/contributor/SOUL.md profiles/contributor/config.yaml profiles/contributor/distribution.yaml profiles/contributor/.env.example profiles/contributor/.no-bundled-skills /opt/kyverno/profiles/contributor/
 COPY profiles/contributor/hooks   /opt/kyverno/profiles/contributor/hooks
 COPY profiles/contributor/plugins /opt/kyverno/profiles/contributor/plugins
@@ -184,6 +187,9 @@ COPY --chown=1000:1000 container/providers/repo-github.yaml container/providers/
 COPY --from=build --chown=1000:1000 /opt/hermes-home /opt/hermes-home
 RUN ln -s /opt/hermes-home/.local/bin/hermes /usr/local/bin/hermes
 COPY --chmod=755 container/kyverno-start container/kyverno-main container/kyverno-env container/dashboard-relay /usr/local/bin/
+# Clone a repository and install the toolchains it declares (Go, Node, the Kyverno CLI), for building and testing in the sandbox.
+COPY --chmod=755 container/kyverno-workspace /usr/local/bin/kyverno-workspace
+COPY --chmod=755 container/toolchains /usr/local/lib/kyverno/toolchains
 
 # The image's final user must stay uid 1000: OpenShell refuses an image whose default user is root.
 USER 1000:1000

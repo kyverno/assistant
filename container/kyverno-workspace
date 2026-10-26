@@ -13,6 +13,17 @@ export TOOLS=/sandbox/.toolchains
 ARCH="$(uname -m)"; case "$ARCH" in aarch64) ARCH=arm64 ;; x86_64) ARCH=amd64 ;; esac
 export ARCH
 
+# dl_verify <url> <sha256> <file>: download, check the checksum published by the vendor, and only then keep it.
+# A download that does not match is deleted, so nothing unchecked is ever unpacked.
+# shellcheck disable=SC2329  # called by the toolchain scripts this file sources
+dl_verify() {
+  mkdir -p "$TOOLS/.downloads"
+  curl -fsSL --retry 2 -o "$3" "$1" || { rm -f "$3"; return 1; }
+  if [ "$(sha256sum "$3" | cut -d' ' -f1)" != "$2" ]; then
+    echo "  checksum mismatch for $1" >&2; rm -f "$3"; return 1
+  fi
+}
+export -f dl_verify
 pass() { printf '  \033[32m✓\033[0m %s\n' "$1"; }
 fail() { printf '  \033[31m✗\033[0m %s\n' "$1" >&2; }
 info() { printf '  %s\n' "$1"; }
@@ -27,10 +38,10 @@ mkdir -p "$TOOLS"
 
 printf '\n\033[1mClone %s\033[0m\n' "$REPO"
 if [ -d "$DIR/.git" ]; then
-  git -C "$DIR" fetch --quiet origin && pass "updated $DIR (your branch and changes are untouched)" || fail "could not update $DIR"
+  if git -C "$DIR" fetch --quiet origin; then pass "updated $DIR (your branch and changes are untouched)"; else fail "could not update $DIR"; fi
 else
   # Full history without file contents; git fetches a file's contents when it is first needed.
-  git clone --quiet --filter=blob:none "https://github.com/$REPO" "$DIR" && pass "cloned to $DIR" || { fail "clone failed"; exit 1; }
+  if git clone --quiet --filter=blob:none "https://github.com/$REPO" "$DIR"; then pass "cloned to $DIR"; else fail "clone failed"; exit 1; fi
 fi
 
 needs=()
@@ -60,6 +71,11 @@ for f in "$LIB"/*.sh; do
   tc="$(basename "$f" .sh)"
   # shellcheck source=/dev/null
   [ -d "$TOOLS/$tc" ] && { . "$f"; tc_env; } >> "$TOOLS/env.sh"
+done
+
+# New terminal shells (the agent's, and the user's `kyverno shell`) pick the tools up on their own.
+for rc_file in "$HOME/.profile" "$HOME/.bashrc"; do
+  grep -qs "$TOOLS/env.sh" "$rc_file" || printf '[ -f %s ] && . %s\n' "$TOOLS/env.sh" "$TOOLS/env.sh" >> "$rc_file"
 done
 
 printf '\n'

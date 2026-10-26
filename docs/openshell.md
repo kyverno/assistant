@@ -34,7 +34,7 @@ the host, the allowed methods and paths, and the programs that may use it.
 
 ## Access requests
 
-When a command is blocked and the task needs it, the agent (guided by the `sandbox-access` skill) can
+When a command is blocked and the task needs it, the agent (guided by the `workspace` skill) can
 ask for a narrow permission: an exact host, specific methods and a path, for one program. Nothing is
 approved automatically; only you approve, from your own terminal:
 
