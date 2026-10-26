@@ -31,6 +31,8 @@ download hosts for Go, Node, Go modules, npm packages and the Kyverno CLI and Ch
    `DEVELOPMENT.md` and CI workflow for the exact commands. Run the narrowest thing that shows the problem
    (`go test ./pkg/<package>/...`, one Chainsaw test, one `kyverno test` folder), not the whole repository.
    Show the command and the output; a reproduction that you did not run is not a reproduction.
+   Memory is limited by Docker (check `free -m`): build the packages you need, not `./...`, and say so if a
+   build is killed for lack of memory (the user can raise Docker's memory).
 3. **Change the code** on a new branch (`git switch -c <issue>-<slug>`, never the default branch). Smallest change
    that fixes it, matching the surrounding code and tests. Do not hand-edit generated files: run the project's
    `make` target. Before editing a path, read what the repository says about it (`knowledge_for`).
