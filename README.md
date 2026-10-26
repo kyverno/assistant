@@ -359,6 +359,26 @@ Settings and chat pages are served too, and the Settings pages can show what is 
 includes the Copilot sign-in token. Your GitHub token is not there. If you do not want it, stop it with
 `openshell forward stop 9219` (the launcher starts it again next time you run it).
 
+## Coding in the sandbox
+
+Both profiles have a terminal inside the sandbox, which cannot reach your laptop. Ask the assistant to reproduce an
+issue or fix a PR and it follows the `workspace` skill: `kyverno-workspace <owner/repo>` clones the repo and downloads
+the toolchains it declares (Go, Node, or the Kyverno CLI and Chainsaw), then it builds, runs the tests, and shows you
+the real output. The toolchains are downloaded the first time, not baked into the image: the network policy allows
+only those hosts, GET only, and every download is checked against the vendor's checksum. Caches live in the sandbox, so
+recreating it downloads them again. A big Go build wants more memory than Docker Desktop's default; things that need
+a real cluster cannot run, and the assistant says so (see [#25](https://github.com/kyverno/assistant/issues/25)).
+
+The result comes back as a patch (`openshell sandbox download`), or as a pushed branch if you turn on pushing:
+
+```bash
+container/kyverno --push-to-fork      # off by default; --no-push removes it
+```
+
+That stores a second credential in OpenShell (your `gh` sign-in's token, or a token with write on your fork). OpenShell
+lets `git push` reach only your own forks (and, as a maintainer, the repository you manage); a hook refuses force pushes,
+branch deletes and pushes to main. Nothing is ever merged.
+
 ## Slack and scheduled jobs
 
 These are not available in the sandbox yet. They work in the [host install](docs/host-install.md):
@@ -372,7 +392,7 @@ A second profile for people contributing to Kyverno. It finds work worth doing, 
 and folders fit together, helps prepare evidence-backed PRs, makes review feedback understandable, and
 tracks the path from first PR toward reviewer. It reads GitHub with your own token and can write one
 thing: a comment on an issue or a PR after you confirm it. It cannot merge, approve, submit a formal
-review, or push; hooks enforce that.
+review; hooks enforce that. It can push to your own fork only if you start the launcher with `--push-to-fork`.
 
 ```bash
 ./scripts/install.sh --profile contributor     # profile name: kyverno-contributor
@@ -396,7 +416,7 @@ Background updates (new reviews, failing checks, merged PRs) are a paused cron j
 | `journey_summary`, `journey_note`, `journey_self_report` | What you have done, areas, ladder progress, private notes |
 | `inbox_read` | What the background watch found |
 
-Skills: `find-work`, `understand-code`, `make-the-change`, `review-loop`, `grow`. Not built yet: Go and the module proxy in the sandbox image, and pushing to your fork.
+Skills: `find-work`, `understand-code`, `make-the-change`, `review-loop`, `grow`. The coding environment is shared with the maintainer profile (see above).
 
 ## Repository layout
 

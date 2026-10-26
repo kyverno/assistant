@@ -33,6 +33,8 @@ because the sandbox has no open internet and the chat screen hides first-use pro
 | Model API key (`--provider anthropic\|openai\|nvidia`) | OpenShell, asked once | A placeholder. Hermes accepts it for these providers. OpenRouter is not supported this way: Hermes requires an `sk-or-` prefix. |
 | GitHub Copilot sign-in | Created by Hermes' own device-code login inside the sandbox | The real token, in the profile's `.env`. It only grants Copilot model access. |
 
+| Push token (`--push-to-fork`, optional) | OpenShell, asked once, apart from the read-only repo token | A placeholder in `GIT_PUSH_TOKEN`. The proxy swaps in the real value on `git push` to the allowed repositories only, and only from `git`. |
+
 The Copilot token and the repo token never share a variable name, so Hermes cannot pick the wrong one.
 
 ## What the agent can reach
@@ -46,6 +48,8 @@ Everything not listed is denied (`policy.yaml` and `providers/*.yaml`).
 | Copilot inference (`api.githubcopilot.com`: `/models`, `/chat/completions`, `/responses`, `/embeddings`, `/v1/**`; and `api.individual`, `api.business`, `api.enterprise.githubcopilot.com`) | Yes, with Hermes' own Copilot token. `/mcp/` is deliberately not among the paths on the shared host (see "Safety layers") |
 | `github.com` login endpoints | Only the two device-code paths |
 | `github.com`, `codeload`, `raw.githubusercontent.com` | Read-only, for the agent's terminal, no credential |
+| Toolchain hosts (`go.dev`, `proxy.golang.org`, `nodejs.org`, `registry.npmjs.org`, and a few more) | GET only, and only for the installer's own binaries (`curl`, Go, Node). Used by `kyverno-workspace`; every download is checked against the vendor's checksum |
+| `github.com` `git-receive-pack`, only with `--push-to-fork` | Pushes to your own forks (and, for a maintainer, the repository they manage), nothing else. The credential is swapped in by the proxy; a hook also refuses force pushes, deletes and pushes to main |
 | `models.dev` | Read-only, for the `/model` list |
 | A model provider you added with `--provider` | Only that provider's API host |
 

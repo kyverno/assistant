@@ -44,6 +44,20 @@ else
   if git clone --quiet --filter=blob:none "https://github.com/$REPO" "$DIR"; then pass "cloned to $DIR"; else fail "clone failed"; exit 1; fi
 fi
 
+# Pushing, when the launcher was run with --push-to-fork: the sandbox then holds a placeholder for the push token (the
+# real one stays in OpenShell, which swaps it in for pushes to your own forks only) and the name of your account.
+if [ -n "${GIT_PUSH_TOKEN:-}" ] && [ -n "${GIT_PUSH_OWNER:-}" ]; then
+  # shellcheck disable=SC2016  # $GIT_PUSH_TOKEN is meant to expand later, when git runs the helper
+  git config --global credential.https://github.com.helper \
+    '!f() { echo username=x-access-token; echo "password=$GIT_PUSH_TOKEN"; }; f'
+  git -C "$DIR" remote get-url fork >/dev/null 2>&1 \
+    || git -C "$DIR" remote add fork "https://github.com/$GIT_PUSH_OWNER/${REPO#*/}"
+  git -C "$DIR" config remote.pushDefault fork
+  pass "pushes go to your fork: git push fork <branch> ($GIT_PUSH_OWNER/${REPO#*/})"
+else
+  info "pushing is off (container/kyverno --push-to-fork turns it on); the assistant hands you a patch instead"
+fi
+
 needs=()
 [ -f "$DIR/go.mod" ] && needs+=(go)
 [ -f "$DIR/package.json" ] && needs+=(node)

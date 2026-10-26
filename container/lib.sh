@@ -134,3 +134,51 @@ acquire_github_token() {
     if [[ "$LOGIN" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]]; then pass "signed in to GitHub as $LOGIN"; else LOGIN=""; fi
   fi
 }
+
+# --- pushing to your own fork (container/kyverno --push-to-fork) ---
+# The login a GitHub token belongs to. The token goes in through stdin, so it never shows in a process list.
+token_login() {
+  printf 'header = "Authorization: Bearer %s"\n' "$1" \
+    | curl -s -K - https://api.github.com/user | sed -n 's/.*"login": *"\([^"]*\)".*/\1/p' | head -n 1
+}
+
+# The OpenShell provider profile for the push credential, written for a list of owner/repo targets (your forks, and for
+# a maintainer the repository they manage). OpenShell checks each request outside the sandbox: a git push may only
+# reach /<owner>/<repo> for these, so the credential cannot be used to push anywhere else. It is a second credential, apart from the read-only token, and the sandbox
+# only ever holds a placeholder for it. Git reads the repository over a path with or without ".git", hence both.
+git_push_profile() {
+  local login="$1" t; shift
+  cat <<EOF
+id: kyverno-git-push
+display_name: Kyverno assistant git push
+description: Lets the sandbox push branches to ${login}'s own forks (and a maintainer's own repository), and nowhere else
+category: source_control
+credentials:
+  - name: push_token
+    description: GitHub token that can push to your fork (the gh sign-in's token, or a fine-grained token with Contents write on it)
+    env_vars: [GIT_PUSH_TOKEN]
+    required: true
+    auth_style: basic
+    header_name: authorization
+discovery:
+  credentials: [push_token]
+endpoints:
+  - host: github.com
+    port: 443
+    protocol: rest
+    enforcement: enforce
+    rules:
+EOF
+  for t in "$@"; do
+    for suffix in "" ".git"; do
+      printf '      - allow: { method: GET, path: "/%s%s/info/refs" }\n' "$t" "$suffix"
+      printf '      - allow: { method: POST, path: "/%s%s/git-receive-pack" }\n' "$t" "$suffix"
+    done
+  done
+  cat <<EOF
+binaries:
+  - /usr/bin/git
+  - /usr/lib/git-core/git-remote-http
+  - /usr/lib/git-core/git-remote-https
+EOF
+}

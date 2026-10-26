@@ -229,6 +229,11 @@ hooks:
       command: "./hooks/require-sandbox-terminal.sh"
       timeout: 10
       fail_closed: true
+    # git push goes to the user's own fork only, never forced, never to main (the network policy cannot see inside a push).
+    - matcher: "terminal"
+      command: "./hooks/git-push-guard.py"
+      timeout: 10
+      fail_closed: true
     - matcher: "mnemosyne_triple_add"
       command: "./hooks/block-mnemosyne-triples.sh"
       timeout: 10

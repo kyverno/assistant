@@ -1,6 +1,6 @@
 ---
 name: workspace
-description: "Work on code in the sandbox: clone the repo, get the right toolchain, reproduce an issue or a failing PR, make and test a change, and hand the result to the user as a patch. Use it whenever a task needs code to be built, run or edited."
+description: "Work on code in the sandbox: clone the repo, get the right toolchain, reproduce an issue or a failing PR, make and test a change, and hand the result to the user as a pushed branch or a patch. Use it whenever a task needs code to be built, run or edited."
 version: 0.1.0
 author: Suhaani Agarwal
 license: MIT
@@ -41,11 +41,18 @@ download hosts for Go, Node, Go modules, npm packages and the Kyverno CLI and Ch
    "not verified" list for what the sandbox cannot run (cluster tests, end-to-end, other platforms). Never say
    something passed unless you ran it and saw it pass.
 5. **Commit** with `git commit -s` (the project's CI requires a sign-off on every commit), conventional messages.
-6. **Hand it over.** Nothing is pushed from the sandbox. Write the patches:
+6. **Hand it over.** If `kyverno-workspace` printed "pushes go to your fork", the user turned pushing on: show them
+   `git log --stat` and the branch name, and once they say yes, `git push -u fork <branch>`. A contributor can push to the `fork`
+   remote only (their own fork). A maintainer can also push to `origin`, the repository they manage, to fix a PR branch.
+   A hook refuses force pushes, deletes and pushes to main, master or a release branch, and the network rule refuses any
+   other repository. Never try another remote or a workaround. Then tell them the compare link,
+   `https://github.com/<their-login>/<repo>/pull/new/<branch>`, to open the PR (or open it for them when the GitHub tools
+   allow it). If pushing is off, write patches instead:
    `git format-patch origin/HEAD.. -o /sandbox/<name>/patches`, and tell the user how to fetch and apply them:
    - OpenShell: `openshell sandbox download <sandbox> /sandbox/<name>/patches .` (see `openshell sandbox list`)
    - plain Docker: `docker cp <container>:/sandbox/<name>/patches .`
    - then in their own checkout: `git switch -c <branch> && git am patches/*.patch`, push to their fork, open the PR.
+   Tell them once that `container/kyverno --push-to-fork` would let you push yourself.
 
 ## When something is blocked
 
@@ -69,5 +76,5 @@ was rejected use their reason instead of asking again.
 
 - Every claim of "passes" or "reproduces" is backed by a command you ran, shown with its output.
 - Commits are signed off; no commit is made on the default branch; no generated file is hand-edited.
-- The handover names the patch folder and the exact commands to fetch and apply it.
+- The handover is a pushed branch with its compare link, or the patch folder with the exact commands to fetch and apply it.
 - The ledger has a "not verified" section whenever something could not be run here.

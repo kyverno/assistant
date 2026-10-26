@@ -20,6 +20,10 @@
 #                  repo and username, Copilot sign-in and model choice. Use it with --build or --image.
 #   --no-attach    set everything up but do not open the chat
 #   --reset        forget the stored GitHub token and ask for it again
+#   --push-to-fork let the assistant push branches to your own forks (kyverno, website, policies; set KYVERNO_PUSH_REPOS
+#                  for others) and, as a maintainer, to the repository you manage, and nowhere else. Never force, never
+#                  to main. A second credential, kept in OpenShell, asked once.
+#   --no-push      remove that again
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -38,6 +42,8 @@ BUILD=0
 RESET=0
 UPGRADE=0
 NO_ATTACH=0
+PUSH=0
+NO_PUSH=0
 BACKUP_DIR=""
 WANT_PROVIDERS=()
 while [ $# -gt 0 ]; do
@@ -50,7 +56,9 @@ while [ $# -gt 0 ]; do
     --upgrade) UPGRADE=1; shift ;;
     --no-attach) NO_ATTACH=1; shift ;;
     --reset) RESET=1; shift ;;
-    -h|--help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --push-to-fork) PUSH=1; shift ;;
+    --no-push) NO_PUSH=1; shift ;;
+    -h|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
@@ -200,6 +208,53 @@ else
   pass "token stored in OpenShell"
 fi
 
+# Pushing to your own fork, if you asked for it. Off by default: the assistant otherwise only reads GitHub.
+PUSH_PROVIDER=kyverno-git-push
+if [ "$NO_PUSH" = 1 ]; then
+  sandbox_listed && openshell sandbox provider detach "$SANDBOX" "$PUSH_PROVIDER" >/dev/null 2>&1
+  openshell provider delete "$PUSH_PROVIDER" >/dev/null 2>&1
+  openshell profile delete "$PUSH_PROVIDER" >/dev/null 2>&1
+  pass "the assistant can no longer push"
+fi
+if [ "$PUSH" = 1 ]; then
+  step "3b. Pushing to your fork"
+  PUSH_TOKEN=""
+  if ! openshell provider get "$PUSH_PROVIDER" >/dev/null 2>&1; then
+    info "This lets the assistant run git push to branches of YOUR forks, and nowhere else: OpenShell refuses any other"
+    info "repository, and a hook refuses force pushes and pushes to main. The token stays in OpenShell."
+    if command -v gh >/dev/null 2>&1 && PUSH_TOKEN=$(gh_token) && [ -n "$PUSH_TOKEN" ]; then
+      pass "using your gh sign-in (it can write to repositories you can write to; the network rule is what limits it)"
+    else
+      info "Paste a fine-grained token of your own account with Contents: Read and write on your fork."
+      { read -r -s -p "  GitHub token: " PUSH_TOKEN </dev/tty; } 2>/dev/null
+      echo
+    fi
+    [ -z "$PUSH_TOKEN" ] && { fail "no token for pushing"; exit 1; }
+  fi
+  PUSH_LOGIN="${KYVERNO_PUSH_LOGIN:-}"
+  [ -z "$PUSH_LOGIN" ] && [ -n "$PUSH_TOKEN" ] && PUSH_LOGIN=$(token_login "$PUSH_TOKEN")
+  [ -z "$PUSH_LOGIN" ] && PUSH_LOGIN="$LOGIN"
+  [ -z "$PUSH_LOGIN" ] && { fail "could not tell whose forks to allow: set KYVERNO_PUSH_LOGIN to your GitHub username"; exit 1; }
+  PUSH_REPOS=()
+  for r in ${KYVERNO_PUSH_REPOS:-kyverno website policies}; do
+    valid_repo "$PUSH_LOGIN/$r" || { fail "'$r' is not a repository name"; exit 1; }
+    PUSH_REPOS+=("$PUSH_LOGIN/$r")
+  done
+  # A maintainer also pushes branches of the repository they manage (a PR branch, a fix to someone's PR).
+  [ "$KIND" = maintainer ] && [ -n "$REPO" ] && PUSH_REPOS+=("$REPO")
+  tmp="$(mktemp -d)"
+  git_push_profile "$PUSH_LOGIN" "${PUSH_REPOS[@]}" > "$tmp/git-push.yaml"
+  sync_profile "$tmp/git-push.yaml" "$PUSH_PROVIDER" || { fail "could not register the push profile"; rm -rf "$tmp"; exit 1; }
+  rm -rf "$tmp"
+  if [ -n "$PUSH_TOKEN" ]; then
+    out="$(GIT_PUSH_TOKEN="$PUSH_TOKEN" openshell provider create --name "$PUSH_PROVIDER" --type "$PUSH_PROVIDER" \
+      --credential GIT_PUSH_TOKEN --config "GIT_PUSH_OWNER=$PUSH_LOGIN" 2>&1)" \
+      || { fail "could not store the push token in OpenShell"; printf '%s\n' "$out" | sed 's/^/    /' >&2; exit 1; }
+    unset PUSH_TOKEN
+  fi
+  pass "pushes allowed to ${PUSH_REPOS[*]} only"
+fi
+
 # Model providers: each key is stored in OpenShell, and the sandbox only holds a placeholder.
 for P in "${WANT_PROVIDERS[@]+"${WANT_PROVIDERS[@]}"}"; do
   VAR=$(provider_env_var "$P") || { fail "unknown model provider '$P' (use anthropic, openai or nvidia)"; exit 1; }
@@ -242,6 +297,7 @@ else
   LOG="$(mktemp)"
   info "creating '$SANDBOX' (the first start can take a few minutes)..."
   PROVIDER_ARGS=(--provider "$PROVIDER")
+  [ "$PUSH" = 1 ] && PROVIDER_ARGS+=(--provider "$PUSH_PROVIDER")
   for P in anthropic openai nvidia; do
     openshell provider get "kyverno-$P" >/dev/null 2>&1 && PROVIDER_ARGS+=(--provider "kyverno-$P")
   done
@@ -269,6 +325,7 @@ fi
 for P in "${WANT_PROVIDERS[@]+"${WANT_PROVIDERS[@]}"}"; do
   openshell sandbox provider attach "$SANDBOX" "kyverno-$P" >/dev/null 2>&1
 done
+[ "$PUSH" = 1 ] && openshell sandbox provider attach "$SANDBOX" "$PUSH_PROVIDER" >/dev/null 2>&1
 pass "sandbox '$SANDBOX' is ready"
 
 # The dashboard runs inside the maintainer sandbox (started by its main process); forward a port on this laptop to it.
