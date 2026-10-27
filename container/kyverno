@@ -2,6 +2,7 @@
 # One command to run the Kyverno assistant inside an OpenShell sandbox.
 #
 #   container/kyverno [--image IMAGE | --build] [--name NAME] [--provider P ...] [--upgrade] [--reset]
+#   container/kyverno --no-openshell [...]     plain Docker instead of OpenShell (less protection; --no-openshell --help)
 #
 # What it does, each time: checks Docker, installs OpenShell if it is missing, registers your GitHub
 # token with OpenShell (asked once, kept outside the sandbox), creates or starts the sandbox, applies
@@ -25,6 +26,11 @@ IMAGE="${KYVERNO_IMAGE:-ghcr.io/kyverno/assistant:latest}"
 SANDBOX="kyverno-assistant"
 DASH_PORT="${KYVERNO_DASHBOARD_PORT:-9219}"   # not 9119, which a Hermes dashboard on your laptop would use
 PROVIDER="kyverno-repo-github"
+# --no-openshell: run the image in plain Docker instead. A separate script, so everything below stays as it is.
+for a in "$@"; do
+  [ "$a" = "--no-openshell" ] && exec "$HERE/kyverno-docker" "$@"
+done
+
 BUILD=0
 RESET=0
 UPGRADE=0
@@ -40,15 +46,13 @@ while [ $# -gt 0 ]; do
     --upgrade) UPGRADE=1; shift ;;
     --no-attach) NO_ATTACH=1; shift ;;
     --reset) RESET=1; shift ;;
-    -h|--help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
 
-pass() { printf '  \033[32m✓\033[0m %s\n' "$1"; }
-fail() { printf '  \033[31m✗\033[0m %s\n' "$1" >&2; }
-info() { printf '  %s\n' "$1"; }
-step() { printf '\n\033[1m%s\033[0m\n' "$1"; }
+# shellcheck source=container/lib.sh
+. "$HERE/lib.sh"
 
 # Register a provider profile, or bring an existing one up to date: OpenShell wants the current
 # resource_version for an update, so older installs pick up changes to these files.
@@ -82,10 +86,8 @@ sandbox_stopped() { [[ "$(sandbox_row)" == *Stopped* ]]; }
 
 save_state() {
   local dest="$1"
-  # The single quotes are deliberate: this script runs inside the sandbox, so nothing should expand here.
-  # shellcheck disable=SC2016
   openshell sandbox exec -n "$SANDBOX" --no-tty -- sh -c \
-    'cd /opt/hermes-home/.hermes/profiles/kyverno && tar -cf /sandbox/kyverno-state.tar $(ls -d .env config.yaml .kyverno-model-chosen mnemosyne/data memories sessions kyverno-dashboard state.db state.db-wal state.db-shm 2>/dev/null)' \
+    "cd /opt/hermes-home/.hermes/profiles/kyverno && tar -cf /sandbox/kyverno-state.tar \$(ls -d $STATE_FILES 2>/dev/null)" \
     >/dev/null 2>&1 || return 1
   openshell sandbox download "$SANDBOX" /sandbox/kyverno-state.tar "$dest/" >/dev/null 2>&1 || return 1
   [ -s "$dest/kyverno-state.tar" ]
@@ -152,26 +154,9 @@ openshell status >/dev/null 2>&1 || { fail "the OpenShell gateway is not reachab
 pass "OpenShell $(openshell --version 2>/dev/null | head -n 1)"
 
 step "2. Image"
-if [ "$BUILD" = 1 ]; then
-  IMAGE="kyverno-assistant:dev"
-  info "building $IMAGE from this checkout (the first build takes several minutes)..."
-  docker build -f "$REPO_ROOT/container/Dockerfile" -t "$IMAGE" "$REPO_ROOT" || { fail "image build failed"; exit 1; }
-  if [ "$UPGRADE" != 1 ] && sandbox_listed; then
-    info "note: '$SANDBOX' already exists and keeps running the image it was made from; add --upgrade to switch it to this build"
-  fi
-elif [ "$UPGRADE" = 1 ] || ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
-  info "pulling $IMAGE..."
-  if ! docker pull "$IMAGE"; then
-    # An image that only exists on this machine (built with --build) cannot be pulled; that is fine.
-    if docker image inspect "$IMAGE" >/dev/null 2>&1; then
-      info "could not pull it; using the copy already on this machine"
-    else
-      fail "could not pull $IMAGE — use --build, or --image with an image you have"
-      exit 1
-    fi
-  fi
-fi
-pass "image $IMAGE"
+INSTANCE="$SANDBOX"
+instance_exists() { sandbox_listed; }
+ensure_image
 
 step "3. GitHub token"
 sync_profile "$HERE/providers/repo-github.yaml" "$PROVIDER" \
@@ -188,53 +173,13 @@ LOGIN="${MAINTAINER_GITHUB_LOGIN:-}"
 if openshell provider get "$PROVIDER" >/dev/null 2>&1; then
   pass "GitHub token already stored in OpenShell (use --reset to replace it)"
 else
-  [ -z "$REPO" ] && read -r -p "  Repo to manage (owner/repo) [kyverno/kyverno]: " REPO
-  REPO="${REPO:-kyverno/kyverno}"
-  [[ "$REPO" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+$ && "${REPO#*/}" != "." && "${REPO#*/}" != ".." ]] || { fail "'$REPO' is not an owner/repo name (letters, digits, dots, dashes, underscores)"; exit 1; }
-  PAT=""
-  METHOD="paste"
-  if command -v gh >/dev/null 2>&1; then
-    info "How do you want to authorize GitHub?"
-    info "  1) Sign in with GitHub (gh): a browser sign-in, nothing to create. Its token has broad 'repo' access,"
-    info "     wider than the fine-grained token in README step 1. It goes to OpenShell, never into the sandbox,"
-    info "     and the assistant still cannot merge."
-    info "  2) Paste a fine-grained token (README step 1)"
-    CHOICE=""
-    read -r -p "  Choose [1]: " CHOICE </dev/tty
-    case "${CHOICE:-1}" in
-      1) METHOD="gh" ;;
-      2) ;;
-      *) fail "'$CHOICE' is not 1 or 2"; exit 1 ;;
-    esac
-  else
-    info "The GitHub CLI (gh) is not installed, so there is no browser sign-in (https://cli.github.com)."
-  fi
-  if [ "$METHOD" = gh ]; then
-    PAT=$(gh auth token --hostname github.com 2>/dev/null) || PAT=""
-    if [ -z "$PAT" ]; then
-      info "gh is not signed in. Starting its browser sign-in..."
-      gh auth login --hostname github.com --git-protocol https --web </dev/tty \
-        || { fail "the gh sign-in did not finish (re-run, or choose 2 and paste a token)"; exit 1; }
-      PAT=$(gh auth token --hostname github.com 2>/dev/null) || PAT=""
-      [ -z "$PAT" ] && { fail "gh did not give a token after signing in"; exit 1; }
-    else
-      pass "using your existing gh sign-in"
-    fi
-  else
-    info "Paste your fine-grained GitHub token (see README step 1). It goes to OpenShell, never into the sandbox."
-    read -r -s -p "  GitHub token: " PAT </dev/tty
-    echo
-  fi
-  [ -z "$PAT" ] && { fail "no token entered (this step needs a terminal to ask for it)"; exit 1; }
-  # Check it before storing it. The token goes in through stdin, so it never shows in a process list.
-  CODE=$(printf 'header = "Authorization: Bearer %s"\n' "$PAT" \
-         | curl -s -o /dev/null -w '%{http_code}' -K - "https://api.github.com/repos/$REPO")
-  case "$CODE" in
-    200) pass "GitHub accepts the token for $REPO" ;;
-    401) fail "GitHub rejected the token (401): wrong, expired or revoked"; exit 1 ;;
-    403|404) fail "the token cannot read $REPO ($CODE): scope it to that repo, or get the org to approve it"; exit 1 ;;
-    *) info "could not verify the token (HTTP ${CODE:-none}) — continuing" ;;
-  esac
+  token_note_gh() {
+    info "     only $REPO. It goes to OpenShell, never into the sandbox, and the assistant still cannot merge."
+    info "     gh may offer to set up git credentials on this machine; you can answer No."
+  }
+  token_note_paste() { info "Paste your fine-grained GitHub token (see README step 1). It goes to OpenShell, never into the sandbox."; }
+  TOKEN_DEFAULT=1
+  acquire_github_token
   REPO_GITHUB_TOKEN="$PAT" openshell provider create --name "$PROVIDER" --type "$PROVIDER" \
     --credential REPO_GITHUB_TOKEN >/dev/null 2>&1 || { fail "could not store the token in OpenShell"; exit 1; }
   unset PAT
@@ -242,16 +187,8 @@ else
 fi
 
 # Model providers: each key is stored in OpenShell, and the sandbox only holds a placeholder.
-declare_provider_env() {
-  case "$1" in
-    anthropic) echo ANTHROPIC_API_KEY ;;
-    openai) echo OPENAI_API_KEY ;;
-    nvidia) echo NVIDIA_API_KEY ;;
-    *) return 1 ;;
-  esac
-}
 for P in "${WANT_PROVIDERS[@]+"${WANT_PROVIDERS[@]}"}"; do
-  VAR=$(declare_provider_env "$P") || { fail "unknown model provider '$P' (use anthropic, openai or nvidia)"; exit 1; }
+  VAR=$(provider_env_var "$P") || { fail "unknown model provider '$P' (use anthropic, openai or nvidia)"; exit 1; }
   sync_profile "$HERE/providers/$P.yaml" "kyverno-$P" \
     || { fail "could not register the $P provider profile"; exit 1; }
   if openshell provider get "kyverno-$P" >/dev/null 2>&1; then

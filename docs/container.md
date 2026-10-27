@@ -29,7 +29,7 @@ because the sandbox has no open internet and the chat screen hides first-use pro
 
 | Secret | Where it lives | What the sandbox sees |
 |---|---|---|
-| GitHub token (fine-grained PAT) | OpenShell, asked once by the launcher | A placeholder in `REPO_GITHUB_TOKEN`. The proxy swaps in the real value on requests to `api.github.com` (reads) and the GitHub MCP server, and only from Hermes' Python. |
+| GitHub token (fine-grained PAT, or the `gh` sign-in's token) | OpenShell, asked once by the launcher | A placeholder in `REPO_GITHUB_TOKEN`. The proxy swaps in the real value on requests to `api.github.com` (reads) and the GitHub MCP server, and only from Hermes' Python. |
 | Model API key (`--provider anthropic\|openai\|nvidia`) | OpenShell, asked once | A placeholder. Hermes accepts it for these providers. OpenRouter is not supported this way: Hermes requires an `sk-or-` prefix. |
 | GitHub Copilot sign-in | Created by Hermes' own device-code login inside the sandbox | The real token, in the profile's `.env`. It only grants Copilot model access. |
 
@@ -118,6 +118,44 @@ earlier all-paths rule: `merge_pull_request` reached GitHub. After the change it
 `providers/repo-github.yaml`. The image build compares them and fails if they differ, so a tool added to one cannot
 silently be missing from the other.
 
+## Running without OpenShell
+
+OpenShell is the default and the way to run this. If you do not want it, `container/kyverno --no-openshell` runs the
+same image as one plain Docker container instead. It is an opt-in with weaker protection, not an equal alternative.
+
+```bash
+container/kyverno --no-openshell [--build | --image IMAGE] [--provider P ...] [--upgrade] [--reset] [--allow-terminal]
+```
+
+| | OpenShell (default) | `--no-openshell` |
+|---|---|---|
+| GitHub token and model keys | Held by the gateway. The agent sees placeholders | In the agent's environment, as real values |
+| Network | Allowlist, enforced by the proxy | Whatever Docker allows: the whole internet |
+| Merges | Refused by the proxy, whatever the token can do | Only the token's scopes stop them. Use a fine-grained token (README step 1), not the `gh` sign-in |
+| Tool allowlist on the GitHub MCP server | Enforced by the proxy | Hermes' own filter only |
+| Terminal and file tools | Allowed, inside the sandbox | Blocked. `--allow-terminal` turns them on, and then the container is the only boundary |
+| Audit log | `openshell logs` | None |
+| Dashboard | Forwarded to `127.0.0.1:9219` | The same address. Hermes keeps it on loopback inside the container; a small relay passes it to a port Docker publishes on `127.0.0.1` only, on a network that only this container joins |
+
+What it still does: the container runs as a non-root user with every Linux capability dropped, `no-new-privileges`
+and a process limit, and nothing from your machine is mounted. Docker is the only requirement. It was tried on Apple Silicon only.
+
+**Keys.** They live in `~/.config/kyverno-assistant/secrets.env` (override with `KYVERNO_SECRETS_FILE`), mode 600, as
+`KEY=value` lines. On every start the launcher copies the allowed keys (`REPO_GITHUB_TOKEN`, `ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY`, `NVIDIA_API_KEY`) into a tmpfs inside the container. They are not in the image, not in
+`docker inspect`, and not on the container's disk; the tmpfs is empty again when the container stops.
+
+**State.** It lives in the container, so it survives `docker stop` and `docker start`. `--upgrade` saves it, recreates the
+container from the new image and restores it, as with OpenShell. Removing the container by hand (`docker rm`) loses it.
+
+**Keys changed?** Re-running the launcher copies the new keys in and restarts the dashboard so it picks them up.
+
+**Removing it.** `docker rm -f kyverno-assistant-docker`, `docker network rm kyverno-assistant-docker-net`, and delete the secrets file.
+This loses the container's state.
+
+**Choosing between them later.** The two modes use different names (`kyverno-assistant` sandbox, `kyverno-assistant-docker`
+container), so they do not interfere. State is not shared between them.
+
 ## Choosing a model
 
 - **GitHub Copilot** is the default. A free account may not allow the model Hermes pre-selects. Copilot's
@@ -125,7 +163,12 @@ silently be missing from the other.
   `model_not_supported`, so only a real request tells you. `gpt-4.1` and `gpt-4o-mini` answered on a free
   account. Switch in chat with `/model gpt-4.1 --global`.
 - **Another provider:** `container/kyverno --provider anthropic` (or `openai`, `nvidia`). The key is
-  asked once and kept in OpenShell.
+  asked once and kept in OpenShell. The proxy adds the real key only on chat and model-list requests
+  (`/v1/chat/completions`, `/v1/responses`, `/v1/messages`, `/v1/models`). Anything else on those hosts is refused,
+  so a prompt-injected command cannot use your key for file uploads, batch jobs or fine-tuning. Hermes features
+  that use other endpoints with the same key (OpenAI speech, transcription or image generation) do not work
+  until the path is added to `container/providers/<provider>.yaml`. `make lint-providers` fails if a provider
+  profile allows every path again.
 
 ## Troubleshooting
 

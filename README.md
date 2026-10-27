@@ -76,8 +76,8 @@ cd assistant
 container/kyverno --build      # first time: builds the image (15 to 30 minutes), then starts it
 ```
 
-It asks for your GitHub token once (hidden), then shows a GitHub page and a code to approve for the
-model sign-in. After that, `container/kyverno` alone gets you back in. Everything it asks is explained in
+It asks you to authorize GitHub once (a browser sign-in with `gh`, or a pasted token), then shows a GitHub page
+and a code to approve for the model sign-in. After that, `container/kyverno` alone gets you back in. Everything it asks is explained in
 [Setup, step by step](#setup-step-by-step).
 
 ## Setup, step by step
@@ -89,7 +89,7 @@ model sign-in. After that, `container/kyverno` alone gets you back in. Everythin
 | **A Mac with Apple Silicon**, or Linux | Tested on Apple Silicon only. See [what runs on which machine](#what-runs-on-which-machine). |
 | **[Docker Desktop](https://docs.docker.com/get-docker/) 4.60 or newer** | Must be running. Give Docker at least 4 GB of memory (Docker Desktop → Settings → Resources); an 8 GB Mac is enough. |
 | **About 20 GB of free disk** | The image is about 4.2 GB. |
-| **A GitHub token** | [Step 1](#1-create-a-github-token). |
+| **GitHub access** | The GitHub CLI (`gh`) signed in, or a token: [Step 1](#1-create-a-github-token). |
 | **A model** | A GitHub Copilot account (the free plan works with a few models), or an Anthropic, OpenAI or NVIDIA API key. See [step 4](#4-pick-a-model-that-works). |
 
 You do not install Hermes, Python or OpenShell yourself. If OpenShell is missing, the launcher installs it using
@@ -105,7 +105,7 @@ build-time checks on both. What decides whether the whole thing runs is Docker, 
 | **Mac with Apple Silicon** | Tested: this is where everything was developed and checked, including real chats |
 | **Linux, x86_64** | Checked end to end on a GitHub Linux runner (Ubuntu 24.04, kernel 6.17, Docker Engine 28): OpenShell installed, the sandbox started, the token stayed a placeholder, merges were refused by the proxy, the hooks were read-only and the dashboard answered. Not tried on a real Linux laptop. The kernel needs Landlock (Linux 5.13 or newer) |
 | **Linux, arm64** | The image is built for it; the launcher has not been tried there |
-| **Intel Mac** | Not supported: OpenShell supports macOS on Apple Silicon only |
+| **Intel Mac** | Not supported with OpenShell (it supports macOS on Apple Silicon only). `container/kyverno --no-openshell` needs only Docker, with less protection (not tried on Intel): see [docs/container.md](docs/container.md#running-without-openshell) |
 | **Windows** | OpenShell supports it through WSL2 (experimental); run the launcher inside WSL2. Untested |
 
 The launcher checks your machine first and says so plainly if it is one it cannot support.
@@ -114,8 +114,11 @@ The launcher checks your machine first and says so plainly if it is one it canno
 
 > **Have the GitHub CLI (`gh`)?** You can skip this step. The launcher asks how to authorize GitHub. Choose **1**
 > and it uses your `gh` sign-in, or opens the browser sign-in (`gh auth login`) if you are not signed in yet. Choose
-> **2** to paste the fine-grained token below instead. The `gh` token has broader access (`repo`) than the
-> fine-grained one. It is stored in OpenShell like any other token, and the assistant still cannot merge.
+> **2** to paste the fine-grained token below instead. `gh` always asks for the `repo`, `read:org` and `gist`
+> scopes, so its token can act on every repository you have access to, private ones included, while the
+> fine-grained one is limited to the repo you scope it to. `gh` may also offer to set up git
+> credentials on your machine; you can answer No. The token is stored in OpenShell like any other, and the
+> assistant still cannot merge.
 
 Create a fine-grained personal access token scoped to the repo you will point the assistant at
 (for example `kyverno/kyverno`):
@@ -160,9 +163,9 @@ It prints five numbered steps. This is what each one does and what you answer:
 |---|---|---|
 | **1. Docker and OpenShell** | Checks Docker is running; installs OpenShell if missing | Nothing, unless Docker is not running |
 | **2. Image** | Builds or pulls the image | Wait |
-| **3. GitHub token** | Asks which repo to manage, then your token (hidden). It checks the token against that repo before keeping it, and stores it in OpenShell | Type the repo (`owner/repo`) and paste the token |
+| **3. GitHub token** | Asks which repo to manage, then how to authorize: sign in with `gh` (browser), or paste a token (hidden). It checks the token against that repo before keeping it, and stores it in OpenShell | Type the repo (`owner/repo`), then sign in or paste the token |
 | **4. Sandbox** | Creates the sandbox and applies its network policy (a minute or two the first time) | Wait |
-| **5. Assistant** | Asks your GitHub username. Then GitHub Copilot sign-in: it prints a page and a code | Open https://github.com/login/device in your browser, enter the code, approve. Then pick **GitHub Copilot** and a model in the picker |
+| **5. Assistant** | Takes your GitHub username from the token (it asks only if it cannot read it). Then GitHub Copilot sign-in: it prints a page and a code | Open https://github.com/login/device in your browser, enter the code, approve. Then pick **GitHub Copilot** and a model in the picker |
 
 The chat then opens. The screen takes about 30 seconds to appear, because the memory plugin loads its search
 engine; you may see some `cpuinfo` and `onnxruntime` lines first, which are harmless. The first run is the only

@@ -17,8 +17,13 @@ discovery:
 endpoints:
   - host: integrate.api.nvidia.com
     port: 443
+    # Chat and model lists only. The proxy adds the real key to anything this endpoint admits, so file uploads,
+    # batch and fine-tuning jobs (which cost money) are left out. A new path is added here on purpose.
     protocol: rest
-    access: read-write
     enforcement: enforce
+    rules:
+      - allow: { method: POST, path: "/v1/chat/completions" }
+      - allow: { method: GET, path: "/v1/models" }
+      - allow: { method: GET, path: "/v1/models/**" }
 binaries:
   - /opt/hermes-home/.hermes/tools/python-*/bin/python*

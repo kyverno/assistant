@@ -1,0 +1,7 @@
+# Default owners for everything in the repo
+*                       @suhaani-agarwal @kyverno/kyverno-core-maintainers
+
+# CI, release, and supply-chain configuration
+/.github/               @suhaani-agarwal @kyverno/kyverno-core-maintainers
+/container/             @suhaani-agarwal @kyverno/kyverno-core-maintainers
+/Makefile               @suhaani-agarwal @kyverno/kyverno-core-maintainers

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs inside the OpenShell sandbox: what is specific to you on the first run, then the chat.
+# Runs inside the OpenShell sandbox (or the plain-Docker container, container/kyverno --no-openshell): what is specific to you on the first run, then the chat.
 # The profile, its skills, hooks and memory plugin are already in the image (container/setup-profile.sh
 # ran when it was built), so this is quick. The launcher calls it with:
 #   openshell sandbox exec --tty -- kyverno-start [--repo R] [--login L]
@@ -39,21 +39,39 @@ while [ $# -gt 0 ]; do
 done
 
 step "Checks"
-if [ ! -d /run/openshell-supervisor-ca ]; then
+if [ -d /run/openshell-supervisor-ca ]; then
+  RUNTIME=openshell
+elif [ "${KYVERNO_RUNTIME:-}" = docker ]; then
+  # container/kyverno --no-openshell: plain Docker. The launcher keeps the keys in a tmpfs file, readable only by
+  # this user; kyverno_load_secrets reads them (see kyverno-env).
+  RUNTIME=docker
+  # shellcheck source=container/kyverno-env
+  . /usr/local/bin/kyverno-env
+  kyverno_load_secrets
+else
   fail "this is not running inside an OpenShell sandbox — start it with the launcher (container/kyverno)"
   exit 1
 fi
 if [ -z "${REPO_GITHUB_TOKEN:-}" ]; then
-  fail "REPO_GITHUB_TOKEN is not set — the sandbox was created without the GitHub provider; re-run the launcher"
+  if [ "$RUNTIME" = docker ]; then
+    fail "REPO_GITHUB_TOKEN is not set — re-run the launcher (container/kyverno --no-openshell), which provides it"
+  else
+    fail "REPO_GITHUB_TOKEN is not set — the sandbox was created without the GitHub provider; re-run the launcher"
+  fi
   exit 1
 fi
 if [ -z "$HERMES_PY" ] || [ ! -f "$PROFILE_DIR/distribution.yaml" ]; then
   fail "the Hermes profile is missing from the image — rebuild it: container/kyverno --build"
   exit 1
 fi
-# REPO_GITHUB_TOKEN holds an opaque placeholder here, never the real token: the proxy swaps it in on
-# requests to GitHub.
-pass "inside an OpenShell sandbox; GitHub token is a placeholder, the real one stays outside"
+if [ "$RUNTIME" = docker ]; then
+  # No proxy here: the real token is in this process's environment.
+  pass "running in plain Docker, without OpenShell; the agent holds the real GitHub token"
+else
+  # REPO_GITHUB_TOKEN holds an opaque placeholder here, never the real token: the proxy swaps it in on
+  # requests to GitHub.
+  pass "inside an OpenShell sandbox; GitHub token is a placeholder, the real one stays outside"
+fi
 
 # --- helpers on the .env file (plain text, no YAML needed) ---
 env_get() {
@@ -129,7 +147,7 @@ if [ "${KYVERNO_SETUP_ONLY:-}" = 1 ]; then
   exit 0
 fi
 
-# --- Model. A provider key held by OpenShell shows up as a placeholder env var; otherwise sign in
+# --- Model. A provider key held by OpenShell shows up as a placeholder env var (a real one under --no-openshell); otherwise sign in
 # --- to GitHub Copilot with Hermes' own device-code login, like the Copilot CLI's. ---
 HAS_PROVIDER_KEY=0
 for v in ANTHROPIC_API_KEY OPENAI_API_KEY NVIDIA_API_KEY; do [ -n "${!v:-}" ] && HAS_PROVIDER_KEY=1; done

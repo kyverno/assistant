@@ -92,7 +92,7 @@ for just those 10. State the slice size against the digest's own `total_count`.
    each open issue's branch marker (parsed from its body, or `null` if it has none)
    as `blocking_issue_branches`.
 4. **Call `sequence_prs`** with every candidate's `number`/`changed_files`/`labels`/
-   `base_branch`/`head_branch`/`body`/`closing_issues` (numbers only)/`dependency_bumps`,
+   `base_branch`/`head_branch`/`body`/`closing_issues` (as fetched)/`dependency_bumps`/`files_truncated`,
    `repo_default_branch`, and `blocking_issue_branches`. It returns `tiers` (each PR
    tagged with `hard_constraints`, `rebase_flag`, `gate_blocked`, `file_classification`),
    `cycles`, `unresolved`, `file_overlaps`, and `package_overlaps` — a structural

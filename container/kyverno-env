@@ -1,0 +1,16 @@
+# shellcheck shell=bash
+# Sourced by kyverno-main and kyverno-start. Only used without OpenShell (container/kyverno --no-openshell).
+#
+# kyverno_load_secrets reads the keys the launcher copied into /run/kyverno-secrets/env (a tmpfs, mode 600) and
+# exports the GitHub token and any *_API_KEY (the name ends in _API_KEY, so it cannot be PATH or LD_PRELOAD). It parses
+# the file line by line and never sources it, so a value cannot run anything. This is the one place that decides which
+# keys count; container/kyverno-docker copies the whole secrets file in.
+kyverno_load_secrets() {
+  local file=/run/kyverno-secrets/env k v
+  [ -f "$file" ] || return 0
+  while IFS='=' read -r k v || [ -n "$k" ]; do
+    case "$k" in
+      REPO_GITHUB_TOKEN|[A-Z][A-Z0-9_]*_API_KEY) export "$k=$v" ;;
+    esac
+  done < "$file"
+}

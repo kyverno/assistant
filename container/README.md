@@ -22,10 +22,13 @@ troubleshooting are all in **[docs/container.md](../docs/container.md)**.
 | `kyverno-start` | Runs inside the sandbox: your repo and username, the Copilot sign-in, then the chat |
 | `kyverno-main` | The sandbox's main process: runs the dashboard in the background and keeps the sandbox alive |
 | `kyverno` | The launcher you run on your laptop |
+| `lib.sh` | Shared by both launchers: output helpers, the GitHub token prompt, the image build or pull, and the list of state kept across `--upgrade` |
+| `kyverno-env`, `dashboard-relay` | Used only by `--no-openshell`, inside the container: reads the keys the launcher copied in, and passes the dashboard to the port Docker publishes |
+| `kyverno-docker` | What `kyverno --no-openshell` runs: the same image in plain Docker, without OpenShell (less protection; see docs/container.md, "Running without OpenShell") |
 | `restore-state.sh` | Uploaded by the launcher during `--upgrade` to put your state back |
 | `policy.yaml` | The sandbox's filesystem and network policy. Keep the Copilot inference paths listed by name (see docs/container.md, "Safety layers") |
-| `providers/*.yaml` | OpenShell provider profiles: the GitHub token (with the MCP tool allowlist the proxy enforces) and the model-provider keys |
-| `hooks/require-sandbox-terminal.sh` | Lets the terminal run locally, but only inside an OpenShell sandbox |
+| `providers/*.yaml` | OpenShell provider profiles: the GitHub token (with the MCP tool allowlist the proxy enforces) and the model-provider keys (each limited to chat and model-list paths) |
+| `hooks/require-sandbox-terminal.sh` | Lets the terminal run locally, but only inside an OpenShell sandbox (or a plain-Docker container started with `--no-openshell --allow-terminal`) |
 
 ## Not done yet
 

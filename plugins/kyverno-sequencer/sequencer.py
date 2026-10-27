@@ -61,18 +61,22 @@ GENERATED_EXCEPTIONS = {"pkg/clients/dclient/client.go"}
 
 API_SURFACE_GLOB_PATTERNS = ["api/kyverno/*", "api/policyreport/*", "api/reports/*"]
 ADMISSION_CRITICAL_GLOB_PATTERNS = ["pkg/engine/*", "pkg/webhooks/*", "pkg/cel/*"]
-TEST_ONLY_GLOB_PATTERNS = ["*_test.go", "test/*"]
+TEST_ONLY_GLOB_PATTERNS = ["*_test.go", "test/*", "*/testdata/*", "*/_testdata/*"]
 
 # Generated-file *inputs* — distinct from the API_SURFACE display tier above: this drives
 # edge-building (input-before-output), not what gets shown to the maintainer.
 GENERATED_INPUT_GLOB_PATTERNS = ["api/*_types.go"]
 GENERATED_INPUT_DEPENDENCY_MODULE = "github.com/kyverno/api"
 
+# The repo these candidates come from. A reference naming another repo ("depends on kyverno/api#72")
+# is not about a candidate with that number.
+REPO = "kyverno/kyverno"
+
 # Covers real phrasing variants seen in the wild, not just the canonical form: "Parent:
 # #17701", "Stacks on top of #17695", "depends on kyverno/kyverno#17720", "Blocked by #N".
 _CROSS_REF_PATTERN = re.compile(
     r"\b(?:depends on|blocked by|requires|stack(?:s|ed)?\s+on(?:\s+top\s+of)?|parent)\b"
-    r"\s*:?\s*(?:[\w.-]+/[\w.-]+)?#(\d+)",
+    r"\s*:?\s*(?:([\w.-]+/[\w.-]+))?#(\d+)",
     re.IGNORECASE,
 )
 
@@ -83,7 +87,15 @@ def _norm(pattern: str) -> str:
 
 
 def _match_any(path: str, patterns: list[str]) -> bool:
-    return any(fnmatch.fnmatch(path, _norm(pat)) for pat in patterns)
+    """A pattern with no '/' matches the file name at any depth, the way the source rules it mirrors
+    (.claude/settings.json) read a bare `zz_generated.deepcopy.go`; fnmatch alone would only match
+    it at the repo root, where no such file exists."""
+    base = path.rsplit("/", 1)[-1]
+    for pat in patterns:
+        pat = _norm(pat)
+        if fnmatch.fnmatch(path, pat) or ("/" not in pat and fnmatch.fnmatch(base, pat)):
+            return True
+    return False
 
 
 def classify_file(path: str) -> str:
@@ -116,6 +128,7 @@ class PR:
     body: str = ""
     closing_issues: list[int] = field(default_factory=list)
     dependency_bumps: list[str] = field(default_factory=list)
+    files_truncated: bool = False
 
     @property
     def size(self) -> int:
@@ -138,6 +151,33 @@ class PR:
 
 
 def pr_from_dict(d: dict) -> PR:
+    raw_closing = d.get("closing_issues")
+    if not isinstance(raw_closing, (list, tuple, set)):
+        raw_closing = [raw_closing] if raw_closing is not None else []
+
+    closing_issues: list[int] = []
+    seen_issues: set[int] = set()
+    for item in raw_closing:
+        if isinstance(item, bool):
+            continue
+        num = None
+        if isinstance(item, dict):
+            val = item.get("number")
+            if not isinstance(val, bool) and val is not None:
+                try:
+                    num = int(val)
+                except (ValueError, TypeError):
+                    pass
+        elif item is not None:
+            try:
+                num = int(item)
+            except (ValueError, TypeError):
+                pass
+
+        if num is not None and num > 0 and num not in seen_issues:
+            seen_issues.add(num)
+            closing_issues.append(num)
+
     return PR(
         number=int(d["number"]),
         changed_files=list(d.get("changed_files") or []),
@@ -145,7 +185,8 @@ def pr_from_dict(d: dict) -> PR:
         base_branch=str(d.get("base_branch") or ""),
         head_branch=str(d.get("head_branch") or ""),
         body=str(d.get("body") or ""),
-        closing_issues=list(d.get("closing_issues") or []),
+        closing_issues=closing_issues,
+        files_truncated=bool(d.get("files_truncated")),
         dependency_bumps=list(d.get("dependency_bumps") or []),
     )
 
@@ -170,7 +211,9 @@ def build_hard_edges(prs: list[PR], repo_default_branch: str) -> tuple[list[tupl
 
         # 3. Explicit body reference.
         for match in _CROSS_REF_PATTERN.finditer(p.body):
-            ref = int(match.group(1))
+            if match.group(1) and match.group(1).lower() != REPO:
+                continue
+            ref = int(match.group(2))
             if ref in by_number and ref != p.number:
                 edges.append((ref, p.number, "explicit reference"))
 
@@ -303,10 +346,15 @@ def find_package_overlaps(prs: list[PR], edges: list[tuple[int, int, str]], file
     """Pairs of candidates touching the same directory but *not* the same file — weaker than
     `find_file_overlaps`: different files can't git-conflict, this is only "review together,
     might interact" territory. Excludes pairs already reported as a file overlap, so the two
-    annotations don't double up on the same pair."""
+    annotations don't double up on the same pair.
+
+    Every file counts except generated ones and tests: regenerated output and test files share
+    directories without the code interacting. Engine, webhook, CEL and API code does count —
+    two PRs in different files of the same package are exactly the pair worth reviewing together."""
     edge_pairs = {frozenset((a, b)) for a, b, _kind in edges}
     dirs_by_pr = {
-        p.number: {os.path.dirname(f) for f in p.changed_files if classify_file(f) == "STANDARD"}
+        p.number: {os.path.dirname(f) for f in p.changed_files
+                   if classify_file(f) != "GENERATED" and not _match_any(f, TEST_ONLY_GLOB_PATTERNS)}
         for p in prs
     }
     overlaps: list[dict] = []
@@ -368,6 +416,9 @@ def sequence(
             warnings = []
             if blocked:
                 warnings.append("gate_blocked: an open e2e-failure issue blocks merging on this branch")
+            if p.files_truncated:
+                warnings.append("files_truncated: changed_files is cut off at the fetch limit, so this PR's "
+                                "classification, overlaps and rebase_flag may be incomplete")
             tier_prs_out.append({
                 "pr": number,
                 "hard_constraints": hard_constraints,
