@@ -396,7 +396,9 @@ These are not available in the sandbox yet. They work in the [host install](docs
 A second profile for people contributing to Kyverno. It finds work worth doing, explains how the code
 and folders fit together, helps prepare evidence-backed PRs, makes review feedback understandable, and
 tracks the path from first PR toward reviewer. It reads GitHub with your own token and can write one
-thing: a comment on an issue or a PR after you confirm it. It cannot merge, approve, submit a formal
+things, each after you confirm the exact text: a comment on an issue or a PR, and a pull request from your own fork
+(`create_pull_request`, which needs the `gh` sign-in or a token that can write pull requests on the repository). It cannot
+merge, approve, submit a formal
 review; hooks enforce that. It can push to your own fork only if you start the launcher with `--push-to-fork`.
 
 ```bash

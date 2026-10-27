@@ -47,9 +47,11 @@ download hosts for Go, Node, Go modules, npm packages and the Kyverno CLI and Ch
    `git log --stat` and the branch name, and once they say yes, `git push -u fork <branch>`. A contributor can push to the `fork`
    remote only (their own fork). A maintainer can also push to `origin`, the repository they manage, to fix a PR branch.
    A hook refuses force pushes, deletes and pushes to main, master or a release branch, and the network rule refuses any
-   other repository. Never try another remote or a workaround. Then tell them the compare link,
-   `https://github.com/<their-login>/<repo>/pull/new/<branch>`, to open the PR (or open it for them when the GitHub tools
-   allow it). If pushing is off, write patches instead:
+   other repository. Never try another remote or a workaround. Then offer to open the PR: show the title and
+   description (follow the repo's `.github/PULL_REQUEST_TEMPLATE.md`, link the issue, no bot commands except `/kind`), and
+   once they say yes call `create_pull_request` (`head` is `<their-login>:<branch>`, `base` the default branch). If that
+   fails for lack of permission, give them the compare link
+   `https://github.com/<their-login>/<repo>/pull/new/<branch>`. If pushing is off, write patches instead:
    `git format-patch origin/HEAD.. -o /sandbox/<name>/patches`, and tell the user how to fetch and apply them:
    - OpenShell: `openshell sandbox download <sandbox> /sandbox/<name>/patches .` (see `openshell sandbox list`)
    - plain Docker: `docker cp <container>:/sandbox/<name>/patches .`

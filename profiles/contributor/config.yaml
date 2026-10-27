@@ -1,8 +1,9 @@
 # kyverno-contributor: Hermes profile config for a contributor to the Kyverno project.
 #
-# Security-critical, hand-edited only. The contributor profile can read GitHub widely and write exactly one
-# thing: a comment on an issue or PR (add_issue_comment), checked by hooks/contributor-guard.py. It has no tool to
-# merge, approve, review, push or delete, and replies to reviewers are drafts the contributor posts.
+# Security-critical, hand-edited only. The contributor profile can read GitHub widely and write two
+# things: a comment on an issue or PR (add_issue_comment) and a pull request from the contributor's own fork
+# (create_pull_request), both checked by hooks/contributor-guard.py. It has no tool to merge, approve, review or
+# delete, and replies to reviewers are drafts the contributor posts.
 #
 #   1. mcp_servers.github.headers (X-MCP-Tools): the hosted server never advertises any other tool.
 #      scripts/install.sh checks that this list equals tools.include.
@@ -17,11 +18,11 @@ mcp_servers:
     url: https://api.githubcopilot.com/mcp/
     headers:
       Authorization: "Bearer ${REPO_GITHUB_TOKEN}"
-      X-MCP-Tools: "search_pull_requests,pull_request_read,issue_read,search_issues,list_issues,list_label,get_label,get_file_contents,get_repository_tree,search_code,get_commit,list_commits,list_branches,list_tags,list_releases,get_latest_release,list_pull_requests,search_repositories,search_users,get_me,semantic_issue_similarity_search,actions_list,actions_get,get_job_logs,list_discussion_categories,list_discussions,get_discussion,get_discussion_comments,add_issue_comment"
+      X-MCP-Tools: "search_pull_requests,pull_request_read,issue_read,search_issues,list_issues,list_label,get_label,get_file_contents,get_repository_tree,search_code,get_commit,list_commits,list_branches,list_tags,list_releases,get_latest_release,list_pull_requests,search_repositories,search_users,get_me,semantic_issue_similarity_search,actions_list,actions_get,get_job_logs,list_discussion_categories,list_discussions,get_discussion,get_discussion_comments,add_issue_comment,create_pull_request"
     supports_parallel_tool_calls: true
     tools:
       # Reads: PRs, issues, files and the tree (the agent can read any code without a clone), commits,
-      # code search, CI runs and logs, Discussions. add_issue_comment is the only write.
+      # code search, CI runs and logs, Discussions. add_issue_comment and create_pull_request are the only writes.
       include:
         - search_pull_requests
         - pull_request_read
@@ -52,6 +53,7 @@ mcp_servers:
         - get_discussion
         - get_discussion_comments
         - add_issue_comment
+        - create_pull_request
 
 custom_toolsets:
   kyverno-contributor-tools:
@@ -75,7 +77,7 @@ platform_toolsets:
 
 hooks:
   pre_tool_call:
-    - matcher: ".*(merge|delete|force_push|review_write|approve|request_copilot|pull_request_review|add_issue_comment|update_issue_comment).*"
+    - matcher: ".*(merge|delete|force_push|review_write|approve|request_copilot|pull_request_review|add_issue_comment|update_issue_comment|create_pull_request).*"
       command: "./hooks/contributor-guard.py"
       timeout: 20
       fail_closed: true
