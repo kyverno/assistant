@@ -85,6 +85,8 @@ image, and puts the state back. It carries only what is yours:
 - the memory database, the notes in `memories/`, the chat history and sessions, and the dashboard's data
 - your repo and username, and the Copilot sign-in (just those settings, not the whole `.env`)
 - the model you chose
+- your cloned repositories under `/sandbox`, with their unpushed commits and edits. The downloaded toolchains and build caches
+  (`/sandbox/.toolchains`, large) only come along with `--keep-caches`; otherwise they download again
 
 The profile itself (skills, plugins, hooks, settings) always comes from the new image. If saving fails, the old
 sandbox is left alone. If restoring fails, the saved copy stays in a temporary folder and its path is printed; it

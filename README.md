@@ -369,8 +369,10 @@ issue or fix a PR and it follows the `workspace` skill: `kyverno-workspace <owne
 the toolchains it declares (Go, Node, or the Kyverno CLI and Chainsaw), then it builds, runs the tests, and shows you
 the real output. The toolchains are downloaded the first time, not baked into the image: the network policy allows
 only those hosts, GET only, and every download is checked against the vendor's checksum. Caches live in the sandbox, so
-recreating it downloads them again. A big Go build wants more memory than Docker Desktop's default; things that need
-a real cluster cannot run, and the assistant says so (see [#25](https://github.com/kyverno/assistant/issues/25)).
+recreating it downloads them again, unless you pass `--keep-caches` to `--upgrade`. Your cloned repositories and their
+unpushed commits always come along on `--upgrade`. When a toolchain's rough memory need is above what the sandbox really
+has, `kyverno-workspace` says so with both numbers. Things that need a real cluster cannot run, and the assistant says so
+(see [#25](https://github.com/kyverno/assistant/issues/25)).
 
 The result comes back as a patch (`openshell sandbox download`), or as a pushed branch if you turn on pushing:
 

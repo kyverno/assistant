@@ -5,6 +5,7 @@
 #   tc_have <version>    succeeds when it is already installed
 #   tc_install <version> download (checksum verified) and unpack it
 #   tc_env               the shell lines that put it on PATH
+#   tc_memory_mb         rough memory a full build wants, to compare with what the sandbox really has
 _go_releases() { curl -fsSL 'https://go.dev/dl/?mode=json&include=all'; }
 tc_want() {
   local v
@@ -15,6 +16,7 @@ tc_want() {
   fi
   echo "$v"
 }
+tc_memory_mb() { echo 6144; }   # a full build of a large module such as kyverno/kyverno
 tc_have() { [ "$("$TOOLS/go/bin/go" env GOVERSION 2>/dev/null)" = "go$1" ]; }
 tc_install() {
   local file="go$1.linux-$ARCH.tar.gz" sha

@@ -8,6 +8,7 @@ container/kyverno --build                  # first time: build the image from th
 container/kyverno                          # later: reattach to (or start) the sandbox
 container/kyverno --provider anthropic     # also use another model provider (anthropic, openai, nvidia)
 container/kyverno --build --upgrade        # new version: recreate the sandbox, keeping your state
+container/kyverno --upgrade --keep-caches   # also carry the downloaded toolchains and build caches (clones always come along)
 container/kyverno --push-to-fork           # also let the assistant push branches to your own fork (off by default)
 ```
 

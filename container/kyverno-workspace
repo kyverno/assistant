@@ -60,6 +60,15 @@ else
   info "pushing is off (container/kyverno --push-to-fork turns it on); the assistant hands you a patch instead"
 fi
 
+# What the sandbox really has: the smaller of the memory cgroup's limit and the machine's total, in MB.
+mem_total_mb() {
+  local total limit
+  total="$(awk '/^MemTotal:/{print int($2/1024)}' /proc/meminfo 2>/dev/null)"
+  limit="$(cat /sys/fs/cgroup/memory.max 2>/dev/null)"
+  if [[ "$limit" =~ ^[0-9]+$ ]] && [ $((limit / 1048576)) -lt "${total:-0}" ]; then total=$((limit / 1048576)); fi
+  echo "${total:-0}"
+}
+
 needs=()
 [ -f "$DIR/go.mod" ] && needs+=(go)
 [ -f "$DIR/package.json" ] && needs+=(node)
@@ -69,9 +78,17 @@ printf '\n\033[1mToolchains\033[0m\n'
 [ "${#needs[@]}" -eq 0 ] && info "nothing to install: no go.mod, package.json or Chainsaw config in $REPO"
 rc=0
 for tc in "${needs[@]+"${needs[@]}"}"; do
+  unset -f tc_memory_mb   # a toolchain without a memory hint must not inherit the previous one's
   # shellcheck source=/dev/null
   . "$LIB/$tc.sh"
   want="$(tc_want "$DIR")"
+  if declare -F tc_memory_mb >/dev/null; then
+    have_mb="$(mem_total_mb)"; need_mb="$(tc_memory_mb)"
+    if [ "$have_mb" -gt 0 ] && [ "$have_mb" -lt "$need_mb" ]; then
+      info "memory: this sandbox has about $have_mb MB; a full $tc build wants roughly $need_mb MB. Build only the packages you need,"
+      info "        or give Docker more memory (Docker Desktop: Settings, Resources, Memory) if a build gets killed."
+    fi
+  fi
   if [ -z "$want" ] || [ "$want" = null ]; then fail "$tc: could not work out the version to install"; rc=1; continue; fi
   if tc_have "$want"; then
     pass "$tc $want already installed"

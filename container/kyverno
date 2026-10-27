@@ -18,6 +18,8 @@
 #                  kept in OpenShell like the GitHub token. Without it, the assistant uses GitHub Copilot.
 #   --upgrade      recreate the sandbox from the (new) image and keep your state: memory, chat history,
 #                  repo and username, Copilot sign-in and model choice. Use it with --build or --image.
+#   --keep-caches  with --upgrade: also carry the downloaded toolchains and build caches (large) to the new sandbox.
+#                  Your cloned repositories and their unpushed work always come along.
 #   --no-attach    set everything up but do not open the chat
 #   --reset        forget the stored GitHub token and ask for it again
 #   --push-to-fork let the assistant push branches to your own forks (kyverno, website, policies; set KYVERNO_PUSH_REPOS
@@ -42,6 +44,7 @@ BUILD=0
 RESET=0
 UPGRADE=0
 NO_ATTACH=0
+KEEP_CACHES=0
 PUSH=0
 NO_PUSH=0
 BACKUP_DIR=""
@@ -55,10 +58,11 @@ while [ $# -gt 0 ]; do
     --provider) WANT_PROVIDERS+=("${2:-}"); shift 2 ;;
     --upgrade) UPGRADE=1; shift ;;
     --no-attach) NO_ATTACH=1; shift ;;
+    --keep-caches) KEEP_CACHES=1; shift ;;
     --reset) RESET=1; shift ;;
     --push-to-fork) PUSH=1; shift ;;
     --no-push) NO_PUSH=1; shift ;;
-    -h|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
@@ -110,14 +114,34 @@ save_state() {
     "cd /opt/hermes-home/.hermes/profiles/$HERMES_PROFILE && tar -cf /sandbox/kyverno-state.tar \$(ls -d $STATE_FILES 2>/dev/null)" \
     >/dev/null 2>&1 || return 1
   openshell sandbox download "$SANDBOX" /sandbox/kyverno-state.tar "$dest/" >/dev/null 2>&1 || return 1
-  [ -s "$dest/kyverno-state.tar" ]
+  [ -s "$dest/kyverno-state.tar" ] || return 1
+  save_workspace "$dest"
+}
+
+# The work in /sandbox: every cloned repository (its unpushed commits and edits), plus ledgers and patches. The
+# toolchains and caches (.toolchains) only with --keep-caches: they are large and can be downloaded again.
+save_workspace() {
+  local dest="$1" skip="--exclude=.toolchains"
+  [ "$KEEP_CACHES" = 1 ] && skip=""
+  if openshell sandbox exec -n "$SANDBOX" --no-tty -- sh -c \
+      "tar -cf /sandbox/kyverno-workspace.tar -C /sandbox $skip --exclude=./kyverno-workspace.tar --exclude=./kyverno-state.tar --exclude=./restore-state.sh ." \
+      >/dev/null 2>&1 && openshell sandbox download "$SANDBOX" /sandbox/kyverno-workspace.tar "$dest/" >/dev/null 2>&1; then
+    info "workspace saved ($(du -sh "$dest/kyverno-workspace.tar" 2>/dev/null | cut -f1))"
+  fi
+  return 0
 }
 
 restore_state() {
   local src="$1"
   openshell sandbox upload "$SANDBOX" "$src/kyverno-state.tar" /sandbox/ >/dev/null 2>&1 || return 1
   openshell sandbox upload "$SANDBOX" "$HERE/restore-state.sh" /sandbox/ >/dev/null 2>&1 || return 1
-  openshell sandbox exec -n "$SANDBOX" --no-tty -- bash /sandbox/restore-state.sh "$HERMES_PROFILE"
+  openshell sandbox exec -n "$SANDBOX" --no-tty -- bash /sandbox/restore-state.sh "$HERMES_PROFILE" || return 1
+  if [ -s "$src/kyverno-workspace.tar" ]; then
+    openshell sandbox upload "$SANDBOX" "$src/kyverno-workspace.tar" /sandbox/ >/dev/null 2>&1 \
+      && openshell sandbox exec -n "$SANDBOX" --no-tty -- sh -c 'cd /sandbox && tar -xf kyverno-workspace.tar && rm -f kyverno-workspace.tar' \
+      && info "workspace restored"
+  fi
+  return 0
 }
 
 step "1. Docker and OpenShell"

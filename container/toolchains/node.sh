@@ -10,6 +10,7 @@ tc_want() {
   curl -fsSL https://nodejs.org/dist/index.json \
     | jq -r --arg v "${v:-}" '[.[].version | ltrimstr("v") | select($v == "" or . == $v or startswith($v + "."))][0]'
 }
+tc_memory_mb() { echo 2048; }   # npm ci and a site build
 tc_have() { [ "$("$TOOLS/node/bin/node" --version 2>/dev/null)" = "v$1" ]; }
 tc_install() {
   local arch="$ARCH" file sha; [ "$arch" = amd64 ] && arch=x64
