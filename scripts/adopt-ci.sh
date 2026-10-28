@@ -87,13 +87,26 @@ pinned to commit \`${ref}\`:
 
 ## Nothing changes when this merges
 
-The scheduled and PR-event runs are **previews**: they print what they would do and write nothing.
+The scheduled and PR-event runs are **previews**: they print what they would do (log lines start with \`[dry-run]\`)
+and write nothing. A repository admin turns the automation on afterwards.
 
-1. Run **Sync labels** from the Actions tab with dry run off, so the lifecycle labels exist.
-2. Run **PR lifecycle** (readiness, then stale) by hand with dry run off, and read the result.
-3. When you are happy with the previews, a repository admin turns the automation on by setting the repository
-   variable \`PR_AUTOMATION_LIVE\` to \`true\` (Settings, Secrets and variables, Actions, Variables). No PR is needed,
-   and setting it back to \`false\` pauses it.
+**Before the switch**
+
+1. Run **Sync labels** from the Actions tab with dry run off, so the lifecycle labels exist. Readiness and stale
+   can fail without them.
+2. Read a few preview runs, and optionally run **PR lifecycle** by hand (readiness, then stale) with dry run off to
+   see real effects once.
+3. Adjust the config (see below) to match the repository.
+4. If the organisation restricts which actions may run (Settings, Actions, General), allow \`${source_repo}@*\`,
+   \`actions/labeler@*\` and \`eps1lon/actions-label-merge-conflict@*\`.
+
+**The switch**: set the repository variable \`PR_AUTOMATION_LIVE\` to \`true\` (Settings, Secrets and variables, Actions,
+Variables), or run \`gh variable set PR_AUTOMATION_LIVE --body true --repo ${repo}\`. Creating a variable needs admin
+access. No PR is needed.
+
+**After it**: readiness and path labels act on the next PR event (readiness also hourly), and stale in its daily run.
+The first live stale run can mark old quiet PRs stale; they cannot be closed until at least 7 days after the warning.
+Setting the variable to \`false\`, or deleting it, returns every scheduled and PR-event run to preview.
 
 ## What to check in this PR
 

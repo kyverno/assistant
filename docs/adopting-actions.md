@@ -47,7 +47,7 @@ A repository admin turns it on, after reading the previews, in this order.
 3. Edit `.github/pr-management.json` (reviewer team, exempt labels, timings) and `.github/pr-readiness-checks.yml`
    (which failing checks block a PR, and which are not the author's to fix) to match the repository.
 4. An organisation that restricts which actions may run (Settings, Actions, General) must allow
-   `kyverno/assistant/*`, `actions/labeler` and `eps1lon/actions-label-merge-conflict`, or the runs will not start.
+   `kyverno/assistant@*`, `actions/labeler@*` and `eps1lon/actions-label-merge-conflict@*`, or the runs will not start.
 
 **The switch**
 
