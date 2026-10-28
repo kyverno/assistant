@@ -32,6 +32,7 @@ for people contributing to Kyverno. See [Contributor profile](#contributor-profi
 - [The dashboard](#the-dashboard)
 - [Slack and scheduled jobs](#slack-and-scheduled-jobs)
 - [Contributor profile](#contributor-profile)
+- [CI automation for your repositories](#ci-automation-for-your-repositories)
 - [Repository layout](#repository-layout)
 - [Further reading](#further-reading)
 
@@ -425,6 +426,33 @@ Background updates (new reviews, failing checks, merged PRs) are a paused cron j
 
 Skills: `find-work`, `understand-code`, `make-the-change`, `review-loop`, `grow`. The coding environment is shared with the maintainer profile (see above).
 
+## CI automation for your repositories
+
+Separate from the agent, and optional: shared GitHub Actions that label PRs from the paths they change, mark a PR
+`ready-for-review` or `needs-author-action` from its checks and review threads, and warn and then close PRs an author
+has left quiet. They need no model, container or token of yours; they run on GitHub with the workflow's own token.
+
+Adopt them **before** relying on the agent if you can. Its queue and follow-up skills (`pr-queue`, `author-followup`)
+read those labels, so a repository that already runs the automation gives the agent the signals it expects. Without
+them the agent still runs, but it has no `needs-author-action` or `ready-for-review` labels to go on.
+
+One person runs one command with their own `gh` login, and it opens a PR in each repository you name:
+
+```bash
+scripts/adopt-ci.sh --reviewers @your-org/maintainers your-org/repo-a your-org/repo-b
+```
+
+The PR adds workflows and config that run in **preview** (they print what they would do and change nothing). To turn
+the automation on, once the previews look right:
+
+1. Run **Sync labels** from the repository's Actions tab with dry run off, so the lifecycle labels exist.
+2. Read a few preview runs, and edit `.github/pr-management.json` and `.github/pr-readiness-checks.yml` if needed.
+3. A repository admin sets the repository variable `PR_AUTOMATION_LIVE` to `true`
+   (`gh variable set PR_AUTOMATION_LIVE --body true --repo owner/repo`). No PR is needed, and `false` pauses it.
+
+The full steps, what is added to each repository, the permissions, and why it works this way are in
+[`docs/adopting-actions.md`](docs/adopting-actions.md). The actions themselves are in [`actions/`](actions/README.md).
+
 ## Repository layout
 
 ```
@@ -438,6 +466,9 @@ profiles/contributor/    the contributor profile: same shape, plus org/org.yaml 
 scripts/install.sh       the host install: idempotent installer, --profile maintainer|contributor [NAME]
 scripts/update.sh        the host install: git pull, then re-run the installer
 scripts/openshell.sh     the host install's sandboxed terminal: setup, policy, access requests, audit
+scripts/adopt-ci.sh      opens a PR that adds the shared CI actions to other repositories (see above)
+actions/                 shared CI actions (PR labelling, readiness, stale), usable without the agent
+adopt-ci-templates/      workflows and config that adopt-ci.sh copies into each repository
 docs/                    design, deployment and usage docs
 ```
 
@@ -512,4 +543,6 @@ The files below are the maintainer profile's, under `profiles/maintainer/`.
 | [`docs/capabilities.md`](docs/capabilities.md) | A tour of what it can do, with example prompts |
 | [`docs/deployment.md`](docs/deployment.md) | Install runbook and every environment variable (host install) |
 | [`docs/architecture.md`](docs/architecture.md) | Design and security model |
+| [`docs/adopting-actions.md`](docs/adopting-actions.md) | Adding the shared CI actions to a repository and turning them on |
+| [`docs/generalisation.md`](docs/generalisation.md) | How the CI actions and the assistants become adoptable by any organisation |
 | [`docs/workflow.md`](docs/workflow.md) | The target maintainer workflow and build plan |
