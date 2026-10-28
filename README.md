@@ -28,6 +28,7 @@ server to run and no webhook receiver.
 - [What it does](#what-it-does)
 - [The dashboard](#the-dashboard)
 - [Slack and scheduled jobs](#slack-and-scheduled-jobs)
+- [CI automation for your repositories](#ci-automation-for-your-repositories)
 - [Repository layout](#repository-layout)
 - [Further reading](#further-reading)
 
@@ -362,6 +363,33 @@ These are not available in the sandbox yet. They work in the [host install](docs
 - **Slack**: talk to the assistant by mentioning it, and it can read and post in your maintainers channel.
 - **Scheduled jobs**: a weekday review digest and two memory jobs (installed paused).
 
+## CI automation for your repositories
+
+Separate from the agent, and optional: shared GitHub Actions that label PRs from the paths they change, mark a PR
+`ready-for-review` or `needs-author-action` from its checks and review threads, and warn and then close PRs an author
+has left quiet. They need no model, container or token of yours; they run on GitHub with the workflow's own token.
+
+Adopt them **before** relying on the agent if you can. Its queue and follow-up skills (`pr-queue`, `author-followup`)
+read those labels, so a repository that already runs the automation gives the agent the signals it expects. Without
+them the agent still runs, but it has no `needs-author-action` or `ready-for-review` labels to go on.
+
+One person runs one command with their own `gh` login, and it opens a PR in each repository you name:
+
+```bash
+scripts/adopt-ci.sh --reviewers @your-org/maintainers your-org/repo-a your-org/repo-b
+```
+
+The PR adds workflows and config that run in **preview** (they print what they would do and change nothing). To turn
+the automation on, once the previews look right:
+
+1. Run **Sync labels** from the repository's Actions tab with dry run off, so the lifecycle labels exist.
+2. Read a few preview runs, and edit `.github/pr-management.json` and `.github/pr-readiness-checks.yml` if needed.
+3. A repository admin sets the repository variable `PR_AUTOMATION_LIVE` to `true`
+   (`gh variable set PR_AUTOMATION_LIVE --body true --repo owner/repo`). No PR is needed, and `false` pauses it.
+
+The full steps, what is added to each repository, the permissions, and why it works this way are in
+[`docs/adopting-actions.md`](docs/adopting-actions.md). The actions themselves are in [`actions/`](actions/README.md).
+
 ## Repository layout
 
 ```
@@ -374,6 +402,9 @@ config.yaml              model default, GitHub/Slack MCP servers, tool allowlist
 scripts/install.sh       the host install: idempotent installer and sanity checks
 scripts/update.sh        the host install: git pull, then re-run the installer
 scripts/openshell.sh     the host install's sandboxed terminal: setup, policy, access requests, audit
+scripts/adopt-ci.sh      opens a PR that adds the shared CI actions to other repositories (see above)
+actions/                 shared CI actions (PR labelling, readiness, stale), usable without the agent
+adopt-ci-templates/      workflows and config that adopt-ci.sh copies into each repository
 policies/                OpenShell policy for the host install's sandboxed terminal
 sandbox/                 Dockerfile of the host install's terminal sandbox image
 hooks/                   pre_tool_call backstops
@@ -452,4 +483,6 @@ Override `IMAGE` or `TAG` for a different local image name, for example `make im
 | [`docs/capabilities.md`](docs/capabilities.md) | A tour of what it can do, with example prompts |
 | [`docs/deployment.md`](docs/deployment.md) | Install runbook and every environment variable (host install) |
 | [`docs/architecture.md`](docs/architecture.md) | Design and security model |
+| [`docs/adopting-actions.md`](docs/adopting-actions.md) | Adding the shared CI actions to a repository and turning them on |
+| [`docs/generalisation.md`](docs/generalisation.md) | How the CI actions and the assistants become adoptable by any organisation |
 | [`docs/workflow.md`](docs/workflow.md) | The target maintainer workflow and build plan |

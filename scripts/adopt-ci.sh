@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Opens a pull request in each named repository that adds the shared CI actions (PR labelling, readiness and stale
-# handling) in preview mode. Run it once, from a laptop, with your own `gh` login; nothing is stored anywhere.
+# handling), in preview mode. Run it once, from a laptop, with your own `gh` login; nothing is stored anywhere.
 #
 #   scripts/adopt-ci.sh --reviewers @your-org/maintainers your-org/repo-a your-org/repo-b
 #   scripts/adopt-ci.sh --reviewers @your-org/maintainers --dry-run your-org/repo-a
@@ -61,6 +61,19 @@ workflows=(pr-management check-pr-management pr-labelling sync-labels)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
+overlap_section() {
+  [[ -n "$overlap" ]] || return 0
+  cat << EOS
+
+## Existing automation to retire first
+
+These workflows already touch the same labels or run a labeler or stale bot. Once the previews are switched on, both
+would act on the same PRs and could add duplicate or conflicting labels and comments. Keep one owner for each job:
+
+$(printf '%s\n' "$overlap" | sed 's/^/- /')
+EOS
+}
+
 pr_body() {
   cat << EOF
 ## What this does
@@ -74,11 +87,26 @@ pinned to commit \`${ref}\`:
 
 ## Nothing changes when this merges
 
-Every scheduled run is a **preview**: it prints what it would do and writes nothing. Turn each part on separately:
+The scheduled and PR-event runs are **previews**: they print what they would do (log lines start with \`[dry-run]\`)
+and write nothing. A repository admin turns the automation on afterwards.
 
-1. Run **Sync labels** from the Actions tab with dry run off, so the lifecycle labels exist.
-2. Run **PR lifecycle** (readiness, then stale) by hand with dry run off, and read the result.
-3. Only then change the scheduled \`dry-run:\` expressions in \`.github/workflows/pr-management.yaml\` to \`'false'\`.
+**Before the switch**
+
+1. Run **Sync labels** from the Actions tab with dry run off, so the lifecycle labels exist. Readiness and stale
+   can fail without them.
+2. Read a few preview runs, and optionally run **PR lifecycle** by hand (readiness, then stale) with dry run off to
+   see real effects once.
+3. Adjust the config (see below) to match the repository.
+4. If the organisation restricts which actions may run (Settings, Actions, General), allow \`${source_repo}@*\`,
+   \`actions/labeler@*\` and \`eps1lon/actions-label-merge-conflict@*\`.
+
+**The switch**: set the repository variable \`PR_AUTOMATION_LIVE\` to \`true\` (Settings, Secrets and variables, Actions,
+Variables), or run \`gh variable set PR_AUTOMATION_LIVE --body true --repo ${repo}\`. Creating a variable needs admin
+access. No PR is needed.
+
+**After it**: readiness and path labels act on the next PR event (readiness also hourly), and stale in its daily run.
+The first live stale run can mark old quiet PRs stale; they cannot be closed until at least 7 days after the warning.
+Setting the variable to \`false\`, or deleting it, returns every scheduled and PR-event run to preview.
 
 ## What to check in this PR
 
@@ -91,6 +119,8 @@ Every scheduled run is a **preview**: it prints what it would do and writes noth
 
 The action is pinned to a full commit SHA so it never changes under you. To update, change the SHA in the four
 workflow files (a Dependabot \`github-actions\` entry does this for you).
+
+$(overlap_section)
 
 Opened with \`scripts/adopt-ci.sh\`. The config check runs on this PR without a token.
 EOF
@@ -131,6 +161,11 @@ adopt() {
     cd "$work"
     git checkout --quiet -b "$branch"
     added=()
+    overlap=$(grep -lE 'needs-author-action|ready-for-review|actions/stale|actions/labeler' .github/workflows/* 2> /dev/null || true)
+    if [[ -n "$overlap" ]]; then
+      echo "  warning: existing workflows overlap with this automation; retire one before switching it on:" >&2
+      printf '%s\n' "$overlap" | sed 's/^/    /' >&2
+    fi
     for name in "${workflows[@]}"; do add_file "$templates/workflows/$name.yaml" ".github/workflows/$name.yaml"; done
     if [[ -e .github/pr-management.json ]]; then
       echo "  kept existing .github/pr-management.json"
@@ -150,8 +185,8 @@ adopt() {
     [[ "$dry_run" == "false" ]] || { echo "  dry run: nothing pushed"; exit 0; }
 
     git add -- "${added[@]}"
-    git commit --quiet -s -m "ci: adopt the shared PR automation (preview mode)" \
-      -m "Pins ${source_repo}/actions/pr-management at ${ref}. Scheduled runs only preview."
+    git commit --quiet -s -m "ci: adopt the shared PR automation" \
+      -m "Pins ${source_repo}/actions/pr-management at ${ref}."
     head="$branch"
     if [[ "$writable" == "true" ]]; then
       git push --quiet origin "$branch"
@@ -162,7 +197,7 @@ adopt() {
     fi
     pr_body > "$tmp/body.md"
     gh pr create --repo "$repo" --base "$default_branch" --head "$head" \
-      --title "ci: adopt the shared PR automation (preview mode)" --body-file "$tmp/body.md"
+      --title "ci: adopt the shared PR automation" --body-file "$tmp/body.md"
   )
 }
 

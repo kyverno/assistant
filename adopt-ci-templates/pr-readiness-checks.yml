@@ -10,8 +10,10 @@ dco:
       | select((.name // .context) == "DCO") | (.conclusion // .state)]
     | any(. == "FAILURE" or . == "ERROR" or . == "TIMED_OUT" or . == "ACTION_REQUIRED" or . == "CANCELLED" or . == "STALE" or . == "STARTUP_FAILURE")
 
-# Every failing check except DCO (own message above). Add names of checks that are not the author's to fix to
-# both exclusion lists and to `infra_checks` below, if you want them reported as advisory.
+# Every failing check except DCO (own message above) blocks readiness. A check the author cannot fix (flaky,
+# infrastructure) should not: add its name to the `["DCO"]` list in both `message` and `test` below. The action also
+# supports an optional `infra_checks` entry that reports such checks as advice without blocking; see
+# actions/pr-management/README.md.
 ci:
   message: |
     "fix the failing check(s): " + (

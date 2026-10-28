@@ -8,5 +8,5 @@ defaults to a dry run.
 | --- | --- |
 | [`pr-management`](pr-management/README.md) | Path labels, readiness classification, stale-author handling, label sync (ported from kyverno/kyverno#18275) |
 
-To adopt it, see [`docs/adopting-actions.md`](../docs/adopting-actions.md): one script opens the PR. Caller
+Back to the [main README](../README.md#ci-automation-for-your-repositories). To adopt it, see [`docs/adopting-actions.md`](../docs/adopting-actions.md): one script opens the PR. Caller
 workflows and config templates are in [`adopt-ci-templates/`](../adopt-ci-templates/).
