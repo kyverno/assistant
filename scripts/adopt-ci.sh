@@ -21,7 +21,7 @@ usage() {
   cat << 'EOF'
 usage: adopt-ci.sh --reviewers @org/team [options] owner/repo [owner/repo ...]
 
-  --reviewers @org/team  team or user the readiness bot mentions when a PR needs a maintainer (required)
+  --reviewers @org/team  existing team of the repo's organisation that the bot mentions when a PR needs a maintainer (required)
   --dry-run              show which files would be added; push nothing, open nothing
   --source owner/repo    where the actions live (default: kyverno/assistant)
   --ref SHA              full commit of the source to pin (default: this checkout's HEAD)
@@ -44,7 +44,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ ${#repos[@]} -gt 0 ]] || { usage >&2; die "name at least one owner/repo"; }
-[[ "$reviewers" =~ ^@[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)?$ ]] || die "--reviewers must look like @user or @org/team"
+# Same rule as the action's own config check; a single @user is rejected there.
+[[ "$reviewers" =~ ^@[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$ ]] || die "--reviewers must look like @org/team"
 for tool in gh git jq; do command -v "$tool" > /dev/null || die "$tool is required"; done
 gh auth status > /dev/null 2>&1 || die "run 'gh auth login' first"
 
@@ -111,6 +112,13 @@ adopt() {
   local repo="$1" default_branch writable work
   echo "== $repo"
   [[ "$(gh api "repos/${repo}" --jq .archived)" == "false" ]] || { echo "  archived, skipped"; return 0; }
+  # The team must exist in the repository's own organisation: a mention of any other name notifies nobody.
+  team_org=$(printf '%s' "${reviewers#@}" | cut -d/ -f1 | tr '[:upper:]' '[:lower:]')
+  team_slug="${reviewers##*/}"
+  [[ "$team_org" == "$(printf '%s' "${repo%%/*}" | tr '[:upper:]' '[:lower:]')" ]] \
+    || { echo "  skipped: ${reviewers} is not a team of ${repo%%/*}" >&2; return 1; }
+  gh api "orgs/${team_org}/teams/${team_slug}" --jq .slug > /dev/null 2>&1 \
+    || { echo "  skipped: team ${reviewers} does not exist or is not visible to you" >&2; return 1; }
   default_branch=$(gh api "repos/${repo}" --jq .default_branch)
   writable=$(gh api "repos/${repo}" --jq .permissions.push)
   if [[ -n "$(gh pr list --repo "$repo" --head "$branch" --state open --json number --jq '.[].number')" ]]; then
