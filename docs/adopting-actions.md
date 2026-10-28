@@ -1,5 +1,8 @@
 # Adopting the CI actions
 
+Part of the [kyverno-assistant README](../README.md#ci-automation-for-your-repositories). These actions are independent
+of the agent.
+
 You need no install, image or model. One person runs one command; it opens a pull request in each repository you
 name. Reviewing and merging that PR is the adoption.
 
@@ -30,17 +33,39 @@ The workflows call `kyverno/assistant/actions/pr-management@<full SHA>`. The SHA
 action cannot change under the adopter; to update, change the SHA (a Dependabot `github-actions` entry opens that
 PR). The workflow files are the only code the repository carries; the logic stays here.
 
-### After the PR merges
+### Turning it on
 
-Nothing happens on its own, by design:
+Nothing happens on its own after the PR merges, by design: every scheduled and PR-event run only previews.
+A repository admin turns it on, after reading the previews, in this order.
 
-1. Run **Sync labels** from the Actions tab with dry run off.
-2. Run **PR lifecycle** by hand, readiness and then stale, with dry run off; read what it did.
-3. When you trust the previews, a repository admin sets the repository variable `PR_AUTOMATION_LIVE` to `true`
-   (Settings, Secrets and variables, Actions, Variables). No PR is needed. Setting it back to `false`, or deleting
-   it, returns every scheduled and PR-event run to preview. Manual runs always follow their own dry-run checkbox.
+**Before the switch**
 
-Edit `pr-readiness-checks.yml` and `labels.yml` to match the repository; the generated ones are generic.
+1. Run **Sync labels** from the Actions tab with dry run off. Readiness and stale use `needs-author-action`,
+   `ready-for-review`, `workflow-approval-required` and `stale`, and runs can fail if those do not exist.
+2. Read a few preview runs (the log lines start with `[dry-run]`), and optionally run **PR lifecycle** by hand,
+   readiness and then stale, with dry run off to see real effects once.
+3. Edit `.github/pr-management.json` (reviewer team, exempt labels, timings) and `.github/pr-readiness-checks.yml`
+   (which failing checks block a PR, and which are not the author's to fix) to match the repository.
+4. An organisation that restricts which actions may run (Settings, Actions, General) must allow
+   `kyverno/assistant/*`, `actions/labeler` and `eps1lon/actions-label-merge-conflict`, or the runs will not start.
+
+**The switch**
+
+Set the repository variable `PR_AUTOMATION_LIVE` to `true` (Settings, Secrets and variables, Actions, Variables), or:
+
+```bash
+gh variable set PR_AUTOMATION_LIVE --body true --repo owner/repo
+```
+
+Creating a variable needs admin access to the repository. No PR and no workflow edit is needed.
+
+**After it**
+
+- Readiness and path labels act on the next PR event, readiness also hourly, and stale in its daily run.
+- The first live stale run can mark old quiet PRs stale. They cannot be closed until at least 7 days after the
+  warning, so there is a week to react.
+- To pause, set the variable to `false` or delete it; every scheduled and PR-event run goes back to preview.
+  Manual runs ignore the variable and follow their own dry-run checkbox.
 
 ### Trust and permissions
 

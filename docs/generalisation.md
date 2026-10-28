@@ -16,7 +16,7 @@ This document fixes the shape so both converge.
 The layers are independent, but they share data: the actions label, classify and file issues in a way the
 assistants then read. An assistant reads `needs-author-action`, `stale` and `ready-for-review` instead of
 recomputing them, and a repo that runs layer 1 gets a better layer 2 for free. A repo without layer 1 still
-works; the assistants fall back to computing the facts themselves.
+works, but those labels are absent; whether the skills compute the same facts another way has not been checked.
 
 The profile layout (`profiles/maintainer`, `profiles/contributor`) is already on `feat/profiles-contributor`.
 This work does not touch it; it lands after that branch merges.
