@@ -61,7 +61,7 @@ Verified means it was run in a real sandbox, on the image as built from this che
 |---|---|---|
 | Image build, sandbox start, first run | Verified | First run takes about a second; agent start to reply about 30 seconds |
 | GitHub MCP with the real token | Verified | Connects, 63 tools. Merge tools are not in the list |
-| GitHub MCP tool allowlist enforced by the proxy | Verified | With a real token: `get_me` is answered; `merge_pull_request` is refused by the name deny rule and `create_pull_request` by the allowlist, both with `policy_denied` before reaching GitHub; a batch with a merge hidden among allowed calls is refused too. `hermes mcp test github` connects through the rules. Closing an MCP session with `DELETE` is rejected by the proxy (it carries no JSON body), which only means the server closes the session itself later |
+| GitHub MCP tool allowlist enforced by the proxy | Verified | With a real token: `get_me` is answered; `merge_pull_request` is refused by the name deny rule with `policy_denied` before reaching GitHub, and `create_pull_request` is admitted (it was refused until it was added to the allowlist); a batch with a merge hidden among allowed calls is refused too. `hermes mcp test github` connects through the rules. Closing an MCP session with `DELETE` is rejected by the proxy (it carries no JSON body), which only means the server closes the session itself later |
 | REST and GraphQL reads with the real token | Verified | Merge, delete and GraphQL mutations refused by the proxy |
 | Safety hooks (merge blocker, mnemosyne triples, terminal guard) | Verified | Approved at build time, listed as allowed |
 | Memory plugin (mnemosyne) | Verified | Starts, searches, consolidates, with the network off. Embedding model is in the image |
