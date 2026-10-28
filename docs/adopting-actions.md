@@ -36,7 +36,9 @@ Nothing happens on its own, by design:
 
 1. Run **Sync labels** from the Actions tab with dry run off.
 2. Run **PR lifecycle** by hand, readiness and then stale, with dry run off; read what it did.
-3. Change the scheduled `dry-run:` expressions in `pr-management.yaml` to `'false'` when you trust it.
+3. When you trust the previews, a repository admin sets the repository variable `PR_AUTOMATION_LIVE` to `true`
+   (Settings, Secrets and variables, Actions, Variables). No PR is needed. Setting it back to `false`, or deleting
+   it, returns every scheduled and PR-event run to preview. Manual runs always follow their own dry-run checkbox.
 
 Edit `pr-readiness-checks.yml` and `labels.yml` to match the repository; the generated ones are generic.
 

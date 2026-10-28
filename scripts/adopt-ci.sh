@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Opens a pull request in each named repository that adds the shared CI actions (PR labelling, readiness and stale
-# handling) in preview mode. Run it once, from a laptop, with your own `gh` login; nothing is stored anywhere.
+# handling), in preview mode. Run it once, from a laptop, with your own `gh` login; nothing is stored anywhere.
 #
 #   scripts/adopt-ci.sh --reviewers @your-org/maintainers your-org/repo-a your-org/repo-b
 #   scripts/adopt-ci.sh --reviewers @your-org/maintainers --dry-run your-org/repo-a
@@ -74,11 +74,13 @@ pinned to commit \`${ref}\`:
 
 ## Nothing changes when this merges
 
-Every scheduled run is a **preview**: it prints what it would do and writes nothing. Turn each part on separately:
+The scheduled and PR-event runs are **previews**: they print what they would do and write nothing.
 
 1. Run **Sync labels** from the Actions tab with dry run off, so the lifecycle labels exist.
 2. Run **PR lifecycle** (readiness, then stale) by hand with dry run off, and read the result.
-3. Only then change the scheduled \`dry-run:\` expressions in \`.github/workflows/pr-management.yaml\` to \`'false'\`.
+3. When you are happy with the previews, a repository admin turns the automation on by setting the repository
+   variable \`PR_AUTOMATION_LIVE\` to \`true\` (Settings, Secrets and variables, Actions, Variables). No PR is needed,
+   and setting it back to \`false\` pauses it.
 
 ## What to check in this PR
 
@@ -150,8 +152,8 @@ adopt() {
     [[ "$dry_run" == "false" ]] || { echo "  dry run: nothing pushed"; exit 0; }
 
     git add -- "${added[@]}"
-    git commit --quiet -s -m "ci: adopt the shared PR automation (preview mode)" \
-      -m "Pins ${source_repo}/actions/pr-management at ${ref}. Scheduled runs only preview."
+    git commit --quiet -s -m "ci: adopt the shared PR automation" \
+      -m "Pins ${source_repo}/actions/pr-management at ${ref}."
     head="$branch"
     if [[ "$writable" == "true" ]]; then
       git push --quiet origin "$branch"
@@ -162,7 +164,7 @@ adopt() {
     fi
     pr_body > "$tmp/body.md"
     gh pr create --repo "$repo" --base "$default_branch" --head "$head" \
-      --title "ci: adopt the shared PR automation (preview mode)" --body-file "$tmp/body.md"
+      --title "ci: adopt the shared PR automation" --body-file "$tmp/body.md"
   )
 }
 
