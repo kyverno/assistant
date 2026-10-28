@@ -21,7 +21,7 @@ usage() {
   cat << 'EOF'
 usage: adopt-ci.sh --reviewers @org/team [options] owner/repo [owner/repo ...]
 
-  --reviewers @org/team  team or user the readiness bot mentions when a PR needs a maintainer (required)
+  --reviewers @org/team  team the readiness bot mentions when a PR needs a maintainer (required)
   --dry-run              show which files would be added; push nothing, open nothing
   --source owner/repo    where the actions live (default: kyverno/assistant)
   --ref SHA              full commit of the source to pin (default: this checkout's HEAD)
@@ -44,7 +44,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ ${#repos[@]} -gt 0 ]] || { usage >&2; die "name at least one owner/repo"; }
-[[ "$reviewers" =~ ^@[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)?$ ]] || die "--reviewers must look like @user or @org/team"
+# Same rule as the action's own config check; a single @user is rejected there.
+[[ "$reviewers" =~ ^@[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$ ]] || die "--reviewers must look like @org/team"
 for tool in gh git jq; do command -v "$tool" > /dev/null || die "$tool is required"; done
 gh auth status > /dev/null 2>&1 || die "run 'gh auth login' first"
 
