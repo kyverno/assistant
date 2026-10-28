@@ -61,6 +61,19 @@ workflows=(pr-management check-pr-management pr-labelling sync-labels)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
+overlap_section() {
+  [[ -n "$overlap" ]] || return 0
+  cat << EOS
+
+## Existing automation to retire first
+
+These workflows already touch the same labels or run a labeler or stale bot. Once the previews are switched on, both
+would act on the same PRs and could add duplicate or conflicting labels and comments. Keep one owner for each job:
+
+$(printf '%s\n' "$overlap" | sed 's/^/- /')
+EOS
+}
+
 pr_body() {
   cat << EOF
 ## What this does
@@ -93,6 +106,8 @@ The scheduled and PR-event runs are **previews**: they print what they would do 
 
 The action is pinned to a full commit SHA so it never changes under you. To update, change the SHA in the four
 workflow files (a Dependabot \`github-actions\` entry does this for you).
+
+$(overlap_section)
 
 Opened with \`scripts/adopt-ci.sh\`. The config check runs on this PR without a token.
 EOF
@@ -133,6 +148,11 @@ adopt() {
     cd "$work"
     git checkout --quiet -b "$branch"
     added=()
+    overlap=$(grep -lE 'needs-author-action|ready-for-review|actions/stale|actions/labeler' .github/workflows/* 2> /dev/null || true)
+    if [[ -n "$overlap" ]]; then
+      echo "  warning: existing workflows overlap with this automation; retire one before switching it on:" >&2
+      printf '%s\n' "$overlap" | sed 's/^/    /' >&2
+    fi
     for name in "${workflows[@]}"; do add_file "$templates/workflows/$name.yaml" ".github/workflows/$name.yaml"; done
     if [[ -e .github/pr-management.json ]]; then
       echo "  kept existing .github/pr-management.json"
