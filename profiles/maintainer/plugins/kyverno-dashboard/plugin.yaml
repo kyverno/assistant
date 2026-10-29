@@ -2,6 +2,6 @@ name: kyverno-dashboard
 version: 0.1.0
 description: "Maintainer dashboard tab for hermes dashboard: PR queue, issue triage, Discussions and an action log, each item with links, verdict, and related PRs/issues. One tool, update_dashboard, writes structured state to a local JSON file that the tab reads. No GitHub/Slack access of its own."
 author: "Suhaani Agarwal"
-license: "MIT"
+license: "Apache-2.0"
 provides_tools:
   - update_dashboard

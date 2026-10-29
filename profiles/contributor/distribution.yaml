@@ -3,7 +3,7 @@ version: 0.1.0
 description: "A coach for people contributing to Kyverno: finds work worth doing, explains how the code fits together, prepares evidence-backed PRs, makes review feedback understandable, and tracks the path from first PR to reviewer"
 hermes_requires: ">=0.12.0"
 author: "Suhaani Agarwal"
-license: "MIT"
+license: "Apache-2.0"
 
 env_requires:
   - name: REPO_GITHUB_TOKEN

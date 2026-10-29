@@ -3,7 +3,7 @@ name: author-followup
 description: "Stale/author-blocked PR decisions: close, reassign, needs-help; and the before-stale status check."
 version: 0.1.0
 author: Suhaani Agarwal, Hermes Agent
-license: MIT
+license: Apache-2.0
 platforms: [linux, macos, windows]
 ---
 

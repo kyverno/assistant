@@ -3,7 +3,7 @@ name: kyverno-context
 description: "Live labels/CODEOWNERS/milestone lookup; Kyverno's codegen & CI facts."
 version: 0.3.0
 author: Suhaani Agarwal, Hermes Agent
-license: MIT
+license: Apache-2.0
 platforms: [linux, macos, windows]
 ---
 

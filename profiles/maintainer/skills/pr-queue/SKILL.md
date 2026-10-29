@@ -3,7 +3,7 @@ name: pr-queue
 description: "Merge-sequence recommendations and per-PR review briefs, cited and linked."
 version: 0.3.0
 author: Suhaani Agarwal, Hermes Agent
-license: MIT
+license: Apache-2.0
 platforms: [linux, macos, windows]
 ---
 

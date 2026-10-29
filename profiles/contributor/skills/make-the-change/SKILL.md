@@ -3,7 +3,7 @@ name: make-the-change
 description: "Change the code in the sandbox, prove it with evidence, check it against the project's own review rules, and prepare the PR so reviewers have little to ask. The contributor writes the AI-use line and all replies."
 version: 0.1.0
 author: Suhaani Agarwal
-license: MIT
+license: Apache-2.0
 platforms: [linux, macos, windows]
 ---
 

@@ -3,7 +3,7 @@ name: issue-triage
 description: "Issue classification, issue↔PR relationship graph, progress synthesis, relationship/staleness surfacing."
 version: 0.1.0
 author: Suhaani Agarwal, Hermes Agent
-license: MIT
+license: Apache-2.0
 platforms: [linux, macos, windows]
 ---
 

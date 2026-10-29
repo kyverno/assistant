@@ -3,7 +3,7 @@ name: understand-code
 description: "Explain how code works and how files and folders relate: governing docs, imports and importers, tests, owners, history, precedent PRs, then read the code itself; finish by checking the contributor can explain it back."
 version: 0.1.0
 author: Suhaani Agarwal
-license: MIT
+license: Apache-2.0
 platforms: [linux, macos, windows]
 ---
 

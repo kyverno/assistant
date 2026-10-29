@@ -3,7 +3,7 @@ name: dashboard-sync
 description: "Push what was just presented, and every confirmed action, to the maintainer's dashboard tab with update_dashboard."
 version: 0.1.0
 author: Suhaani Agarwal, Hermes Agent
-license: MIT
+license: Apache-2.0
 platforms: [linux, macos, windows]
 ---
 

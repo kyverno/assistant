@@ -2,6 +2,6 @@ name: kyverno-sequencer
 version: 0.1.0
 description: "Deterministic PR merge-sequencing: a hard-dependency graph (stacked / generated-file / explicit-body-reference / closing-issue-conflict edges), cycle detection, and a topological layering into tiers, plus package_overlaps and gate_blocked annotations. A graph builder, not a decision maker — pure stdlib, no external dependency. Called by the pr-queue skill; never calls GitHub/Slack itself — takes already-fetched PR metadata, returns tiers for the agent to order within and explain."
 author: "Suhaani Agarwal"
-license: "MIT"
+license: "Apache-2.0"
 provides_tools:
   - sequence_prs
