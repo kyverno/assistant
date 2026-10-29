@@ -27,6 +27,26 @@ provider_env_var() {
 # What differs between the two assistants, for both launchers. They share the image, not the sandbox (or container),
 # the GitHub token or the state. Sets HERMES_PROFILE, PROVIDER and PROVIDER_FILE (OpenShell), TOKEN_KEY (the name the
 # token has in the secrets file without OpenShell), LOGIN_VAR, DEFAULT_NAME and DEFAULT_DOCKER_NAME, and the wording.
+# Picks the profile when --profile was not given: the one you already have a sandbox for, else it asks (on a terminal)
+# or falls back to maintainer. Args: names of the existing sandboxes or containers, then the maintainer and the
+# contributor default names.
+choose_profile() {
+  [ -n "$KIND" ] && return 0
+  local existing="$1" m="$2" c="$3" has_m=0 has_c=0 choice
+  grep -qx "$m" <<<"$existing" && has_m=1
+  grep -qx "$c" <<<"$existing" && has_c=1
+  if [ "$has_m$has_c" = 10 ]; then KIND=maintainer; return 0; fi
+  if [ "$has_m$has_c" = 01 ]; then KIND=contributor; return 0; fi
+  KIND=maintainer
+  [ -t 0 ] && [ -t 1 ] || return 0
+  printf '\n  Which assistant do you want?\n'
+  printf '    1) maintainer   review the PR queue of a repo you maintain\n'
+  printf '    2) contributor  find work, understand the code and get your PRs merged\n'
+  read -r -p "  Choose [1]: " choice </dev/tty
+  [ "$choice" = 2 ] && KIND=contributor
+  return 0
+}
+
 # shellcheck disable=SC2034  # each launcher uses some of these, not all
 select_profile() {
   case "$1" in

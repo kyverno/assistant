@@ -81,7 +81,7 @@ cd assistant
 container/kyverno --build      # first time: builds the image (15 to 30 minutes), then starts it
 ```
 
-It asks you to authorize GitHub once (a browser sign-in with `gh`, or a pasted token), then shows a GitHub page
+If you do not say `--profile`, it first asks whether you want the maintainer or the contributor assistant. It asks you to authorize GitHub once (a browser sign-in with `gh`, or a pasted token), then shows a GitHub page
 and a code to approve for the model sign-in. After that, `container/kyverno` alone gets you back in. Everything it asks is explained in
 [Setup, step by step](#setup-step-by-step).
 
@@ -396,23 +396,22 @@ These are not available in the sandbox yet. They work in the [host install](docs
 
 A second profile for people contributing to Kyverno. It finds work worth doing, explains how the code
 and folders fit together, helps prepare evidence-backed PRs, makes review feedback understandable, and
-tracks the path from first PR toward reviewer. It reads GitHub with your own token and can write one
+tracks the path from first PR toward reviewer. It reads GitHub with your own token and can write two
 things, each after you confirm the exact text: a comment on an issue or a PR, and a pull request from your own fork
 (`create_pull_request`, which needs the `gh` sign-in or a token that can write pull requests on the repository). It cannot
 merge, approve, submit a formal
 review; hooks enforce that. It can push to your own fork only if you start the launcher with `--push-to-fork`.
 
 ```bash
-./scripts/install.sh --profile contributor     # profile name: kyverno-contributor
-hermes -p kyverno-contributor chat
+container/kyverno --profile contributor     # or just container/kyverno, which asks which assistant you want
 ```
 
-It needs a GitHub token (a fine-grained PAT of your own account; "Public repositories (read-only)" is
-enough to read everything), your GitHub username, and the repo (default `kyverno/kyverno`). The optional
-sandboxed terminal lets it clone and read the code and edit in a clone; it holds no tokens.
-`KYVERNO_PROFILE_KIND=contributor ./scripts/openshell.sh status|audit|rules` manages that sandbox.
-Background updates (new reviews, failing checks, merged PRs) are a paused cron job:
-`hermes -p kyverno-contributor cron resume kyverno-contributor-watch`.
+It has its own sandbox (`kyverno-contributor`) and its own GitHub token, apart from the maintainer's. It needs a GitHub
+token of your own account (a fine-grained PAT; "Public repositories (read-only)" is enough to read everything, or sign in
+with `gh`), your GitHub username (read from the token), and the repo (default `kyverno/kyverno`). The coding environment
+below lets it clone the repo, build and test in the sandbox, which holds no real tokens. It runs only in the
+sandbox: the host install (`scripts/install.sh`) sets up the maintainer profile only. Background updates (new reviews,
+failing checks, merged PRs) need the messaging gateway, so they are not available in the sandbox yet.
 
 | Tool (plugin `profiles/contributor/plugins/contributor/`) | Answers |
 |---|---|

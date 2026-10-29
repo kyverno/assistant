@@ -12,7 +12,7 @@
 # What it keeps: a non-root user, no Linux capabilities, no-new-privileges, a process limit, no host mounts, and the
 # terminal and file tools blocked (add --allow-terminal to turn them on; the container is then the only boundary).
 #
-#   --profile K       maintainer (default) or contributor, as in container/kyverno. Each has its own container, GitHub
+#   --profile K       maintainer or contributor (asked if not given), as in container/kyverno. Each has its own container, GitHub
 #                     token (in the one secrets file) and state; model keys are shared.
 #   --build           build the image from this checkout (container/Dockerfile) instead of pulling one
 #   --image IMAGE     use this image (default: $KYVERNO_IMAGE, else ghcr.io/kyverno/assistant:latest)
@@ -38,7 +38,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/.." && pwd)"
 IMAGE="${KYVERNO_IMAGE:-ghcr.io/kyverno/assistant:latest}"
-KIND=maintainer
+KIND=""
 NAME=""
 DASH_PORT="${KYVERNO_DASHBOARD_PORT:-9219}"   # same default as the OpenShell launcher
 RELAY_PORT=38219                              # inside the container; Docker publishes it as DASH_PORT
@@ -75,6 +75,7 @@ done
 
 # shellcheck source=container/lib.sh
 . "$HERE/lib.sh"
+choose_profile "$(docker ps -a --format '{{.Names}}' 2>/dev/null)" kyverno-assistant-docker kyverno-contributor-docker
 select_profile "$KIND"
 NAME="${NAME:-$DEFAULT_DOCKER_NAME}"
 
