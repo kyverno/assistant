@@ -105,10 +105,7 @@ The assistants stay human-invoked and still cannot merge; none of this changes t
 
 ## Open points
 
-- Licensing: `actions/pr-management` is Apache-2.0 and the rest of the repo is MIT. `NOTICE` records it; confirm
-  whether `actions/` should be Apache-2.0 as a whole.
-- Whether the repo is renamed. `kyverno/assistant` is the pin path adopters would write, so the name should be
-  settled before anyone pins it.
+- Repo name: `kyverno/assistant` is the pin path adopters write, and it is settled; a rename would break every pin.
 - No tests are committed here, by repo policy. #18275 ships a regression suite for the action; this port
   omits it. The scripts are copied from PR head `3030a2c`; only `validate` mode was run here, against the
   example config. `readiness` and `stale` were not exercised.
