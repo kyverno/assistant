@@ -134,6 +134,13 @@ print(json.load(urllib.request.urlopen(req, timeout=10)).get("login", ""))' 2>/d
 fi
 pass "repo $(env_get KYVERNO_REPO), $KIND $(env_get "$LOGIN_VAR")"
 
+# Hermes hides MCP and plugin tools behind a search step by default. A small model never searches, so it never
+# finds find_issues or the GitHub tools and wanders through the terminal instead. Keep every tool in view. This runs
+# on each start because config.yaml is yours and survives --upgrade, so an image change alone would not reach it.
+if ! grep -qE '^ +enabled: "?off"?' "$PROFILE_DIR/config.yaml" 2>/dev/null; then
+  hermes -p "$PROFILE" config set tools.tool_search.enabled off >/dev/null 2>&1 || true
+fi
+
 # Hermes only fills ${HERMES_SKILL_DIR}-style variables in skills; resolve ours from .env.
 if [ ! -f "$DONE_MARK" ]; then
   ENV_FILE="$ENV_FILE" python3 - "$PROFILE_DIR" <<'PY'
