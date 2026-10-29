@@ -1,0 +1,119 @@
+#!/bin/bash
+# Get a repository ready to work on inside the sandbox: clone it and install the toolchains it needs.
+#   kyverno-workspace <owner/repo>
+# The repository goes to /sandbox/<name>. What it needs is read from the repository itself (go.mod -> Go,
+# package.json -> Node.js, .chainsaw.yaml -> the Kyverno CLI and Chainsaw), at the version the repository pins, from
+# toolchains/<name>.sh. Tools land in /sandbox/.toolchains, and `source /sandbox/.toolchains/env.sh` puts them on PATH.
+# Safe to run again: it updates the clone and skips what is already installed. The first run downloads a lot (Go's
+# module and build caches for Kyverno come to about 5 GB), so it says what it is doing.
+set -uo pipefail
+
+LIB=/usr/local/lib/kyverno/toolchains
+export TOOLS=/sandbox/.toolchains
+ARCH="$(uname -m)"; case "$ARCH" in aarch64) ARCH=arm64 ;; x86_64) ARCH=amd64 ;; esac
+export ARCH
+
+# dl_verify <url> <sha256> <file>: download, check the checksum published by the vendor, and only then keep it.
+# A download that does not match is deleted, so nothing unchecked is ever unpacked.
+# shellcheck disable=SC2329  # called by the toolchain scripts this file sources
+dl_verify() {
+  mkdir -p "$TOOLS/.downloads"
+  curl -fsSL --retry 2 -o "$3" "$1" || { rm -f "$3"; return 1; }
+  if [ "$(sha256sum "$3" | cut -d' ' -f1)" != "$2" ]; then
+    echo "  checksum mismatch for $1" >&2; rm -f "$3"; return 1
+  fi
+}
+export -f dl_verify
+pass() { printf '  \033[32m✓\033[0m %s\n' "$1"; }
+fail() { printf '  \033[31m✗\033[0m %s\n' "$1" >&2; }
+info() { printf '  %s\n' "$1"; }
+
+REPO="${1:-}"
+if [[ ! "$REPO" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+$ || "${REPO#*/}" == "." || "${REPO#*/}" == ".." ]]; then
+  echo "usage: kyverno-workspace <owner/repo>" >&2
+  exit 2
+fi
+DIR="/sandbox/${REPO#*/}"
+mkdir -p "$TOOLS"
+
+printf '\n\033[1mClone %s\033[0m\n' "$REPO"
+if [ -d "$DIR/.git" ]; then
+  if git -C "$DIR" fetch --quiet origin; then pass "updated $DIR (your branch and changes are untouched)"; else fail "could not update $DIR"; fi
+else
+  # Full history without file contents; git fetches a file's contents when it is first needed.
+  if git clone --quiet --filter=blob:none "https://github.com/$REPO" "$DIR"; then pass "cloned to $DIR"; else fail "clone failed"; exit 1; fi
+fi
+
+# Pushing, when the launcher was run with --push-to-fork: the sandbox then holds a placeholder for the push token (the
+# real one stays in OpenShell, which swaps it in for pushes to your own forks only).
+# Your account name: kyverno-start keeps your GitHub username in the profile's .env (the launcher read it from your token).
+OWNER="$(sed -n 's/^[A-Z_]*GITHUB_LOGIN=//p' /opt/hermes-home/.hermes/profiles/*/.env 2>/dev/null | head -n 1)"
+if [ -n "${GIT_PUSH_TOKEN:-}" ] && [ -n "$OWNER" ]; then
+  # shellcheck disable=SC2016  # $GIT_PUSH_TOKEN is meant to expand later, when git runs the helper
+  git config --global credential.https://github.com.helper \
+    '!f() { echo username=x-access-token; echo "password=$GIT_PUSH_TOKEN"; }; f'
+  git -C "$DIR" remote get-url fork >/dev/null 2>&1 \
+    || git -C "$DIR" remote add fork "https://github.com/$OWNER/${REPO#*/}"
+  git -C "$DIR" config remote.pushDefault fork
+  pass "pushes go to your fork: git push fork <branch> ($OWNER/${REPO#*/})"
+else
+  info "pushing is off (container/kyverno --push-to-fork turns it on); the assistant hands you a patch instead"
+fi
+
+# What the sandbox really has: the smaller of the memory cgroup's limit and the machine's total, in MB.
+mem_total_mb() {
+  local total limit
+  total="$(awk '/^MemTotal:/{print int($2/1024)}' /proc/meminfo 2>/dev/null)"
+  limit="$(cat /sys/fs/cgroup/memory.max 2>/dev/null)"
+  if [[ "$limit" =~ ^[0-9]+$ ]] && [ $((limit / 1048576)) -lt "${total:-0}" ]; then total=$((limit / 1048576)); fi
+  echo "${total:-0}"
+}
+
+needs=()
+[ -f "$DIR/go.mod" ] && needs+=(go)
+[ -f "$DIR/package.json" ] && needs+=(node)
+{ [ -f "$DIR/.chainsaw.yaml" ] || [ -d "$DIR/.chainsaw" ]; } && needs+=(kyverno-tools)
+
+printf '\n\033[1mToolchains\033[0m\n'
+[ "${#needs[@]}" -eq 0 ] && info "nothing to install: no go.mod, package.json or Chainsaw config in $REPO"
+rc=0
+for tc in "${needs[@]+"${needs[@]}"}"; do
+  unset -f tc_memory_mb   # a toolchain without a memory hint must not inherit the previous one's
+  # shellcheck source=/dev/null
+  . "$LIB/$tc.sh"
+  want="$(tc_want "$DIR")"
+  if declare -F tc_memory_mb >/dev/null; then
+    have_mb="$(mem_total_mb)"; need_mb="$(tc_memory_mb)"
+    if [ "$have_mb" -gt 0 ] && [ "$have_mb" -lt "$need_mb" ]; then
+      info "memory: this sandbox has about $have_mb MB; a full $tc build wants roughly $need_mb MB. Build only the packages you need,"
+      info "        or give Docker more memory (Docker Desktop: Settings, Resources, Memory) if a build gets killed."
+    fi
+  fi
+  if [ -z "$want" ] || [ "$want" = null ]; then fail "$tc: could not work out the version to install"; rc=1; continue; fi
+  if tc_have "$want"; then
+    pass "$tc $want already installed"
+  else
+    info "installing $tc $want..."
+    if tc_install "$want" && tc_have "$want"; then pass "$tc $want installed"; else fail "$tc $want did not install (is the network policy letting its downloads through?)"; rc=1; fi
+  fi
+done
+
+# env.sh covers everything installed so far, not just this run's toolchains.
+: > "$TOOLS/env.sh"
+for f in "$LIB"/*.sh; do
+  tc="$(basename "$f" .sh)"
+  # shellcheck source=/dev/null
+  [ -d "$TOOLS/$tc" ] && { . "$f"; tc_env; } >> "$TOOLS/env.sh"
+done
+
+# New terminal shells (the agent's, and the user's `kyverno shell`) pick the tools up on their own.
+for rc_file in "$HOME/.profile" "$HOME/.bashrc"; do
+  grep -qs "$TOOLS/env.sh" "$rc_file" || printf '[ -f %s ] && . %s\n' "$TOOLS/env.sh" "$TOOLS/env.sh" >> "$rc_file"
+done
+
+printf '\n'
+if [ "$rc" = 0 ]; then
+  info "Ready. In a new shell: cd $DIR && source $TOOLS/env.sh"
+  [ -f "$DIR/go.mod" ] && info "The first Go build downloads modules and compiles for 10 to 15 minutes; later builds are quick."
+fi
+exit "$rc"

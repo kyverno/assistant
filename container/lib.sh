@@ -24,10 +24,54 @@ provider_env_var() {
   esac
 }
 
+# What differs between the two assistants, for both launchers. They share the image, not the sandbox (or container),
+# the GitHub token or the state. Sets HERMES_PROFILE, PROVIDER and PROVIDER_FILE (OpenShell), TOKEN_KEY (the name the
+# token has in the secrets file without OpenShell), LOGIN_VAR, DEFAULT_NAME and DEFAULT_DOCKER_NAME, and the wording.
+# Picks the profile when --profile was not given: the one you already have a sandbox for, else it asks (on a terminal)
+# or falls back to maintainer. Args: names of the existing sandboxes or containers, then the maintainer and the
+# contributor default names.
+choose_profile() {
+  [ -n "$KIND" ] && return 0
+  local existing="$1" m="$2" c="$3" has_m=0 has_c=0 choice
+  grep -qx "$m" <<<"$existing" && has_m=1
+  grep -qx "$c" <<<"$existing" && has_c=1
+  if [ "$has_m$has_c" = 10 ]; then KIND=maintainer; return 0; fi
+  if [ "$has_m$has_c" = 01 ]; then KIND=contributor; return 0; fi
+  KIND=maintainer
+  [ -t 0 ] && [ -t 1 ] || return 0
+  printf '\n  Which assistant do you want?\n'
+  printf '    1) maintainer   review the PR queue of a repo you maintain\n'
+  printf '    2) contributor  find work, understand the code and get your PRs merged\n'
+  read -r -p "  Choose [1]: " choice </dev/tty
+  [ "$choice" = 2 ] && KIND=contributor
+  return 0
+}
+
+# shellcheck disable=SC2034  # each launcher uses some of these, not all
+select_profile() {
+  case "$1" in
+    maintainer)
+      HERMES_PROFILE=kyverno; PROVIDER=kyverno-repo-github; PROVIDER_FILE=repo-github.yaml
+      TOKEN_KEY=REPO_GITHUB_TOKEN; LOGIN_VAR=MAINTAINER_GITHUB_LOGIN
+      DEFAULT_NAME=kyverno-assistant; DEFAULT_DOCKER_NAME=kyverno-assistant-docker
+      REPO_ASK="Repo to manage (owner/repo) [kyverno/kyverno]: "
+      TOKEN_SCOPE="the assistant still cannot merge."
+      TOKEN_PASTE_HELP="Paste your fine-grained GitHub token (see README step 1)." ;;
+    contributor)
+      HERMES_PROFILE=kyverno-contributor; PROVIDER=kyverno-contributor-github; PROVIDER_FILE=repo-github-contributor.yaml
+      TOKEN_KEY=CONTRIBUTOR_REPO_GITHUB_TOKEN; LOGIN_VAR=CONTRIBUTOR_GITHUB_LOGIN
+      DEFAULT_NAME=kyverno-contributor; DEFAULT_DOCKER_NAME=kyverno-contributor-docker
+      REPO_ASK="Repo you contribute to (owner/repo) [kyverno/kyverno]: "
+      TOKEN_SCOPE="the assistant can only read, comment, and open a PR from your fork."
+      TOKEN_PASTE_HELP="Paste a fine-grained GitHub token of your own account (public repositories, read-only, is enough to read; commenting, and opening a PR, on kyverno repositories need a token that can write there)." ;;
+    *) echo "unknown profile '$1' (maintainer or contributor)" >&2; exit 2 ;;
+  esac
+}
+
 # What is yours across an --upgrade: memory, chat history, your repo and username, the Copilot sign-in, the model you
 # chose. Paths under the profile directory. The profile itself (skills, hooks, plugins, settings) comes from the new image.
 # shellcheck disable=SC2034  # used by the launchers that source this file
-STATE_FILES=".env config.yaml .kyverno-model-chosen mnemosyne/data memories sessions kyverno-dashboard state.db state.db-wal state.db-shm"
+STATE_FILES=".env config.yaml .kyverno-model-chosen mnemosyne/data memories sessions kyverno-dashboard kyverno-contributor state.db state.db-wal state.db-shm"
 
 # Build the image from this checkout (--build), or pull it when it is missing or --upgrade asks for the newest.
 ensure_image() {
@@ -58,7 +102,7 @@ ensure_image() {
 # token_note_gh (printed under the gh option) and token_note_paste (printed before the paste prompt), and picks the
 # default option in TOKEN_DEFAULT (1 = gh, 2 = paste).
 acquire_github_token() {
-  [ -z "$REPO" ] && read -r -p "  Repo to manage (owner/repo) [kyverno/kyverno]: " REPO
+  [ -z "$REPO" ] && read -r -p "  ${REPO_ASK:-Repo to manage (owner/repo) [kyverno/kyverno]: }" REPO
   REPO="${REPO:-kyverno/kyverno}"
   valid_repo "$REPO" || { fail "'$REPO' is not an owner/repo name (letters, digits, dots, dashes, underscores)"; exit 1; }
   PAT=""
@@ -109,4 +153,52 @@ acquire_github_token() {
             | curl -s -m 10 -K - https://api.github.com/user | sed -n 's/.*"login": *"\([^"]*\)".*/\1/p' | head -n 1)
     if [[ "$LOGIN" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]]; then pass "signed in to GitHub as $LOGIN"; else LOGIN=""; fi
   fi
+}
+
+# --- pushing to your own fork (container/kyverno --push-to-fork) ---
+# The login a GitHub token belongs to. The token goes in through stdin, so it never shows in a process list.
+token_login() {
+  printf 'header = "Authorization: Bearer %s"\n' "$1" \
+    | curl -s -K - https://api.github.com/user | sed -n 's/.*"login": *"\([^"]*\)".*/\1/p' | head -n 1
+}
+
+# The OpenShell provider profile for the push credential, written for a list of owner/repo targets (your forks, and for
+# a maintainer the repository they manage). OpenShell checks each request outside the sandbox: a git push may only
+# reach /<owner>/<repo> for these, so the credential cannot be used to push anywhere else. It is a second credential, apart from the read-only token, and the sandbox
+# only ever holds a placeholder for it. Git reads the repository over a path with or without ".git", hence both.
+git_push_profile() {
+  local login="$1" t; shift
+  cat <<EOF
+id: kyverno-git-push
+display_name: Kyverno assistant git push
+description: Lets the sandbox push branches to ${login}'s own forks (and a maintainer's own repository), and nowhere else
+category: source_control
+credentials:
+  - name: push_token
+    description: GitHub token that can push to your fork (the gh sign-in's token, or a fine-grained token with Contents write on it)
+    env_vars: [GIT_PUSH_TOKEN]
+    required: true
+    auth_style: basic
+    header_name: authorization
+discovery:
+  credentials: [push_token]
+endpoints:
+  - host: github.com
+    port: 443
+    protocol: rest
+    enforcement: enforce
+    rules:
+EOF
+  for t in "$@"; do
+    for suffix in "" ".git"; do
+      printf '      - allow: { method: GET, path: "/%s%s/info/refs" }\n' "$t" "$suffix"
+      printf '      - allow: { method: POST, path: "/%s%s/git-receive-pack" }\n' "$t" "$suffix"
+    done
+  done
+  cat <<EOF
+binaries:
+  - /usr/bin/git
+  - /usr/lib/git-core/git-remote-http
+  - /usr/lib/git-core/git-remote-https
+EOF
 }

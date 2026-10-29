@@ -1,14 +1,16 @@
 #!/bin/bash
-# Runs once, at image build time, after `hermes profile install` and the mnemosyne install: the
-# one-time profile setup that used to run on every user's first start. Doing it here means a user's
+# Runs once per profile, at image build time, after `hermes profile install` and the mnemosyne install:
+# the one-time profile setup that used to run on every user's first start. Doing it here means a user's
 # first start only handles what is theirs (repo, username, sign-in), and each Hermes command costs
 # nothing extra at runtime.
+#   kyverno-setup-profile <maintainer|contributor> <hermes profile name>
 set -uo pipefail
 
+KIND="${1:?profile kind}"
+PROFILE="${2:?profile name}"
 export HERMES_HOME=/opt/hermes-home/.hermes
-PROFILE=kyverno
 PROFILE_DIR="$HERMES_HOME/profiles/$PROFILE"
-SRC=/opt/kyverno/profiles/maintainer
+SRC=/opt/kyverno/profiles/$KIND
 
 step() { printf '\n== %s\n' "$1"; }
 # Hermes asks for confirmation on some commands when a terminal is attached; never wait on one.
@@ -42,11 +44,15 @@ step "hooks: run them from the read-only copy in /opt/kyverno"
 # the baked copies under /opt/kyverno: root-owned, and read-only to the agent under the sandbox policy. The
 # copies the profile install put in the profile folder are writable by the agent, so they would be a weaker home
 # for the checks that stop it merging.
-python3 - "$PROFILE_DIR" "$SRC/hooks" <<'PY'
-import sys
-profile_dir, hooks_dir = sys.argv[1], sys.argv[2]
+# A hook written in Python runs under Hermes' own interpreter: the system python3 is not the one the proxy lets
+# talk to GitHub with the token placeholder swapped in.
+PYTHON="$(compgen -G "$HERMES_HOME/tools/python-*/bin/python3" | head -n 1)"
+python3 - "$PROFILE_DIR" "$SRC/hooks" "$PYTHON" <<'PY'
+import re, sys
+profile_dir, hooks_dir, python = sys.argv[1:4]
 p = profile_dir + "/config.yaml"
 s = open(p).read()
+s = re.sub(r'command: "\./hooks/([^"]+\.py)"', lambda m: 'command: "%s %s/%s"' % (python, hooks_dir, m.group(1)), s)
 s = s.replace('command: "./hooks/', 'command: "' + hooks_dir + '/')
 open(p, "w").write(s)
 PY
@@ -62,7 +68,7 @@ for tool in ("terminal", "file"):
 s = re.sub(r"(?m)^    - mcp-slack\n", "", s)
 open(p, "w").write(s)
 PY
-hq mcp remove slack
+[ "$KIND" = maintainer ] && hq mcp remove slack
 hq config set terminal.backend local
 hq config set terminal.cwd /sandbox
 
@@ -87,8 +93,8 @@ hermes -p "$PROFILE" mcp list </dev/null 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep
 bad=0
 require() { local what="$1"; shift; "$@" || { echo "   FAILED: $what" >&2; bad=1; }; }
 forbid() { local what="$1"; shift; if "$@"; then echo "   FAILED: $what" >&2; bad=1; fi; }
-forbid "a hook command still points at ./hooks/" grep -qE 'command: "\./hooks/' "$CFG"
-require "hook commands point at $SRC/hooks" grep -qE "command: \"$SRC/hooks/" "$CFG"
+forbid "a hook command still points at ./hooks/" grep -qE 'command: ".*\./hooks/' "$CFG"
+require "hook commands point at $SRC/hooks" grep -qE "command: \".*$SRC/hooks/" "$CFG"
 forbid "the Slack tool is still in the config" grep -q 'mcp-slack' "$CFG"
 require "hooks_auto_accept is on" grep -qE '^hooks_auto_accept: *true' "$CFG"
 require "the terminal backend is local" grep -qE '^ +backend: *local' "$CFG"

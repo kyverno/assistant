@@ -8,6 +8,8 @@ container/kyverno --build                  # first time: build the image from th
 container/kyverno                          # later: reattach to (or start) the sandbox
 container/kyverno --provider anthropic     # also use another model provider (anthropic, openai, nvidia)
 container/kyverno --build --upgrade        # new version: recreate the sandbox, keeping your state
+container/kyverno --upgrade --keep-caches   # also carry the downloaded toolchains and build caches (clones always come along)
+container/kyverno --push-to-fork           # also let the assistant push branches to your own fork (off by default)
 ```
 
 What runs where, how secrets are kept, what the agent can reach, what works today and what doesn't, and
@@ -28,6 +30,9 @@ troubleshooting are all in **[docs/container.md](../docs/container.md)**.
 | `restore-state.sh` | Uploaded by the launcher during `--upgrade` to put your state back |
 | `policy.yaml` | The sandbox's filesystem and network policy. Keep the Copilot inference paths listed by name (see docs/container.md, "Safety layers") |
 | `providers/*.yaml` | OpenShell provider profiles: the GitHub token (with the MCP tool allowlist the proxy enforces) and the model-provider keys (each limited to chat and model-list paths) |
+| `kyverno-workspace`, `toolchains/*.sh` | Run inside the sandbox: clone a repo and download exactly the toolchains it declares (Go, Node, Kyverno CLI, Chainsaw), each checked against a vendor checksum. At run time, not in the image |
+| `skills/workspace/` | The skill both profiles use to reproduce an issue, change code, prove it, and hand it over as a pushed branch or a patch |
+| `hooks/git-push-guard.py` | Terminal hook: pushes go to your fork (a maintainer: also the managed repository), never forced, never to main |
 | `hooks/require-sandbox-terminal.sh` | Lets the terminal run locally, but only inside an OpenShell sandbox (or a plain-Docker container started with `--no-openshell --allow-terminal`) |
 
 ## Not done yet

@@ -1,0 +1,60 @@
+# OpenShell provider profile for the repo-scoped GitHub PAT. The sandbox only ever holds a
+# placeholder in REPO_GITHUB_TOKEN; the gateway's proxy swaps in the real value on requests to the
+# endpoints below, and only from the binaries listed. Import with:
+#   openshell profile import -f container/providers/repo-github-contributor.yaml
+id: kyverno-contributor-github
+display_name: Kyverno contributor GitHub token
+description: The contributor's own GitHub PAT for the Kyverno contributor assistant (read APIs plus the GitHub MCP server)
+category: source_control
+credentials:
+  - name: repo_token
+    description: Fine-grained PAT of your own account (public repositories read-only is enough)
+    env_vars: [REPO_GITHUB_TOKEN]
+    required: true
+    auth_style: bearer
+    header_name: authorization
+discovery:
+  credentials: [repo_token]
+endpoints:
+  # REST and GraphQL reads only. GraphQL mutations, including mergePullRequest, are refused here.
+  - host: api.github.com
+    port: 443
+    protocol: rest
+    access: read-only
+    enforcement: enforce
+  - host: api.github.com
+    port: 443
+    path: /graphql
+    protocol: graphql
+    access: read-only
+    enforcement: enforce
+  # The hosted GitHub MCP server, checked tool by tool by the proxy, outside the sandbox: the agent cannot edit this
+  # the way it could edit config.yaml. Only the tools listed here can be called; everything else, merges included,
+  # is refused, and so is a batch that hides one among allowed calls. Only /mcp/ gets the token; Copilot inference
+  # on the same host carries its own bearer and gets none. For this to hold, container/policy.yaml must not allow
+  # all paths on api.githubcopilot.com: OpenShell admits a request if any rule for the host admits it.
+  # The list must equal X-MCP-Tools in profiles/contributor/config.yaml; the image build fails if it does not.
+  - host: api.githubcopilot.com
+    port: 443
+    path: /mcp/
+    protocol: mcp
+    enforcement: enforce
+    mcp:
+      versions: ["2025-03-26", "2025-06-18", "2025-11-25"]
+      allow_all_known_mcp_methods: true
+    rules:
+      - allow:
+          tool:
+            any: [
+              search_pull_requests, pull_request_read, issue_read, search_issues, list_issues, list_label,
+              get_label, get_file_contents, get_repository_tree, search_code, get_commit, list_commits,
+              list_branches, list_tags, list_releases, get_latest_release, list_pull_requests,
+              search_repositories, search_users, get_me, semantic_issue_similarity_search, actions_list,
+              actions_get, get_job_logs, list_discussion_categories, list_discussions, get_discussion,
+              get_discussion_comments, add_issue_comment, create_pull_request
+              ]
+    deny_rules:
+      - { method: tools/call, tool: { any: ["*merge*", "*delete*", "*force_push*"] } }
+binaries:
+  # Hermes' interpreter. The directory name carries the Python version and build date, hence the glob.
+  - /opt/hermes-home/.hermes/tools/python-*/bin/python*

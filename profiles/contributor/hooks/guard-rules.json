@@ -1,0 +1,10 @@
+{
+  "comment_command_exceptions": [
+    {
+      "command": "assign",
+      "only_on_label": "good first issue",
+      "body_must_equal": "/assign"
+    }
+  ],
+  "pull_request_body_commands": ["kind"]
+}

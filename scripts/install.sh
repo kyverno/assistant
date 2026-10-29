@@ -6,6 +6,7 @@ set -uo pipefail
 
 PROFILE="${1:-kyverno}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SRC="$REPO_ROOT/profiles/maintainer"
 PROFILE_DIR="$HOME/.hermes/profiles/$PROFILE"
 
 pass() { printf '  \033[32m✓\033[0m %s\n' "$1"; }
@@ -13,9 +14,9 @@ fail() { printf '  \033[31m✗\033[0m %s\n' "$1"; }
 info() { printf '  %s\n' "$1"; }
 step() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 
-cd "$REPO_ROOT" || exit 1
+cd "$SRC" 2>/dev/null || { fail "$SRC not found"; exit 1; }
 if [ ! -f distribution.yaml ]; then
-  fail "distribution.yaml not found — run this from the repo root (or via ./scripts/install.sh)"
+  fail "$SRC/distribution.yaml not found"
   exit 1
 fi
 
@@ -78,7 +79,23 @@ for k, v in (m.items() if isinstance(m, dict) else []):
   PREV_TERMINAL=$(cfg_get terminal.backend)
 fi
 
-if [ -f "$PROFILE_DIR/distribution.yaml" ]; then
+# Installs made before the profiles/ layout recorded the repo root as their source, which no longer
+# holds a distribution.yaml. Re-point those at profiles/maintainer (user data, .env and memory are kept).
+RECORDED=""
+[ -f "$PROFILE_DIR/distribution.yaml" ] && RECORDED=$(python3 -c "
+import yaml
+print((yaml.safe_load(open('$PROFILE_DIR/distribution.yaml')) or {}).get('source') or '')" 2>/dev/null)
+MIGRATE=no
+if [ -n "$RECORDED" ] && [ -d "$RECORDED" ] && [ ! -f "$RECORDED/distribution.yaml" ]; then MIGRATE=yes; fi
+
+if [ "$MIGRATE" = "yes" ]; then
+  info "profile '$PROFILE' was installed from $RECORDED, which has moved to profiles/maintainer — re-pointing it..."
+  if ! hermes profile install . --name "$PROFILE" --force -y; then
+    fail "hermes profile install --force failed — see output above"
+    exit 1
+  fi
+  pass "profile '$PROFILE' re-installed from $SRC (user data kept)"
+elif [ -f "$PROFILE_DIR/distribution.yaml" ]; then
   info "profile '$PROFILE' already installed — pulling in any repo changes (skills, config.yaml,"
   info "plugins/, cron) since the last install/update..."
   if ! hermes profile update "$PROFILE" --force-config -y; then
@@ -498,7 +515,7 @@ WANT_SANDBOX="${KYVERNO_SANDBOX_TERMINAL:-}"
 if [ -z "$WANT_SANDBOX" ] && [ "$INTERACTIVE" = 1 ]; then
   info "Optional: a sandboxed terminal for the assistant (installs NVIDIA OpenShell and builds a"
   info "small Docker image). It can read GitHub and run commands, but holds no tokens and cannot"
-  info "write anywhere you haven't allowed (policies/terminal.yaml)."
+  info "write anywhere you haven't allowed (profiles/maintainer/sandbox/policy.yaml)."
   read -r -p "  Set it up? [Y/n]: " WANT_SANDBOX </dev/tty
   case "$WANT_SANDBOX" in [Nn]*) WANT_SANDBOX=no ;; *) WANT_SANDBOX=yes ;; esac
 fi
@@ -514,7 +531,7 @@ if [ "$WANT_SANDBOX" = "yes" ]; then
   fi
 fi
 if [ "$WANT_SANDBOX" = "yes" ]; then
-  if ./scripts/openshell.sh setup; then
+  if "$REPO_ROOT/scripts/openshell.sh" setup; then
     python3 - "$PROFILE_DIR/config.yaml" <<'PY'
 import re, sys
 p = sys.argv[1]

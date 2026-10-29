@@ -1,0 +1,16 @@
+name: contributor
+version: 0.1.0
+description: "Cited, code-computed facts for a contributor: what the repository says about a path and how a file or folder fits into the code, precedent PRs in the same area, issues worth taking and the history of each, the state of the contributor's own PR, their journey and role-ladder progress, and a background inbox. Stdlib + PyYAML; uses the contributor's own REPO_GITHUB_TOKEN; read-only."
+author: "Suhaani Agarwal"
+license: "MIT"
+provides_tools:
+  - knowledge_for
+  - explain_path
+  - related_prs
+  - find_issues
+  - issue_history
+  - my_pr_state
+  - journey_summary
+  - journey_note
+  - journey_self_report
+  - inbox_read

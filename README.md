@@ -14,6 +14,9 @@ server to run and no webhook receiver.
 > workflows (see the validation plan in [`docs/deployment.md`](docs/deployment.md)). Slack and scheduled jobs are
 > not available in the sandbox yet; they work in the [host install](docs/host-install.md).
 
+There are two profiles in `profiles/`: **maintainer** (this document) and **contributor**, a coach
+for people contributing to Kyverno. See [Contributor profile](#contributor-profile).
+
 ## Contents
 
 - [How it works](#how-it-works)
@@ -28,6 +31,7 @@ server to run and no webhook receiver.
 - [What it does](#what-it-does)
 - [The dashboard](#the-dashboard)
 - [Slack and scheduled jobs](#slack-and-scheduled-jobs)
+- [Contributor profile](#contributor-profile)
 - [CI automation for your repositories](#ci-automation-for-your-repositories)
 - [Repository layout](#repository-layout)
 - [Further reading](#further-reading)
@@ -77,7 +81,7 @@ cd assistant
 container/kyverno --build      # first time: builds the image (15 to 30 minutes), then starts it
 ```
 
-It asks you to authorize GitHub once (a browser sign-in with `gh`, or a pasted token), then shows a GitHub page
+If you do not say `--profile`, it first asks whether you want the maintainer or the contributor assistant. It asks you to authorize GitHub once (a browser sign-in with `gh`, or a pasted token), then shows a GitHub page
 and a code to approve for the model sign-in. After that, `container/kyverno` alone gets you back in. Everything it asks is explained in
 [Setup, step by step](#setup-step-by-step).
 
@@ -310,6 +314,9 @@ openshell provider delete kyverno-anthropic         # model keys you added, if a
 docker rmi kyverno-assistant:dev                    # the image, if you built it yourself
 ```
 
+If you used `--push-to-fork`, also `openshell provider delete kyverno-git-push` (or run the launcher with `--no-push`). With `--no-openshell`, the clones and toolchains live in a Docker volume that outlives the container:
+`docker volume rm kyverno-assistant-docker-workspace` (the name follows the container's).
+
 ## What it does
 
 | Area | Capabilities |
@@ -356,12 +363,67 @@ Settings and chat pages are served too, and the Settings pages can show what is 
 includes the Copilot sign-in token. Your GitHub token is not there. If you do not want it, stop it with
 `openshell forward stop 9219` (the launcher starts it again next time you run it).
 
+## Coding in the sandbox
+
+Both profiles have a terminal inside the sandbox, which cannot reach your laptop. Ask the assistant to reproduce an
+issue or fix a PR and it follows the `workspace` skill: `kyverno-workspace <owner/repo>` clones the repo and downloads
+the toolchains it declares (Go, Node, or the Kyverno CLI and Chainsaw), then it builds, runs the tests, and shows you
+the real output. The toolchains are downloaded the first time, not baked into the image: the network policy allows
+only those hosts, GET only, and every download is checked against the vendor's checksum. Caches live in the sandbox, so
+recreating it downloads them again, unless you pass `--keep-caches` to `--upgrade`. Your cloned repositories and their
+unpushed commits always come along on `--upgrade`. When a toolchain's rough memory need is above what the sandbox really
+has, `kyverno-workspace` says so with both numbers. Things that need a real cluster cannot run, and the assistant says so
+(see [#25](https://github.com/kyverno/assistant/issues/25)).
+
+The result comes back as a patch (`openshell sandbox download`), or as a pushed branch if you turn on pushing:
+
+```bash
+container/kyverno --push-to-fork      # off by default; --no-push removes it
+```
+
+That stores a second credential in OpenShell (your `gh` sign-in's token, or a token with write on your fork). OpenShell
+lets `git push` reach only your own forks (and, as a maintainer, the repository you manage); a hook refuses force pushes,
+branch deletes and pushes to main. Nothing is ever merged.
+
 ## Slack and scheduled jobs
 
 These are not available in the sandbox yet. They work in the [host install](docs/host-install.md):
 
 - **Slack**: talk to the assistant by mentioning it, and it can read and post in your maintainers channel.
 - **Scheduled jobs**: a weekday review digest and two memory jobs (installed paused).
+
+## Contributor profile
+
+A second profile for people contributing to Kyverno. It finds work worth doing, explains how the code
+and folders fit together, helps prepare evidence-backed PRs, makes review feedback understandable, and
+tracks the path from first PR toward reviewer. It reads GitHub with your own token and can write two
+things, each after you confirm the exact text: a comment on an issue or a PR, and a pull request from your own fork
+(`create_pull_request`, which needs the `gh` sign-in or a token that can write pull requests on the repository). It cannot
+merge, approve, submit a formal
+review; hooks enforce that. It can push to your own fork only if you start the launcher with `--push-to-fork`.
+
+```bash
+container/kyverno --profile contributor     # or just container/kyverno, which asks which assistant you want
+```
+
+It has its own sandbox (`kyverno-contributor`) and its own GitHub token, apart from the maintainer's. It needs a GitHub
+token of your own account (a fine-grained PAT; "Public repositories (read-only)" is enough to read everything, or sign in
+with `gh`), your GitHub username (read from the token), and the repo (default `kyverno/kyverno`). The coding environment
+below lets it clone the repo, build and test in the sandbox, which holds no real tokens. It runs only in the
+sandbox: the host install (`scripts/install.sh`) sets up the maintainer profile only. Background updates (new reviews,
+failing checks, merged PRs) need the messaging gateway, so they are not available in the sandbox yet.
+
+| Tool (plugin `profiles/contributor/plugins/contributor/`) | Answers |
+|---|---|
+| `knowledge_for` | What the repo's AGENTS.md chain, instructions, labels and CODEOWNERS say about a path |
+| `explain_path` | How a file or folder fits in: contents, Go imports and exports, who imports it, tests, history |
+| `related_prs` | How the same area was changed before: merged precedents, open work, rejected attempts |
+| `find_issues`, `issue_history` | What to work on, and what happened to each issue before |
+| `my_pr_state` | Review threads (maintainers, humans, bots), failing checks, blockers on your PR |
+| `journey_summary`, `journey_note`, `journey_self_report` | What you have done, areas, ladder progress, private notes |
+| `inbox_read` | What the background watch found |
+
+Skills: `find-work`, `understand-code`, `make-the-change`, `review-loop`, `grow`. The coding environment is shared with the maintainer profile (see above).
 
 ## CI automation for your repositories
 
@@ -396,21 +458,16 @@ The full steps, what is added to each repository, the permissions, and why it wo
 Makefile                 common lint, image build, scan and run targets (make help)
 container/               the sandbox: Dockerfile, launcher, policy, provider profiles (see container/README.md)
 .github/workflows/       builds and publishes the sandbox image
-distribution.yaml        install manifest: name, version, required env vars
-SOUL.md                  the agent's identity and boundaries
-config.yaml              model default, GitHub/Slack MCP servers, tool allowlist
-scripts/install.sh       the host install: idempotent installer and sanity checks
+profiles/maintainer/     the maintainer profile: distribution.yaml, SOUL.md, config.yaml, hooks/,
+                         plugins/, skills/, cron/, sandbox/ (the host install's terminal image and policy)
+profiles/contributor/    the contributor profile: same shape, plus org/org.yaml (everything specific to
+                         the organisation), one plugin, scripts/kyverno-watch.py
+scripts/install.sh       the host install: idempotent installer, --profile maintainer|contributor [NAME]
 scripts/update.sh        the host install: git pull, then re-run the installer
 scripts/openshell.sh     the host install's sandboxed terminal: setup, policy, access requests, audit
 scripts/adopt-ci.sh      opens a PR that adds the shared CI actions to other repositories (see above)
 actions/                 shared CI actions (PR labelling, readiness, stale), usable without the agent
 adopt-ci-templates/      workflows and config that adopt-ci.sh copies into each repository
-policies/                OpenShell policy for the host install's sandboxed terminal
-sandbox/                 Dockerfile of the host install's terminal sandbox image
-hooks/                   pre_tool_call backstops
-plugins/                 bundled Hermes plugins
-skills/                  agent skills
-cron/jobs.json           scheduled jobs (installed paused)
 docs/                    design, deployment and usage docs
 ```
 
@@ -429,6 +486,8 @@ Run `make help` to see the available commands. The most useful targets are:
 
 Override `IMAGE` or `TAG` for a different local image name, for example `make image TAG=debug`.
 
+The files below are the maintainer profile's, under `profiles/maintainer/`.
+
 <details>
 <summary><b>Details</b></summary>
 
@@ -445,17 +504,17 @@ Override `IMAGE` or `TAG` for a different local image name, for example `make im
 
 **Hooks**
 
-- `hooks/block-dangerous-tools.sh`: rejects any merge, delete-repo or force-push-shaped tool call.
-- `hooks/block-mnemosyne-triples.sh`: restricts the memory plugin's `triple_add` to the exact facts
+- `profiles/maintainer/hooks/block-dangerous-tools.sh`: rejects any merge, delete-repo or force-push-shaped tool call.
+- `profiles/maintainer/hooks/block-mnemosyne-triples.sh`: restricts the memory plugin's `triple_add` to the exact facts
   this distribution writes.
 
 **Plugins**
 
-- `plugins/kyverno-fetch/`: `fetch_pr_candidates` and `fetch_file_diff_overlap`, one batched call
+- `profiles/maintainer/plugins/kyverno-fetch/`: `fetch_pr_candidates` and `fetch_file_diff_overlap`, one batched call
   over GitHub's GraphQL and REST APIs.
-- `plugins/kyverno-sequencer/`: `sequence_prs`, a hard-dependency graph with cycle detection and
+- `profiles/maintainer/plugins/kyverno-sequencer/`: `sequence_prs`, a hard-dependency graph with cycle detection and
   topological layering into tiers.
-- `plugins/kyverno-dashboard/`: the `update_dashboard` tool and the Kyverno tab in
+- `profiles/maintainer/plugins/kyverno-dashboard/`: the `update_dashboard` tool and the Kyverno tab in
   `hermes dashboard`.
 
 **Skills**

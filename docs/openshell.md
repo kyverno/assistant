@@ -8,7 +8,7 @@ The sandbox cannot see your own files; to work on a repository the assistant clo
 
 ## What the sandbox allows
 
-Everything is in [`policies/terminal.yaml`](../policies/terminal.yaml). Anything not listed there is denied.
+Everything is in [`profiles/maintainer/sandbox/policy.yaml`](../policies/terminal.yaml). Anything not listed there is denied.
 
 | Area | Rule |
 |---|---|
@@ -17,12 +17,12 @@ Everything is in [`policies/terminal.yaml`](../policies/terminal.yaml). Anything
 | Programs | Only `curl` and `git` may reach those hosts; `python3` and everything else is blocked |
 | Tokens | None. The sandbox has no GitHub, Slack or model credentials |
 
-`hooks/require-sandbox-terminal.sh` blocks every terminal and file-tool call unless the profile's terminal backend is
+`profiles/maintainer/hooks/require-sandbox-terminal.sh` blocks every terminal and file-tool call unless the profile's terminal backend is
 ssh into an `openshell-*` host, so a changed config cannot move the terminal onto your machine.
 
 ## Changing the policy
 
-Edit `policies/terminal.yaml`, then:
+Edit `profiles/maintainer/sandbox/policy.yaml`, then:
 
 ```bash
 ./scripts/openshell.sh policy      # network rules apply to the running sandbox
@@ -34,7 +34,7 @@ the host, the allowed methods and paths, and the programs that may use it.
 
 ## Access requests
 
-When a command is blocked and the task needs it, the agent (guided by the `sandbox-access` skill) can
+When a command is blocked and the task needs it, the agent (guided by the `workspace` skill) can
 ask for a narrow permission: an exact host, specific methods and a path, for one program. Nothing is
 approved automatically; only you approve, from your own terminal:
 
@@ -49,7 +49,7 @@ OpenShell marks approved agent rules as audit-only unless enforcement is set, wh
 path and method through; `rules approve` switches enforcement on for every approved REST rule. A
 request that opens a whole host (no methods or paths) is refused unless you add `--allow-whole-host`.
 Approved rules last until the policy is re-applied (`scripts/openshell.sh policy`); add the ones you
-want to keep to `policies/terminal.yaml`.
+want to keep to `profiles/maintainer/sandbox/policy.yaml`.
 
 ## Audit trail
 

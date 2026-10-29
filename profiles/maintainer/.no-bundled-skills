@@ -1,0 +1,12 @@
+This profile opted out of Hermes' general-purpose bundled skill catalog
+(apple, social-media, devops, email, creative, media, research,
+software-development, web, note-taking, autonomous-ai-agents,
+productivity, ...) — see docs/architecture.md, "Why the bundled skill
+catalog is opted out". This distribution ships exactly 4 skills
+(kyverno-context, pr-queue, pr-actions, discussions); nothing else should
+be discoverable in this profile's sessions.
+
+Shipped as part of this repo so every maintainer who installs it gets this
+automatically — never a manual step. Real marker recognized by Hermes'
+own sync_skills() (tools/skills_sync.py); deleting this file re-enables
+the full bundle on the next sync.

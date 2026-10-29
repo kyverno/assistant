@@ -2,7 +2,7 @@
 # Runs inside the OpenShell sandbox (or the plain-Docker container, container/kyverno --no-openshell): what is specific to you on the first run, then the chat.
 # The profile, its skills, hooks and memory plugin are already in the image (container/setup-profile.sh
 # ran when it was built), so this is quick. The launcher calls it with:
-#   openshell sandbox exec --tty -- kyverno-start [--repo R] [--login L]
+#   openshell sandbox exec --tty -- kyverno-start [--profile maintainer|contributor] [--repo R] [--login L]
 # It is idempotent: later runs skip what is already done.
 #
 #   KYVERNO_SETUP_ONLY=1    stop after setup (no sign-in, no chat)
@@ -11,10 +11,7 @@ set -uo pipefail
 
 export HERMES_HOME=/opt/hermes-home/.hermes
 export PATH="/opt/hermes-home/.local/bin:$PATH"
-PROFILE=kyverno
-PROFILE_DIR="$HERMES_HOME/profiles/$PROFILE"
-ENV_FILE="$PROFILE_DIR/.env"
-DONE_MARK="$PROFILE_DIR/.kyverno-user-setup"
+KIND=maintainer
 HERMES_PY=$(compgen -G "/opt/hermes-home/.hermes/tools/python-*/bin/python3" | head -n 1)
 
 # What GitHub allows: an owner/repo with letters, digits, dots, dashes and underscores; a username with letters,
@@ -28,15 +25,27 @@ info() { printf '  %s\n' "$1"; }
 step() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 
 REPO="${KYVERNO_REPO:-}"
-LOGIN="${MAINTAINER_GITHUB_LOGIN:-}"
+LOGIN=""
 while [ $# -gt 0 ]; do
   case "$1" in
+    --profile) KIND="${2:-}"; shift 2 ;;
     --repo) REPO="${2:-}"; shift 2 ;;
     --login) LOGIN="${2:-}"; shift 2 ;;
     --) shift; break ;;
     *) break ;;
   esac
 done
+
+# One image holds both profiles. Which one this sandbox runs is picked by the launcher.
+case "$KIND" in
+  maintainer) PROFILE=kyverno; LOGIN_VAR=MAINTAINER_GITHUB_LOGIN; REPO_ASK="Repo to manage (owner/repo) [kyverno/kyverno]: " ;;
+  contributor) PROFILE=kyverno-contributor; LOGIN_VAR=CONTRIBUTOR_GITHUB_LOGIN; REPO_ASK="Repo you contribute to (owner/repo) [kyverno/kyverno]: " ;;
+  *) echo "unknown profile '$KIND' (maintainer or contributor)" >&2; exit 2 ;;
+esac
+PROFILE_DIR="$HERMES_HOME/profiles/$PROFILE"
+ENV_FILE="$PROFILE_DIR/.env"
+DONE_MARK="$PROFILE_DIR/.kyverno-user-setup"
+[ -z "$LOGIN" ] && LOGIN="${!LOGIN_VAR:-}"
 
 step "Checks"
 if [ -d /run/openshell-supervisor-ca ]; then
@@ -104,19 +113,33 @@ step "Settings"
 [ -f "$ENV_FILE" ] || { [ -f "$PROFILE_DIR/.env.EXAMPLE" ] && cp "$PROFILE_DIR/.env.EXAMPLE" "$ENV_FILE" || : > "$ENV_FILE"; }
 # The token is deliberately not in this file. Only who you are and which repo.
 if [ -z "$(env_get KYVERNO_REPO)" ]; then
-  [ -z "$REPO" ] && read -r -p "  Repo to manage (owner/repo) [kyverno/kyverno]: " REPO
+  [ -z "$REPO" ] && read -r -p "  $REPO_ASK" REPO
   REPO="${REPO:-kyverno/kyverno}"
   valid_repo "$REPO" || { fail "'$REPO' is not an owner/repo name (letters, digits, dots, dashes, underscores)"; exit 1; }
   env_set KYVERNO_REPO "$REPO"
 fi
-if [ -z "$(env_get MAINTAINER_GITHUB_LOGIN)" ]; then
+if [ -z "$(env_get "$LOGIN_VAR")" ]; then
+  # The launcher knows the username only in the run that asked for the token. Otherwise ask GitHub who the token
+  # belongs to (the proxy puts the real token in), and only ask the person if that does not work.
+  [ -z "$LOGIN" ] && LOGIN="$("$HERMES_PY" -I -c '
+import json, os, urllib.request
+req = urllib.request.Request("https://api.github.com/user", headers={"Authorization": "Bearer " + os.environ["REPO_GITHUB_TOKEN"], "User-Agent": "kyverno-assistant"})
+print(json.load(urllib.request.urlopen(req, timeout=10)).get("login", ""))' 2>/dev/null)"
+  valid_login "$LOGIN" 2>/dev/null && pass "signed in to GitHub as $LOGIN" || LOGIN=""
   [ -z "$LOGIN" ] && read -r -p "  Your GitHub username: " LOGIN
   if [ -n "$LOGIN" ]; then
     valid_login "$LOGIN" || { fail "'$LOGIN' is not a GitHub username (letters, digits and dashes)"; exit 1; }
-    env_set MAINTAINER_GITHUB_LOGIN "$LOGIN"
+    env_set "$LOGIN_VAR" "$LOGIN"
   fi
 fi
-pass "repo $(env_get KYVERNO_REPO), maintainer $(env_get MAINTAINER_GITHUB_LOGIN)"
+pass "repo $(env_get KYVERNO_REPO), $KIND $(env_get "$LOGIN_VAR")"
+
+# Hermes hides MCP and plugin tools behind a search step by default. A small model never searches, so it never
+# finds find_issues or the GitHub tools and wanders through the terminal instead. Keep every tool in view. This runs
+# on each start because config.yaml is yours and survives --upgrade, so an image change alone would not reach it.
+if ! grep -qE '^ +enabled: "?off"?' "$PROFILE_DIR/config.yaml" 2>/dev/null; then
+  hermes -p "$PROFILE" config set tools.tool_search.enabled off >/dev/null 2>&1 || true
+fi
 
 # Hermes only fills ${HERMES_SKILL_DIR}-style variables in skills; resolve ours from .env.
 if [ ! -f "$DONE_MARK" ]; then
@@ -128,7 +151,7 @@ for line in open(os.environ["ENV_FILE"]):
     if line and not line.startswith("#") and "=" in line:
         k, _, v = line.partition("=")
         values[k.strip()] = v.strip()
-for var in ("KYVERNO_REPO", "MAINTAINER_GITHUB_LOGIN"):
+for var in ("KYVERNO_REPO", "MAINTAINER_GITHUB_LOGIN", "CONTRIBUTOR_GITHUB_LOGIN"):
     val = values.get(var)
     if not val:
         continue

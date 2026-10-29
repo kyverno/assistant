@@ -32,18 +32,34 @@ RUN mkdir -p "$HOME" \
     && chmod -R a+rX /opt/hermes \
     && ln -s /opt/hermes-home/.local/bin/hermes /usr/local/bin/hermes
 
-# The profile, baked in and read-only under /opt/kyverno. It is installed into HERMES_HOME below, at build
+# The profiles, baked in and read-only under /opt/kyverno. Both are installed into HERMES_HOME below, at build
 # time; the safety hooks are run from here, where the agent cannot edit them.
-COPY SOUL.md config.yaml distribution.yaml .env.example .no-bundled-skills /opt/kyverno/profiles/maintainer/
-COPY hooks   /opt/kyverno/profiles/maintainer/hooks
-COPY plugins /opt/kyverno/profiles/maintainer/plugins
-COPY skills  /opt/kyverno/profiles/maintainer/skills
-COPY cron    /opt/kyverno/profiles/maintainer/cron
+COPY profiles/maintainer/SOUL.md profiles/maintainer/config.yaml profiles/maintainer/distribution.yaml profiles/maintainer/.env.example profiles/maintainer/.no-bundled-skills /opt/kyverno/profiles/maintainer/
+COPY profiles/maintainer/hooks   /opt/kyverno/profiles/maintainer/hooks
+COPY profiles/maintainer/plugins /opt/kyverno/profiles/maintainer/plugins
+COPY profiles/maintainer/skills  /opt/kyverno/profiles/maintainer/skills
+COPY profiles/maintainer/cron    /opt/kyverno/profiles/maintainer/cron
+# The skill both profiles share for working on code (one source, installed with each profile).
+COPY container/skills/workspace /opt/kyverno/profiles/maintainer/skills/workspace
+COPY container/skills/workspace /opt/kyverno/profiles/contributor/skills/workspace
+COPY profiles/contributor/SOUL.md profiles/contributor/config.yaml profiles/contributor/distribution.yaml profiles/contributor/.env.example profiles/contributor/.no-bundled-skills /opt/kyverno/profiles/contributor/
+COPY profiles/contributor/hooks   /opt/kyverno/profiles/contributor/hooks
+COPY profiles/contributor/plugins /opt/kyverno/profiles/contributor/plugins
+COPY profiles/contributor/skills  /opt/kyverno/profiles/contributor/skills
+COPY profiles/contributor/cron    /opt/kyverno/profiles/contributor/cron
+COPY profiles/contributor/org     /opt/kyverno/profiles/contributor/org
+COPY profiles/contributor/scripts /opt/kyverno/profiles/contributor/scripts
 # The terminal runs locally inside the sandbox here, not over ssh into a second one.
 COPY container/hooks/require-sandbox-terminal.sh /opt/kyverno/profiles/maintainer/hooks/require-sandbox-terminal.sh
-RUN chmod 755 /opt/kyverno/profiles/maintainer/hooks/*.sh && chmod -R a+rX /opt/kyverno
+COPY container/hooks/require-sandbox-terminal.sh /opt/kyverno/profiles/contributor/hooks/require-sandbox-terminal.sh
+# Pushes from the terminal go to the user's own fork only (see container/kyverno --push-to-fork); both profiles use this hook.
+COPY container/hooks/git-push-guard.py /opt/kyverno/profiles/maintainer/hooks/git-push-guard.py
+COPY container/hooks/git-push-guard.py /opt/kyverno/profiles/contributor/hooks/git-push-guard.py
+# The memory plugin's approval gate has a gap that the maintainer profile's hook closes; both profiles use that one hook.
+COPY profiles/maintainer/hooks/block-mnemosyne-triples.sh /opt/kyverno/profiles/contributor/hooks/block-mnemosyne-triples.sh
+RUN chmod 755 /opt/kyverno/profiles/*/hooks/* && chmod -R a+rX /opt/kyverno
 
-# Install the profile and its memory plugin (mnemosyne) now, while the network is open. The sandbox
+# Install the profiles and the memory plugin (mnemosyne) now, while the network is open. The sandbox
 # cannot reach PyPI, and at runtime Hermes would stop at a hidden "Prepare these dependencies? [y/N]"
 # prompt. Hermes wants that answer on a terminal, so `script` supplies one. Runs as the sandbox user
 # (uid 1000), so everything it writes into Hermes' home is already writable at runtime.
@@ -52,7 +68,13 @@ RUN export HERMES_HOME=/opt/hermes-home/.hermes \
     && hermes profile install /opt/kyverno/profiles/maintainer --name kyverno -y \
     && printf 'y\n' | script -qec "hermes -p kyverno plugins install mnemosyne --enable" /dev/null \
     && PLUGINS="$(hermes -p kyverno plugins list 2>&1)" \
+    && printf '%s\n' "$PLUGINS" | grep -q 'mnemosyne.*enabled' \
+    && hermes profile install /opt/kyverno/profiles/contributor --name kyverno-contributor -y \
+    && PLUGINS="$(hermes -p kyverno-contributor plugins list 2>&1)" \
     && printf '%s\n' "$PLUGINS" | grep -q 'mnemosyne.*enabled'
+# The second profile does not run `plugins install mnemosyne`: that re-resolves Hermes' dependencies and builds a whole
+# second Python environment (37 minutes and gigabytes). The plugin is already in the shared environment and the
+# profile's config enables it; the verification at the end of the build proves its memory provider loads.
 
 # Model-provider libraries. Hermes installs these on first use by re-resolving its whole dependency lock
 # from PyPI and GitHub, which the sandbox cannot reach. OpenAI, NVIDIA, OpenRouter, Gemini and Copilot use
@@ -94,14 +116,16 @@ sys.exit(0 if p else 1)'
 # searches only ever read it from the profile's cache folder (local_files_only); the download happens in a
 # separate first-start path that works on a laptop with internet. The sandbox cannot reach HuggingFace, so
 # without this the first memory lookup stalls for a retry cycle and falls back to a weaker search.
-# Download it now, into that same folder.
+# Download it now, into that same folder (the contributor profile reads the same files through a symlink).
 RUN export HERMES_HOME=/opt/hermes-home/.hermes \
     && PY="$(ls -d /opt/hermes-home/.hermes/tools/python-*/bin/python3 | head -n 1)" \
-    && "$PY" -I -c 'import sys; sys.path.insert(0, "/opt/hermes"); import hermes_bootstrap; from fastembed import TextEmbedding; v = list(TextEmbedding("BAAI/bge-small-en-v1.5", cache_dir="/opt/hermes-home/.hermes/profiles/kyverno/cache/fastembed").embed(["warm up"]))[0]; print("embedding model ready, dimensions:", len(v)); sys.exit(0 if len(v) == 384 else 1)'
+    && "$PY" -I -c 'import sys; sys.path.insert(0, "/opt/hermes"); import hermes_bootstrap; from fastembed import TextEmbedding; v = list(TextEmbedding("BAAI/bge-small-en-v1.5", cache_dir="/opt/hermes-home/.hermes/profiles/kyverno/cache/fastembed").embed(["warm up"]))[0]; print("embedding model ready, dimensions:", len(v)); sys.exit(0 if len(v) == 384 else 1)' \
+    && mkdir -p /opt/hermes-home/.hermes/profiles/kyverno-contributor/cache \
+    && ln -s /opt/hermes-home/.hermes/profiles/kyverno/cache/fastembed /opt/hermes-home/.hermes/profiles/kyverno-contributor/cache/fastembed
 
 # The rest of the one-time profile setup (skills, hook paths, terminal and Slack settings): see the script.
 COPY --chmod=755 container/setup-profile.sh /usr/local/bin/kyverno-setup-profile
-RUN /usr/local/bin/kyverno-setup-profile
+RUN kyverno-setup-profile maintainer kyverno && kyverno-setup-profile contributor kyverno-contributor
 
 # Keep certifi in pip's embedded copies and ensurepip's wheel free of the same vulnerable release.
 RUN export HERMES_HOME=/opt/hermes-home/.hermes \
@@ -161,56 +185,20 @@ ENV HOME=/opt/hermes-home
 # Hermes' code and the profile stay root-owned; Hermes' home belongs to the sandbox user (uid 1000).
 COPY --from=build /opt/hermes /opt/hermes
 COPY --from=build /opt/kyverno /opt/kyverno
-# Only for the build-time check below: the proxy's tool allowlist lives in this profile, outside the sandbox.
-COPY --chown=1000:1000 container/providers/repo-github.yaml /tmp/repo-github.yaml
+# Only for the build-time check below: the proxy's tool allowlists live in these provider profiles, outside the sandbox.
+COPY --chown=1000:1000 container/providers/repo-github.yaml container/providers/repo-github-contributor.yaml /tmp/providers/
 COPY --from=build --chown=1000:1000 /opt/hermes-home /opt/hermes-home
 RUN ln -s /opt/hermes-home/.local/bin/hermes /usr/local/bin/hermes
 COPY --chmod=755 container/kyverno-start container/kyverno-main container/kyverno-env container/dashboard-relay /usr/local/bin/
+# Clone a repository and install the toolchains it declares (Go, Node, the Kyverno CLI), for building and testing in the sandbox.
+COPY --chmod=755 container/kyverno-workspace /usr/local/bin/kyverno-workspace
+COPY --chmod=755 container/toolchains /usr/local/lib/kyverno/toolchains
+# The workspace folder the agent's terminal starts in. OpenShell makes it itself; plain Docker needs it to exist and be writable.
+RUN install -d -o 1000 -g 1000 /sandbox
 
 # The image's final user must stay uid 1000: OpenShell refuses an image whose default user is root.
 USER 1000:1000
 
-# Proof that the finished image works, run on the copied files with NO network: Hermes knows its own version,
-# the agent cannot write to Hermes' code or the safety hooks, the proxy's GitHub tool allowlist equals the one in config.yaml,
-# `anthropic` imports, mnemosyne comes up as the memory provider, and a full memory cycle passes (import two
-# memories, search them, which needs the embedding model read locally, and run a consolidation). If the cleanup
-# above removed something that was needed, or the plugin needs anything from the internet, this fails the build
-# and the output says what. The warm-up data is removed after, so every user starts with an empty memory.
-RUN --network=none export HERMES_HOME=/opt/hermes-home/.hermes \
-    && V="$(hermes --version)" \
-    && echo "$V" \
-    && case "$V" in *unknown*) echo "Hermes cannot tell its own version" >&2; exit 1 ;; esac \
-    && test ! -w /opt/hermes \
-    && test ! -w /opt/kyverno/profiles/maintainer/hooks \
-    && test ! -w /opt/kyverno/profiles/maintainer/hooks/block-dangerous-tools.sh \
-    && PY="$(ls -d /opt/hermes-home/.hermes/tools/python-*/bin/python3 | head -n 1)" \
-    && HERMES_HOME=$HERMES_HOME/profiles/kyverno "$PY" -I -c '\
-import sys; sys.path.insert(0, "/opt/hermes"); \
-import hermes_bootstrap, anthropic, certifi, PIL, pip; \
-import pip._vendor.certifi as pip_certifi; \
-from PIL import Image; \
-assert certifi.__version__ == "2026.10.19" and pip_certifi.__version__ == "2026.10.19"; \
-assert PIL.__version__ == "13.0.0" and pip.__version__ == "26.2.2"; \
-assert Image.new("RGB", (2, 2)).resize((1, 1)).size == (1, 1); \
-from plugins.memory import load_memory_provider; \
-p = load_memory_provider("mnemosyne"); \
-print("anthropic", anthropic.__version__, "| certifi", certifi.__version__, "| Pillow", PIL.__version__, "| pip", pip.__version__, "| memory provider:", type(p).__name__ if p else None); \
-sys.exit(0 if p else 1)' \
-    && HERMES_HOME=$HERMES_HOME/profiles/kyverno "$PY" -I -c '\
-import re, sys; \
-cfg = open("/opt/hermes-home/.hermes/profiles/kyverno/config.yaml").read(); \
-want = re.search(r"X-MCP-Tools: \"([^\"]+)\"", cfg).group(1).split(","); \
-prof = open("/tmp/repo-github.yaml").read(); \
-have = [t.strip() for t in re.search(r"any: \[(.*?)\]", prof, re.S).group(1).split(",") if t.strip()]; \
-ok = have == want; \
-print("proxy tool allowlist matches config.yaml:", ok, "(%d tools)" % len(want)); \
-sys.exit(0 if ok else 1)' \
-    && rm -f /tmp/repo-github.yaml \
-    && printf '%s' '{"mnemosyne_export": {"version": "1.3"}, "working_memory": [{"id": "warmup:1", "content": "Kyverno warm-up memory: the review queue is ordered by dependency tier.", "source": "warmup", "timestamp": "2026-01-01T00:00:00", "session_id": "warmup", "importance": 0.9, "scope": "global", "pinned": 1}]}' > /tmp/warmup.json \
-    && hermes -p kyverno mnemosyne import -i /tmp/warmup.json --force \
-    && OUT="$(hermes -p kyverno mnemosyne inspect 'dependency tier review queue' 2>&1)" \
-    && echo "$OUT" \
-    && ! echo "$OUT" | grep -q 'ERROR' \
-    && echo "$OUT" | grep -q 'warm-up memory' \
-    && hermes -p kyverno mnemosyne sleep \
-    && rm -rf /tmp/warmup.json /opt/hermes-home/.hermes/profiles/kyverno/mnemosyne/data
+# Proof that the finished image works, run on the copied files with NO network (see container/verify-image.sh).
+COPY --chmod=755 container/verify-image.sh /usr/local/bin/kyverno-verify-image
+RUN --network=none kyverno-verify-image

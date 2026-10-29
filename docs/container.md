@@ -33,6 +33,8 @@ because the sandbox has no open internet and the chat screen hides first-use pro
 | Model API key (`--provider anthropic\|openai\|nvidia`) | OpenShell, asked once | A placeholder. Hermes accepts it for these providers. OpenRouter is not supported this way: Hermes requires an `sk-or-` prefix. |
 | GitHub Copilot sign-in | Created by Hermes' own device-code login inside the sandbox | The real token, in the profile's `.env`. It only grants Copilot model access. |
 
+| Push token (`--push-to-fork`, optional) | OpenShell, asked once, apart from the read-only repo token | A placeholder in `GIT_PUSH_TOKEN`. The proxy swaps in the real value on `git push` to the allowed repositories only, and only from `git`. |
+
 The Copilot token and the repo token never share a variable name, so Hermes cannot pick the wrong one.
 
 ## What the agent can reach
@@ -46,6 +48,8 @@ Everything not listed is denied (`policy.yaml` and `providers/*.yaml`).
 | Copilot inference (`api.githubcopilot.com`: `/models`, `/chat/completions`, `/responses`, `/embeddings`, `/v1/**`; and `api.individual`, `api.business`, `api.enterprise.githubcopilot.com`) | Yes, with Hermes' own Copilot token. `/mcp/` is deliberately not among the paths on the shared host (see "Safety layers") |
 | `github.com` login endpoints | Only the two device-code paths |
 | `github.com`, `codeload`, `raw.githubusercontent.com` | Read-only, for the agent's terminal, no credential |
+| Toolchain hosts (`go.dev`, `proxy.golang.org`, `nodejs.org`, `registry.npmjs.org`, and a few more) | GET only, and only for the installer's own binaries (`curl`, Go, Node). Used by `kyverno-workspace`; every download is checked against the vendor's checksum |
+| `github.com` `git-receive-pack`, only with `--push-to-fork` | Pushes to your own forks (and, for a maintainer, the repository they manage), nothing else. The credential is swapped in by the proxy; a hook also refuses force pushes, deletes and pushes to main |
 | `models.dev` | Read-only, for the `/model` list |
 | A model provider you added with `--provider` | Only that provider's API host |
 
@@ -57,7 +61,7 @@ Verified means it was run in a real sandbox, on the image as built from this che
 |---|---|---|
 | Image build, sandbox start, first run | Verified | First run takes about a second; agent start to reply about 30 seconds |
 | GitHub MCP with the real token | Verified | Connects, 63 tools. Merge tools are not in the list |
-| GitHub MCP tool allowlist enforced by the proxy | Verified | With a real token: `get_me` is answered; `merge_pull_request` is refused by the name deny rule and `create_pull_request` by the allowlist, both with `policy_denied` before reaching GitHub; a batch with a merge hidden among allowed calls is refused too. `hermes mcp test github` connects through the rules. Closing an MCP session with `DELETE` is rejected by the proxy (it carries no JSON body), which only means the server closes the session itself later |
+| GitHub MCP tool allowlist enforced by the proxy | Verified | With a real token: `get_me` is answered; `merge_pull_request` is refused by the name deny rule with `policy_denied` before reaching GitHub, and `create_pull_request` is admitted (it was refused until it was added to the allowlist); a batch with a merge hidden among allowed calls is refused too. `hermes mcp test github` connects through the rules. Closing an MCP session with `DELETE` is rejected by the proxy (it carries no JSON body), which only means the server closes the session itself later |
 | REST and GraphQL reads with the real token | Verified | Merge, delete and GraphQL mutations refused by the proxy |
 | Safety hooks (merge blocker, mnemosyne triples, terminal guard) | Verified | Approved at build time, listed as allowed |
 | Memory plugin (mnemosyne) | Verified | Starts, searches, consolidates, with the network off. Embedding model is in the image |
@@ -81,6 +85,8 @@ image, and puts the state back. It carries only what is yours:
 - the memory database, the notes in `memories/`, the chat history and sessions, and the dashboard's data
 - your repo and username, and the Copilot sign-in (just those settings, not the whole `.env`)
 - the model you chose
+- your cloned repositories under `/sandbox`, with their unpushed commits and edits. The downloaded toolchains and build caches
+  (`/sandbox/.toolchains`, large) only come along with `--keep-caches`; otherwise they download again
 
 The profile itself (skills, plugins, hooks, settings) always comes from the new image. If saving fails, the old
 sandbox is left alone. If restoring fails, the saved copy stays in a temporary folder and its path is printed; it
@@ -134,6 +140,8 @@ container/kyverno --no-openshell [--build | --image IMAGE] [--provider P ...] [-
 | Merges | Refused by the proxy, whatever the token can do | Only the token's scopes stop them. Use a fine-grained token (README step 1), not the `gh` sign-in |
 | Tool allowlist on the GitHub MCP server | Enforced by the proxy | Hermes' own filter only |
 | Terminal and file tools | Allowed, inside the sandbox | Blocked. `--allow-terminal` turns them on, and then the container is the only boundary |
+| Coding environment (`kyverno-workspace`) | Downloads only from the allowed toolchain hosts | The same scripts and checksums, but the container can reach anything, so the host allowlist is not there. Needs `--allow-terminal` |
+| Pushing (`--push-to-fork`) | Token held by the gateway, pushes limited to your forks | Not available: the launcher refuses it. The assistant hands over patches |
 | Audit log | `openshell logs` | None |
 | Dashboard | Forwarded to `127.0.0.1:9219` | The same address. Hermes keeps it on loopback inside the container; a small relay passes it to a port Docker publishes on `127.0.0.1` only, on a network that only this container joins |
 

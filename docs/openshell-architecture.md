@@ -15,7 +15,7 @@ User documentation is [openshell.md](openshell.md).
 
 - Hermes runs on the laptop. Its terminal (and, with the ssh backend, file tools) run inside one
   OpenShell sandbox, `kyverno-terminal`, reached over ssh.
-- Policy `policies/terminal.yaml`: read-only GitHub for `curl` and `git`, default-deny otherwise.
+- Policy `profiles/maintainer/sandbox/policy.yaml`: read-only GitHub for `curl` and `git`, default-deny otherwise.
 - Policy advisor: the agent proposes a rule, the maintainer approves with `scripts/openshell.sh rules`.
 - Audit: `scripts/openshell.sh audit`, with a launchd collector writing daily logs.
 - `scripts/install.sh` sets it all up; `scripts/update.sh` updates it.
@@ -255,6 +255,9 @@ Grouped by what the maintainer or contributor gets. "Phase" refers to [section 1
 
 ### Contributor (coach)
 
+The full contributor design, including coding access, the AI-policy gates and the ladder, is in
+[contributor-profile.md](contributor-profile.md); the table below is the short form.
+
 | Feature | What it does | Phase |
 |---|---|---|
 | Review explainer | Restates reviewer comments in plain steps and points to the repo convention | 3 |
@@ -330,7 +333,7 @@ it aims to do better:
    state, and CODEOWNERS are computed from Kyverno's own repository.
 2. **Provable containment of untrusted code**: fork PR code and repro manifests run in a
    kernel-confined sandbox with no tokens, which a proxy-only design does not provide.
-3. **A contributor side** that explains and unblocks instead of generating patches.
+3. **A contributor side** that finds work, helps write and test it, and checks it against Kyverno's AI policy before a PR is opened ([contributor-profile.md](contributor-profile.md)).
 4. **Alignment with Kubernetes' stated AI policy**: humans stay accountable, no AI co-authors,
    AI-assisted contributions are disclosed ([kubernetes.dev](https://www.kubernetes.dev/blog/2026/06/26/open-source-maintainership-in-the-age-of-ai/)).
 
@@ -416,11 +419,26 @@ listed above.
 | 3 Contributor | Contributor profile and coach; weekly trajectory report; budgets; policy proposals on the dashboard |
 | 4 Security | Advisory lookup, `govulncheck`, embargo handling |
 | 5 Extras | Release helper, docs and codegen drift, reviewer routing, standing approvals (A2) |
-| Later | Kyverno Guard and admission, Kubernetes deployment (section 11) |
+| Later | Hermes inside the sandbox, Kyverno Guard and admission, Kubernetes deployment (section 11) |
 
-## 11. Later: Kyverno and Kubernetes
+## 11. Later: Hermes inside the sandbox, Kyverno and Kubernetes
 
 Not part of the first build. Recorded so the design leaves room.
+
+**Hermes inside the sandbox.** Today Hermes runs on the maintainer's machine and holds the
+tokens; only the terminal and file tools run in the sandbox. Running all of Hermes in a sandbox
+would keep real tokens off the machine (the proxy swaps placeholders on the wire) and police and
+audit Hermes' own network traffic.
+
+- NemoClaw runs Hermes this way. Its public base image (`ghcr.io/nvidia/nemoclaw/hermes-sandbox-base`,
+  arm64 and amd64, 0.49 GB compressed) is a build stage that its own Dockerfile (about 1,500 lines)
+  completes. It pins Hermes 0.21.3 and carries about 17 patches **[V]**.
+- Hermes' code goes in a read-only path, state in `/sandbox/.hermes`, run as a non-root user with
+  `hermes gateway run`; `/dev/pts` must be writable for the terminal **[V]**.
+- One patch makes MCP over HTTP use the sandbox proxy. Hermes at 0.21.5 and later already does
+  this in `tools/mcp_tool_transport.py` (`_mcp_proxy_mounts`) **[V]**.
+- Open: Slack Socket Mode through the proxy, the dashboard, scheduled jobs, hooks, locking
+  `config.yaml` and `hooks/` read-only while state stays writable **[?]**.
 
 **Kyverno Guard (supervisor middleware).** A gRPC service implementing `EvaluateHttpRequest`,
 built on the Kyverno authz SDK or JSON-payload `ValidatingPolicy` **[I]** (`kyverno-authz` is a

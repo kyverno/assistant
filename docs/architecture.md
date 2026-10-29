@@ -35,14 +35,14 @@ kyverno-assistant is a [Hermes profile distribution](https://hermes-agent.nousre
    `scripts/install.sh` fails when the two differ.
 2. **`mcp_servers.github.tools.include`** — Hermes' own per-tool filter, matched against raw
    (unprefixed) tool names.
-3. **`hooks.pre_tool_call` → `hooks/block-dangerous-tools.sh`** — a shell hook, `matcher`-
+3. **`hooks.pre_tool_call` → `profiles/maintainer/hooks/block-dangerous-tools.sh`** — a shell hook, `matcher`-
    scoped to any tool name containing `merge`, `delete_repo` or `force_push` (the matcher is a
    full-match regex, so MCP names like `mcp__github__merge_pull_request` need the `.*` wrapper),
    `fail_closed: true` (shell hooks fail open by default; this is inverted on purpose for a security gate). Reads the tool-call event as
    JSON from stdin — Hermes pipes the event that way, not via an env var. Every invocation
    that matches the `matcher` is blocked; there's no conditional branch inside the hook.
 
-`hooks/block-mnemosyne-triples.sh` is the same pattern, scoped to `mnemosyne_triple_add`,
+`profiles/maintainer/hooks/block-mnemosyne-triples.sh` is the same pattern, scoped to `mnemosyne_triple_add`,
 restricting it to the exact 5 predicates this distribution writes (`memory.write_approval`
 stages `mnemosyne_remember` correctly but doesn't gate `triple_add`, which commits straight to
 the database — this hook is the real control for that one tool).
@@ -65,7 +65,7 @@ ever wanted:
 
 ## Why two bundled plugins instead of MCP servers
 
-`plugins/kyverno-fetch/` and `plugins/kyverno-sequencer/` are bundled Hermes plugins (plain
+`profiles/maintainer/plugins/kyverno-fetch/` and `profiles/maintainer/plugins/kyverno-sequencer/` are bundled Hermes plugins (plain
 Python, not MCP servers) — `__init__.py` exposes `register(ctx)`, which registers each
 tool's schema (from `tools.py`) with Hermes; still needs an explicit `config.yaml` toolset
 grant and a `plugins.enabled:` entry like any other tool — bundled isn't auto-trusted. They
@@ -104,7 +104,7 @@ per-profile under `~/.hermes/profiles/<profile>/plugins/<name>/`.
   repeated Kahn's-algorithm peeling. Within a tier, no hard edge exists between any member —
   the tool returns them flat and unordered; ordering within a tier is the agent's judgment
   call (session context, Slack/Discussions, maintainer history), made explicit in
-  `skills/pr-queue/SKILL.md`'s precedence ladder, not something the tool decides. Also
+  `profiles/maintainer/skills/pr-queue/SKILL.md`'s precedence ladder, not something the tool decides. Also
   computes per-PR annotations: file classification (`GENERATED` > `API_SURFACE` >
   `ADMISSION_CRITICAL` > `TEST_ONLY` > `STANDARD`), `rebase_flag` (shares a changed file with
   an earlier tier), `file_overlaps`/`package_overlaps` (no hard edge), `gate_blocked`
@@ -127,8 +127,8 @@ From `kyverno/kyverno`'s own `Makefile` and `.github/workflows/`:
   signals; a PR can carry both, and `pr-queue` states them separately rather than conflating
   them.
 
-See `skills/kyverno-context/SKILL.md` for the full codegen/CI reference and
-`skills/pr-queue/SKILL.md` for how it's used in sequencing.
+See `profiles/maintainer/skills/kyverno-context/SKILL.md` for the full codegen/CI reference and
+`profiles/maintainer/skills/pr-queue/SKILL.md` for how it's used in sequencing.
 
 ## Why labels and CODEOWNERS are never hardcoded
 
