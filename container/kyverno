@@ -259,6 +259,9 @@ if [ "$PUSH" = 1 ]; then
   PUSH_LOGIN="${KYVERNO_PUSH_LOGIN:-}"
   [ -z "$PUSH_LOGIN" ] && [ -n "$PUSH_TOKEN" ] && PUSH_LOGIN=$(token_login "$PUSH_TOKEN")
   [ -z "$PUSH_LOGIN" ] && PUSH_LOGIN="$LOGIN"
+  # The push credential from an earlier run is not read again, so ask GitHub who you are, then ask you.
+  [ -z "$PUSH_LOGIN" ] && command -v gh >/dev/null 2>&1 && PUSH_LOGIN=$(gh api user --jq .login 2>/dev/null)
+  [ -z "$PUSH_LOGIN" ] && [ -t 0 ] && read -r -p "  Your GitHub username (whose forks it may push to): " PUSH_LOGIN </dev/tty
   [ -z "$PUSH_LOGIN" ] && { fail "could not tell whose forks to allow: set KYVERNO_PUSH_LOGIN to your GitHub username"; exit 1; }
   PUSH_REPOS=()
   for r in ${KYVERNO_PUSH_REPOS:-kyverno website policies}; do
