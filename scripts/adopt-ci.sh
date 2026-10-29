@@ -113,7 +113,7 @@ Setting the variable to \`false\`, or deleting it, returns every scheduled and P
 - \`.github/pr-management.json\`: reviewers (\`${reviewers}\`), exempt labels, timings.
 - \`.github/pr-readiness-checks.yml\`: the names of checks that should block, and any that are not the author's to fix.
 - \`.github/labels.yml\`: add path rules for your areas. It must define the lifecycle labels \`needs-author-action\`,
-  \`ready-for-review\`, \`workflow-approval-required\` and \`stale\`; any missing from an existing file are appended to it by this PR.
+  \`ready-for-review\`, \`workflow-approval-required\`, \`stale\` and \`merge-conflicts\`; any missing from an existing file are appended to it by this PR.
 
 ## Keeping it current
 
@@ -179,7 +179,7 @@ adopt() {
     add_file "$templates/labels.yml" .github/labels.yml
     # An existing labels.yml keeps everything it has; only the lifecycle labels the action needs are appended to it.
     labels_appended=false
-    for label in needs-author-action ready-for-review workflow-approval-required stale; do
+    for label in needs-author-action ready-for-review workflow-approval-required stale merge-conflicts; do
       grep -qE "^[\"']?${label}[\"']?:" .github/labels.yml && continue
       [[ -z "$(tail -c1 .github/labels.yml)" ]] || echo >> .github/labels.yml
       awk -v key="${label}:" '$0 == key { on = 1; print; next } on && /^[ \t]/ { print; next } { on = 0 }' "$templates/labels.yml" >> .github/labels.yml
