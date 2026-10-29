@@ -76,6 +76,7 @@ STATE_FILES=".env config.yaml .kyverno-model-chosen mnemosyne/data memories sess
 # Build the image from this checkout (--build), or pull it when it is missing or --upgrade asks for the newest.
 ensure_image() {
   if [ "$BUILD" = 1 ]; then
+    [ -f "$REPO_ROOT/container/Dockerfile" ] || { fail "--build needs a checkout of the repository (this launcher was taken from an image)"; exit 1; }
     IMAGE="kyverno-assistant:dev"
     info "building $IMAGE from this checkout (the first build takes several minutes)..."
     docker build -f "$REPO_ROOT/container/Dockerfile" -t "$IMAGE" "$REPO_ROOT" || { fail "image build failed"; exit 1; }
