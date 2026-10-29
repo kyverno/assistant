@@ -33,6 +33,20 @@ The workflows call `kyverno/assistant/actions/pr-management@<full SHA>`. The SHA
 action cannot change under the adopter; to update, change the SHA (a Dependabot `github-actions` entry opens that
 PR). The workflow files are the only code the repository carries; the logic stays here.
 
+### Updating a repository that already uses it
+
+`scripts/adopt-ci.sh` never overwrites a file, so running it again on an adopted repository adds nothing. To move
+the pin, including from another source such as `kyverno/kyverno/.github/actions/pr-management`, run
+
+```sh
+scripts/adopt-ci.sh --update-pin your-org/repo-a your-org/repo-b
+```
+
+It rewrites only the pinned `uses:` reference in the repository's workflows to this checkout's commit and opens a PR
+saying which lines moved from where to where. Config files, labels and every other workflow line stay as they are, and
+`--reviewers` is not needed. A repository that does not use the action yet is skipped with a pointer to the normal
+adoption. `--dry-run` shows the diff and pushes nothing.
+
 ### Turning it on
 
 Nothing happens on its own after the PR merges, by design: every scheduled and PR-event run only previews.
