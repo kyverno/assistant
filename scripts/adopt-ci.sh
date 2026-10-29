@@ -185,9 +185,13 @@ publish() { # title; runs in the clone with the branch committed; reads repo, wr
   if [[ "$writable" == "true" ]]; then
     git push --quiet origin "$branch" || return 1
   else
+    local login
+    login=$(gh api user --jq .login)
     gh repo fork "$repo" --remote --remote-name fork > /dev/null 2>&1 || true
+    # With an existing fork, gh prints "already exists" and adds no remote.
+    git remote get-url fork > /dev/null 2>&1 || git remote add fork "https://github.com/${login}/${repo#*/}.git"
     git push --quiet fork "$branch" || return 1
-    head="$(gh api user --jq .login):${branch}"
+    head="${login}:${branch}"
   fi
   gh pr create --repo "$repo" --base "$default_branch" --head "$head" --title "$1" --body-file "$tmp/body.md"
 }
