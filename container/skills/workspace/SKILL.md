@@ -3,7 +3,7 @@ name: workspace
 description: "Work on code in the sandbox: clone the repo, get the right toolchain, reproduce an issue or a failing PR, make and test a change, and hand the result to the user as a pushed branch or a patch. Use it whenever a task needs code to be built, run or edited."
 version: 0.1.0
 author: Suhaani Agarwal
-license: MIT
+license: Apache-2.0
 platforms: [linux, macos, windows]
 ---
 

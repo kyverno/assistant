@@ -3,7 +3,7 @@ name: review-loop
 description: "After the PR is open: explain every review comment and failing check, say which look right and which deserve pushback with evidence, keep the PR moving, and draft reviews of other people's PRs for the contributor to post."
 version: 0.1.0
 author: Suhaani Agarwal
-license: MIT
+license: Apache-2.0
 platforms: [linux, macos, windows]
 ---
 

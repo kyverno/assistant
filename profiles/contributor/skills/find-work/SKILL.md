@@ -3,7 +3,7 @@ name: find-work
 description: "Choose what to work on: issues matched to the contributor's areas, with the full history of each before recommending it, and how to join or adopt work already in progress."
 version: 0.1.0
 author: Suhaani Agarwal
-license: MIT
+license: Apache-2.0
 platforms: [linux, macos, windows]
 ---
 

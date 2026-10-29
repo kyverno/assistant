@@ -3,7 +3,7 @@ name: discussions
 description: "Reads and answers GitHub Discussions via the maintainer's token."
 version: 0.1.0
 author: Suhaani Agarwal, Hermes Agent
-license: MIT
+license: Apache-2.0
 platforms: [linux, macos, windows]
 ---
 

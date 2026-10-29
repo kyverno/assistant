@@ -2,7 +2,7 @@ name: kyverno-fetch
 version: 0.1.0
 description: "One-call GraphQL fetch of PR-candidate metadata (body, files, labels, milestone, review/thread/CI state, closing issues) and issue-candidate metadata (labels, assignees, milestone, comments, every PR that references closing it, the real closer when closed). Each has a digest mode (drops body/review/comment text, capped at 60) for ranking a whole candidate set, plus a details call for full data on an explicit number list after ranking. Also fetch_file_diff_overlap for checking whether two PRs touching the same file touch the same lines. Stdlib-only, talks to GitHub's GraphQL/REST APIs directly with the profile's own REPO_GITHUB_TOKEN. No GitHub/Slack MCP access of its own."
 author: "Suhaani Agarwal"
-license: "MIT"
+license: "Apache-2.0"
 provides_tools:
   - fetch_pr_candidates
   - fetch_pr_details

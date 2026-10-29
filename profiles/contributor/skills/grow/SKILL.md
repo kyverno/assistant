@@ -3,7 +3,7 @@ name: grow
 description: "The path from first PR to reviewer: what the contributor has done, what the project's ladder asks for, what to work on next to deepen an area or widen it, and the evidence to bring when asking for a role."
 version: 0.1.0
 author: Suhaani Agarwal
-license: MIT
+license: Apache-2.0
 platforms: [linux, macos, windows]
 ---
 
