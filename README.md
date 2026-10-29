@@ -75,6 +75,17 @@ stores your token, creates or starts the sandbox, and opens the chat.
 
 ## Quick start
 
+You need Docker (and, on a Mac, Apple Silicon: see [what you need](#0-what-you-need)). You do not need to clone this
+repository: the launcher is inside the image, so one command copies it out and another runs it.
+
+```bash
+mkdir -p ~/.kyverno-launcher
+docker run --rm ghcr.io/kyverno/assistant:latest tar -C /opt/kyverno -c launcher | tar -x -C ~/.kyverno-launcher
+~/.kyverno-launcher/launcher/kyverno
+```
+
+To upgrade later, run the `docker run` line again, then start the launcher with `--upgrade`. Prefer a clone, or want to build the image yourself? Then:
+
 ```bash
 git clone https://github.com/kyverno/assistant.git
 cd assistant

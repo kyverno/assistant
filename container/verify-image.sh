@@ -74,6 +74,11 @@ PYEOF
 
 echo "== workspace: script, toolchains and the shared skill"
 test -x /usr/local/bin/kyverno-workspace
+# The launcher a user extracts from the image (README: Quick start): every file it reads next to itself, and it must parse.
+for f in kyverno kyverno-docker restore-state.sh lib.sh policy.yaml providers/repo-github.yaml providers/repo-github-contributor.yaml; do
+  test -f "/opt/kyverno/launcher/$f"
+done
+for f in kyverno kyverno-docker restore-state.sh lib.sh; do bash -n "/opt/kyverno/launcher/$f"; done
 for f in /usr/local/lib/kyverno/toolchains/*.sh /usr/local/bin/kyverno-workspace; do bash -n "$f"; done
 test -f "$HERMES_HOME/profiles/kyverno/skills/workspace/SKILL.md"
 test -f "$HERMES_HOME/profiles/kyverno-contributor/skills/workspace/SKILL.md"
