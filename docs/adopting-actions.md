@@ -29,9 +29,11 @@ the PR open, so it is safe to run again.
 | `.github/pr-readiness-checks.yml` | which checks block a PR, which are not the author's to fix |
 | `.github/labels.yml` | label catalog and path rules |
 
-The workflows call `kyverno/assistant/.github/actions/pr-management@<full SHA>`. The SHA is this checkout's commit, so the
-action cannot change under the adopter; to update, change the SHA (a Dependabot `github-actions` entry opens that
-PR). The workflow files are the only code the repository carries; the logic stays here.
+The four workflow files are short callers: they say when to run and call a shared workflow here
+(`.github/workflows/pr-management.yml`, or `pr-management-validate.yml` for the config check), pinned to this
+checkout's commit. The logic, the default-branch checkout and the preview or live decision live in the shared
+workflow. To update, change the SHA, or use `--update-pin` below. Job names now read `<job> / <shared job>`, which
+matters if a branch-protection rule requires one by name.
 
 ### Updating a repository that already uses it
 
@@ -42,8 +44,8 @@ the pin, including from another source such as `kyverno/kyverno/.github/actions/
 scripts/adopt-ci.sh --update-pin your-org/repo-a your-org/repo-b
 ```
 
-It rewrites only the pinned `uses:` reference in the repository's workflows to this checkout's commit and opens a PR
-saying which lines moved from where to where. Config files, labels and every other workflow line stay as they are, and
+It changes only the pinned `uses:` lines that name `pr-management` (the action or a shared workflow) to this
+checkout's repository and commit, and opens a PR listing what moved. Config files, labels and every other workflow line stay as they are, and
 `--reviewers` is not needed. A repository that does not use the action yet is skipped with a pointer to the normal
 adoption. `--dry-run` shows the diff and pushes nothing.
 
@@ -95,13 +97,9 @@ permissions each mode needs are in [`.github/actions/pr-management/README.md`](.
 | **Starter workflows** in the organisation's `.github` repository (`workflow-templates/`) | GitHub; they appear under Actions, New workflow, in every repository of the organisation ([docs](https://docs.github.com/en/enterprise-server@3.4/actions/using-workflows/creating-starter-workflows-for-your-organization)) | Organisation-only, and each repository has to click through it by hand; no PR, no config. Worth adding for Kyverno as a second route |
 | **Onboarding PR from a GitHub App** | Renovate opens a "Configure Renovate" PR, and merging it turns the tool on | The right long-term shape, but it needs a hosted app and write access to every repository, which is the cross-repository credential this design avoids |
 | **Required workflows through organisation rulesets** | GitHub, to force a workflow onto every repository | Enforces rather than adopts; the 2023 announcement limited it to Enterprise plans, so other organisations may not have it, and it does not carry per-repository config |
-| **Reusable workflow** instead of a composite action | GitHub | Can hold several jobs, but a checkout inside it checks out the caller's repository, and it cannot be published to the Marketplace. Composite fits a step that runs in the caller's job |
+| **Reusable workflow** | GitHub | Used here on top of the composite action: the action is the engine, and the reusable workflows keep each repository's callers short |
 
 ## Not decided yet
 
-- Whether to also offer the whole workflow as a reusable workflow (`workflow_call`), so a repository keeps only a
-  thin caller. It needs checking how `schedule`, `pull_request_target`, concurrency and the `PR_AUTOMATION_LIVE`
-  variable behave in a called workflow, and that a local action path inside it resolves in the caller's checkout, not
-  here.
 - Making the config files optional, so a repository would need only the workflows, needs a change to the action's
   `run.py`. That would cut the number of files adopters review.
