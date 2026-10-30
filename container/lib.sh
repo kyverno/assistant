@@ -35,10 +35,16 @@ choose_profile() {
   local existing="$1" m="$2" c="$3" has_m=0 has_c=0 choice
   grep -qx "$m" <<<"$existing" && has_m=1
   grep -qx "$c" <<<"$existing" && has_c=1
-  if [ "$has_m$has_c" = 10 ]; then KIND=maintainer; return 0; fi
-  if [ "$has_m$has_c" = 01 ]; then KIND=contributor; return 0; fi
+  if [ "$has_m$has_c" = 10 ]; then
+    KIND=maintainer; info "starting the maintainer assistant, the only one you have (--profile contributor for the other)"; return 0
+  fi
+  if [ "$has_m$has_c" = 01 ]; then
+    KIND=contributor; info "starting the contributor assistant, the only one you have (--profile maintainer for the other)"; return 0
+  fi
   KIND=maintainer
-  [ -t 0 ] && [ -t 1 ] || return 0
+  if ! { [ -t 0 ] && [ -t 1 ]; }; then
+    info "starting the maintainer assistant (no terminal to ask on; --profile contributor for the other)"; return 0
+  fi
   printf '\n  Which assistant do you want?\n'
   printf '    1) maintainer   review the PR queue of a repo you maintain\n'
   printf '    2) contributor  find work, understand the code and get your PRs merged\n'
