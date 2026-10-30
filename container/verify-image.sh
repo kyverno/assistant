@@ -82,7 +82,7 @@ for f in kyverno kyverno-docker restore-state.sh lib.sh; do bash -n "/opt/kyvern
 for f in /usr/local/lib/kyverno/toolchains/*.sh /usr/local/bin/kyverno-workspace; do bash -n "$f"; done
 test -f "$HERMES_HOME/profiles/kyverno/skills/workspace/SKILL.md"
 test -f "$HERMES_HOME/profiles/kyverno-contributor/skills/workspace/SKILL.md"
-# The push guard refuses a force push, a push to main and a push to an unknown remote, and lets a normal push to the
+# The push guard refuses a force push, a push to main, a push to an unknown remote and a bare git clone, and lets a normal push to the
 # fork through; a contributor may not push to origin, a maintainer may.
 for kind in maintainer contributor; do
   GUARD=/opt/kyverno/profiles/$kind/hooks/git-push-guard.py
@@ -90,6 +90,8 @@ for kind in maintainer contributor; do
   guard() { echo "{\"tool_name\":\"terminal\",\"tool_input\":{\"command\":\"$1\"}}" | HERMES_HOME=$HERMES_HOME/profiles/$profile python3 -I "$GUARD"; }
   guard "git push --force fork x" | grep -q '"action": "block"'
   guard "git push fork main" | grep -q '"action": "block"'
+  guard "git clone https://github.com/kyverno/kyverno.git" | grep -q '"action": "block"'
+  test "$(guard "kyverno-workspace kyverno/kyverno")" = '{}'
   guard "git push https://example.com/x/y.git x" | grep -q '"action": "block"'
   test "$(guard "git push -u fork fix/x")" = '{}'
   if [ "$kind" = contributor ]; then guard "git push origin fix/x" | grep -q '"action": "block"'; else test "$(guard "git push origin fix/x")" = '{}'; fi

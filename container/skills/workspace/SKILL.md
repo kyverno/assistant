@@ -20,7 +20,7 @@ download hosts for Go, Node, Go modules, npm packages and the Kyverno CLI and Ch
 
 ## Steps
 
-1. **Set up once per repository.** `kyverno-workspace <owner/repo>` clones it to `/sandbox/<name>` and installs
+1. **Set up once per repository. Never run `git clone` yourself:** it is refused, and it would skip the setup that makes pushing and sign-off work. `kyverno-workspace <owner/repo>` clones it to `/sandbox/<name>` and installs
    the toolchains it declares (Go from `go.mod`, Node from `.nvmrc` or `package.json`, the Kyverno CLI and Chainsaw
    for policy repositories), checking each download against the vendor's checksum. Tell the user the first run
    downloads a lot, and that the first Go build of kyverno/kyverno compiles for 10 to 15 minutes. Then
