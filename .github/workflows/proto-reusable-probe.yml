@@ -1,0 +1,70 @@
+# Prototype only, not for merging: reports what a called workflow sees, to decide whether pr-management can be
+# shared as a reusable workflow. It forces nothing to be written; `validate` mode needs no token.
+name: Proto reusable probe
+
+on:
+  workflow_call:
+    inputs:
+      dry-run:
+        type: string
+        default: 'true'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Contexts seen from inside the called workflow
+        env:
+          REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SCHEDULE: ${{ github.event.schedule }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          SHA: ${{ github.sha }}
+          REF: ${{ github.ref }}
+          PROBE_VAR: ${{ vars.PROTOTYPE_PROBE }}
+          DRY_RUN_INPUT: ${{ inputs.dry-run }}
+        run: |
+          echo "repository       = $REPOSITORY"
+          echo "event_name       = $EVENT_NAME"
+          echo "event.schedule   = $EVENT_SCHEDULE"
+          echo "workflow_ref     = $WORKFLOW_REF"
+          echo "ref              = $REF"
+          echo "sha              = $SHA"
+          echo "vars.PROTOTYPE_PROBE (set on the caller's repo) = '$PROBE_VAR'"
+          echo "inputs.dry-run   = $DRY_RUN_INPUT"
+
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Whose files are in the workspace
+        run: |
+          git remote -v | head -1
+          ls -a .github
+          test -f .github/pr-management.json && echo "caller's .github/pr-management.json is present" || echo "no .github/pr-management.json here"
+          test -d .github/actions/pr-management && echo "local action dir present" || echo "no local .github/actions/pr-management in the workspace"
+
+      - name: Local action path (expected to fail if ./ resolves in the caller's checkout)
+        id: local
+        continue-on-error: true
+        uses: ./.github/actions/pr-management
+        with:
+          mode: validate
+
+      - name: Report the local action result
+        env:
+          OUTCOME: ${{ steps.local.outcome }}
+        run: echo "local ./ action outcome = $OUTCOME"
+
+      - name: The action by full path, as it would be called from a shared workflow
+        uses: kyverno/assistant/.github/actions/pr-management@ff202be472ba7999004f785d0db1750cb4e78c8b
+        with:
+          mode: validate
