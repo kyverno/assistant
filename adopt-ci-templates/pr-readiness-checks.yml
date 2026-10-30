@@ -1,5 +1,5 @@
 # Starting point for the pr-management action's readiness checks. Each key is a possible finding; `test` and
-# `message` are jq expressions run against the PR object that actions/pr-management/readiness.sh fetches, with
+# `message` are jq expressions run against the PR object that .github/actions/pr-management/readiness.sh fetches, with
 # `$author` bound to the PR author's login. Add a check by adding an entry; the action itself never changes.
 # Anything specific to your repo (required check names, infrastructure checks to ignore) belongs here.
 
@@ -13,7 +13,7 @@ dco:
 # Every failing check except DCO (own message above) blocks readiness. A check the author cannot fix (flaky,
 # infrastructure) should not: add its name to the `["DCO"]` list in both `message` and `test` below. The action also
 # supports an optional `infra_checks` entry that reports such checks as advice without blocking; see
-# actions/pr-management/README.md.
+# .github/actions/pr-management/README.md.
 ci:
   message: |
     "fix the failing check(s): " + (

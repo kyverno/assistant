@@ -1,3 +1,3 @@
-actions/pr-management is extracted from kyverno/kyverno#18275 ("feat(ci): extract shared PR management
+.github/actions/pr-management is extracted from kyverno/kyverno#18275 ("feat(ci): extract shared PR management
 action", .github/actions/pr-management), Copyright The Kyverno Authors, licensed under the Apache License 2.0.
 Local changes: comment wording only. The rest of this repository is Apache-2.0 as well; see LICENSE.

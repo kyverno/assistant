@@ -68,7 +68,7 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
       # Replace <full-commit-SHA> with a reviewed commit before use.
-      - uses: kyverno/assistant/actions/pr-management@<full-commit-SHA>
+      - uses: kyverno/assistant/.github/actions/pr-management@<full-commit-SHA>
         env:
           GH_TOKEN: ${{ github.token }}
         with:
@@ -160,4 +160,4 @@ path labeling while other modes are previewed.
 
 ## Origin
 
-Extracted from kyverno/kyverno#18275 (Apache-2.0). See [`NOTICE`](../../NOTICE).
+Extracted from kyverno/kyverno#18275 (Apache-2.0). See [`NOTICE`](../../../NOTICE).
