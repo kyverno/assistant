@@ -31,7 +31,7 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
       - name: Sync label metadata
-        uses: kyverno/assistant/actions/pr-management@<full-commit-SHA>
+        uses: kyverno/assistant/.github/actions/pr-management@<full-commit-SHA>
         env:
           GH_TOKEN: ${{ github.token }}
         with:

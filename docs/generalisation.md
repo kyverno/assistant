@@ -9,7 +9,7 @@ This document fixes the shape so both converge.
 
 | Layer | What it is | Needs a model? | Who adopts it |
 | --- | --- | --- | --- |
-| 1. CI actions (`actions/`) | Deterministic composite GitHub Actions: PR management, flaky tests, security triage, vulnerability scanning | No | Any org, from a workflow file |
+| 1. CI actions (`.github/actions/`) | Deterministic composite GitHub Actions: PR management, flaky tests, security triage, vulnerability scanning | No | Any org, from a workflow file |
 | 2. Maintainer assistant (`profiles/maintainer`) | On-demand agent that orders a maintainer's queue and acts with their token | Yes | One maintainer, on their own machine |
 | 3. Contributor assistant (`profiles/contributor`) | On-demand agent that helps a contributor get a PR merged | Yes | One contributor |
 
@@ -32,12 +32,13 @@ Everything org-specific is configuration. Nothing Kyverno-specific is allowed in
 | One person's setup | `.env` / the launcher | the assistants | tokens, GitHub login, which repos |
 
 Rules: the adopting repo owns its config and the action never reads config from a PR head in a write-capable
-job (see the trust model in [`actions/pr-management/README.md`](../actions/pr-management/README.md)); an unknown
+job (see the trust model in [`.github/actions/pr-management/README.md`](../.github/actions/pr-management/README.md)); an unknown
 config key is an error, not ignored; every mutating mode defaults to dry run.
 
 ## Conventions for actions
 
-1. **Location and reference.** `actions/<name>/action.yml`, used as `uses: <org>/assistant/actions/<name>@<full SHA>`.
+1. **Location and reference.** `.github/actions/<name>/action.yml`, the standard directory, used as
+   `uses: <org>/assistant/.github/actions/<name>@<full SHA>`.
    Adopters pin a reviewed commit; floating tags are not recommended.
 2. **Composite, standard tools only.** Bash, Python 3 standard library, `jq`, `gh`. No npm or pip install at run
    time. Scripts load from `GITHUB_ACTION_PATH`, never from the consumer's checkout.
@@ -93,14 +94,14 @@ The assistants stay human-invoked and still cannot merge; none of this changes t
 
 ## Order of work
 
-1. **Done in this change:** `actions/pr-management` ported, `adopt-ci-templates/` caller workflows and config, `scripts/adopt-ci.sh`,
+1. **Done in this change:** `.github/actions/pr-management` ported, `adopt-ci-templates/` caller workflows and config, `scripts/adopt-ci.sh`,
    `NOTICE` for the Apache-2.0 source, this document.
 2. **Done:** `scripts/adopt-ci.sh`, one command that opens the adoption PR in each named repository; see
    [`adopting-actions.md`](adopting-actions.md).
 3. Later, only if wanted: `security-triage`, `flaky-tests`, `vuln-scan`.
 4. After `feat/profiles-contributor` merges: neutral names, `ASSISTANT_REPOS`, `repo-context` skill, plugin
    renames, and `contexts/kyverno/`.
-5. Move Kyverno repos from #18275's copy to `kyverno/assistant/actions/pr-management@<sha>` once it is merged
+5. Move Kyverno repos from #18275's copy to `kyverno/assistant/.github/actions/pr-management@<sha>` once it is merged
    and this repo has a tagged, reviewed commit to pin.
 
 ## Open points

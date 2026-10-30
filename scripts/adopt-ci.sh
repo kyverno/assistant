@@ -92,7 +92,7 @@ pr_body() {
   cat << EOF
 ## What this does
 
-Adds the shared PR automation from [${source_repo}](https://github.com/${source_repo}/tree/${ref}/actions/pr-management),
+Adds the shared PR automation from [${source_repo}](https://github.com/${source_repo}/tree/${ref}/.github/actions/pr-management),
 pinned to commit \`${ref}\`:
 
 - **Labels** PRs from the paths they change, and flags merge conflicts.
@@ -154,7 +154,7 @@ pin_body() { # old pins (one per line), changed files (one per line)
   cat << EOF
 ## What this does
 
-Points the PR automation at \`${source_repo}/actions/pr-management@${ref}\`. Only the \`uses:\` lines in the files
+Points the PR automation at \`${source_repo}/.github/actions/pr-management@${ref}\`. Only the \`uses:\` lines in the files
 below change. The config files and every other line of the workflows stay as they are.
 
 Files:
@@ -165,7 +165,7 @@ Moved from:
 
 ${from_md}
 
-Moved to: [\`${source_repo}/actions/pr-management@${ref}\`](https://github.com/${source_repo}/tree/${ref}/actions/pr-management)
+Moved to: [\`${source_repo}/.github/actions/pr-management@${ref}\`](https://github.com/${source_repo}/tree/${ref}/.github/actions/pr-management)
 
 ## What to check
 
@@ -198,7 +198,7 @@ publish() { # title; runs in the clone with the branch committed; reads repo, wr
 
 update_pins() { # runs in the clone
   local files old new f
-  new="${source_repo}/actions/pr-management@${ref}"
+  new="${source_repo}/.github/actions/pr-management@${ref}"
   files=$(grep -lE "uses:[[:space:]]*${pin_path_re}" .github/workflows/* 2> /dev/null || true)
   if [[ -z "$files" ]]; then
     echo "  does not use pr-management yet; run without --update-pin to adopt it"
@@ -228,7 +228,7 @@ add_file() { # source, destination (relative to repo root); never overwrites
     return
   fi
   mkdir -p "$(dirname "$dest")"
-  sed "s#kyverno/assistant/actions/pr-management@<full-commit-SHA>#${source_repo}/actions/pr-management@${ref}#" "$src" > "$dest"
+  sed "s#kyverno/assistant/.github/actions/pr-management@<full-commit-SHA>#${source_repo}/.github/actions/pr-management@${ref}#" "$src" > "$dest"
   echo "  add $dest"
   added+=("$dest")
 }
@@ -294,7 +294,7 @@ adopt() {
 
     git add -- "${added[@]}"
     git commit --quiet -s -m "ci: adopt the shared PR automation" \
-      -m "Pins ${source_repo}/actions/pr-management at ${ref}."
+      -m "Pins ${source_repo}/.github/actions/pr-management at ${ref}."
     pr_body > "$tmp/body.md"
     publish "ci: adopt the shared PR automation" || exit 1
   )

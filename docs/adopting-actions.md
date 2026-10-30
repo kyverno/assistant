@@ -29,7 +29,7 @@ the PR open, so it is safe to run again.
 | `.github/pr-readiness-checks.yml` | which checks block a PR, which are not the author's to fix |
 | `.github/labels.yml` | label catalog and path rules |
 
-The workflows call `kyverno/assistant/actions/pr-management@<full SHA>`. The SHA is this checkout's commit, so the
+The workflows call `kyverno/assistant/.github/actions/pr-management@<full SHA>`. The SHA is this checkout's commit, so the
 action cannot change under the adopter; to update, change the SHA (a Dependabot `github-actions` entry opens that
 PR). The workflow files are the only code the repository carries; the logic stays here.
 
@@ -85,7 +85,7 @@ Creating a variable needs admin access to the repository. No PR and no workflow 
 
 The action runs with the workflow's own `GITHUB_TOKEN`: no secret and no cross-repository credential is created.
 Write-capable jobs check out the default branch, never a PR head, and read their config from there. The token
-permissions each mode needs are in [`actions/pr-management/README.md`](../actions/pr-management/README.md).
+permissions each mode needs are in [`.github/actions/pr-management/README.md`](../.github/actions/pr-management/README.md).
 
 ## Why a script, and what else was considered
 
@@ -99,8 +99,9 @@ permissions each mode needs are in [`actions/pr-management/README.md`](../action
 
 ## Not decided yet
 
-- The action's path is `kyverno/assistant/actions/pr-management`, because that is where it lives today. The two
-  Kyverno PRs for `website` and `policies` pin `kyverno/kyverno/.github/actions/pr-management` instead; decide
-  with the owner of kyverno/kyverno#18275 which path everyone should pin before the script is used widely.
+- Whether to also offer the whole workflow as a reusable workflow (`workflow_call`), so a repository keeps only a
+  thin caller. It needs checking how `schedule`, `pull_request_target`, concurrency and the `PR_AUTOMATION_LIVE`
+  variable behave in a called workflow, and that a local action path inside it resolves in the caller's checkout, not
+  here.
 - Making the config files optional, so a repository would need only the workflows, needs a change to the action's
   `run.py`. That would cut the number of files adopters review.

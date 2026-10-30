@@ -461,7 +461,7 @@ the automation on, once the previews look right:
    (`gh variable set PR_AUTOMATION_LIVE --body true --repo owner/repo`). No PR is needed, and `false` pauses it.
 
 The full steps, what is added to each repository, the permissions, and why it works this way are in
-[`docs/adopting-actions.md`](docs/adopting-actions.md). The actions themselves are in [`actions/`](actions/README.md).
+[`docs/adopting-actions.md`](docs/adopting-actions.md). The actions themselves are in [`.github/actions/`](.github/actions/README.md).
 
 ## Repository layout
 
@@ -477,7 +477,7 @@ scripts/install.sh       the host install: idempotent installer, --profile maint
 scripts/update.sh        the host install: git pull, then re-run the installer
 scripts/openshell.sh     the host install's sandboxed terminal: setup, policy, access requests, audit
 scripts/adopt-ci.sh      opens a PR that adds the shared CI actions to other repositories (see above)
-actions/                 shared CI actions (PR labelling, readiness, stale), usable without the agent
+.github/actions/         shared CI actions (PR labelling, readiness, stale), usable without the agent
 adopt-ci-templates/      workflows and config that adopt-ci.sh copies into each repository
 docs/                    design, deployment and usage docs
 ```
