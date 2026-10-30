@@ -1,0 +1,27 @@
+# Prototype only, not for merging: does a caller have to grant the union of every job's permissions, even for jobs
+# that are skipped?
+name: Proto reusable perms
+
+on:
+  workflow_call:
+    inputs:
+      writer:
+        type: string
+        default: 'false'
+
+jobs:
+  reader:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - run: echo "reader ran"
+
+  writer:
+    if: inputs.writer == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - run: echo "writer ran"

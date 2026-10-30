@@ -1,5 +1,5 @@
 # Prototype only, not for merging: reports what a called workflow sees, to decide whether pr-management can be
-# shared as a reusable workflow. It forces nothing to be written; `validate` mode needs no token.
+# shared as a reusable workflow. dry-run is always forced on by the caller, so nothing is written.
 name: Proto reusable probe
 
 on:
@@ -8,9 +8,9 @@ on:
       dry-run:
         type: string
         default: 'true'
-
-permissions:
-  contents: read
+      sleep:
+        type: string
+        default: '0'
 
 jobs:
   probe:
@@ -18,6 +18,9 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+    concurrency:
+      group: proto-probe
+      cancel-in-progress: false
     steps:
       - name: Contexts seen from inside the called workflow
         env:
@@ -25,46 +28,68 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           EVENT_SCHEDULE: ${{ github.event.schedule }}
           WORKFLOW_REF: ${{ github.workflow_ref }}
-          SHA: ${{ github.sha }}
           REF: ${{ github.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           PROBE_VAR: ${{ vars.PROTOTYPE_PROBE }}
           DRY_RUN_INPUT: ${{ inputs.dry-run }}
         run: |
           echo "repository       = $REPOSITORY"
           echo "event_name       = $EVENT_NAME"
-          echo "event.schedule   = $EVENT_SCHEDULE"
+          echo "event.schedule   = '$EVENT_SCHEDULE'"
           echo "workflow_ref     = $WORKFLOW_REF"
           echo "ref              = $REF"
-          echo "sha              = $SHA"
-          echo "vars.PROTOTYPE_PROBE (set on the caller's repo) = '$PROBE_VAR'"
+          echo "pr number        = '$PR_NUMBER'"
+          echo "pr head sha      = '$PR_HEAD_SHA'"
+          echo "default branch   = $DEFAULT_BRANCH"
+          echo "vars.PROTOTYPE_PROBE = '$PROBE_VAR'"
           echo "inputs.dry-run   = $DRY_RUN_INPUT"
+          date -u +"started %H:%M:%S"
 
-      - name: Check out the repository
+      - name: Check out the default branch, as the real workflows do
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
 
-      - name: Whose files are in the workspace
+      - name: What was checked out
         run: |
-          git remote -v | head -1
-          ls -a .github
-          test -f .github/pr-management.json && echo "caller's .github/pr-management.json is present" || echo "no .github/pr-management.json here"
-          test -d .github/actions/pr-management && echo "local action dir present" || echo "no local .github/actions/pr-management in the workspace"
+          echo "HEAD = $(git rev-parse HEAD)"
+          git log -1 --format='subject = %s'
 
-      - name: Local action path (expected to fail if ./ resolves in the caller's checkout)
-        id: local
-        continue-on-error: true
-        uses: ./.github/actions/pr-management
-        with:
-          mode: validate
-
-      - name: Report the local action result
+      - name: Hold the job open, to see whether a second run queues behind it
         env:
-          OUTCOME: ${{ steps.local.outcome }}
-        run: echo "local ./ action outcome = $OUTCOME"
+          SLEEP: ${{ inputs.sleep }}
+        run: |
+          sleep "$SLEEP"
+          date -u +"finished %H:%M:%S"
 
-      - name: The action by full path, as it would be called from a shared workflow
+      - name: Validate with the action by full path
         uses: kyverno/assistant/.github/actions/pr-management@ff202be472ba7999004f785d0db1750cb4e78c8b
         with:
           mode: validate
+
+  readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    concurrency:
+      group: proto-readiness
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out the default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Readiness classification (dry run only)
+        uses: kyverno/assistant/.github/actions/pr-management@ff202be472ba7999004f785d0db1750cb4e78c8b
+        with:
+          mode: readiness
+          dry-run: ${{ inputs.dry-run }}
