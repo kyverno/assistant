@@ -7,6 +7,10 @@ covers the rest. A contributor pushes to the `fork` remote only; a maintainer ma
 branch of the repository they manage. Neither forces, deletes a branch, or pushes to main, master or a release
 branch: a direct push to the default branch would skip the review and merge gate.
 
+It also refuses a bare `git clone`: the agent must run `kyverno-workspace OWNER/REPO` instead, which clones the same
+repository and also sets up the `fork` remote, the push credential, the sign-off setting and the toolchains. A plain
+clone has none of that, so a later `git push` would fail and the commits would lack the sign-off.
+
 Hermes pipes the event as JSON on stdin and expects JSON on stdout.
 """
 import json
@@ -33,6 +37,9 @@ def check(tokens):
     i = 0
     while i < len(args) and args[i].startswith("-"):
         i += 2 if args[i] in ("-C", "-c", "--git-dir", "--work-tree") else 1
+    if i < len(args) and args[i] == "clone":
+        return ("do not use git clone: run `kyverno-workspace OWNER/REPO` (for example kyverno-workspace kyverno/kyverno). "
+                "It clones the repository into /sandbox and sets up your fork, sign-off and toolchains")
     if i >= len(args) or args[i] != "push":
         return None
     rest = args[i + 1:]
@@ -55,7 +62,7 @@ def main():
     try:
         payload = json.load(sys.stdin)
         command = (payload.get("tool_input") or {}).get("command") or ""
-        if "push" not in command:
+        if "push" not in command and "clone" not in command:
             print("{}")
             return
         for part in re.split(r"[;&|\n]+", command):
