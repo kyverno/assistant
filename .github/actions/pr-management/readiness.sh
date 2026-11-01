@@ -249,6 +249,13 @@ for ((i = 0; i < returned_count; i++)); do
   has_ready_label=$(jq -r '[.labels.nodes[].name] | any(. == "ready-for-review")' pr.json)
   has_approval_label=$(jq -r '[.labels.nodes[].name] | any(. == "workflow-approval-required")' pr.json)
 
+  # A maintainer's exempt label (e.g. hold) means hands off: leave every label and comment as it is.
+  if jq -e --argjson exemptions "$EXEMPT_LABELS" \
+    'any(.labels.nodes[]; .name as $l | $exemptions | index($l) != null)' pr.json > /dev/null; then
+    echo "PR #$number: exempt label present — leaving labels as-is."
+    continue
+  fi
+
   # Gated workflows are absent from the rollup, so the PR would look clean. Matched by head SHA
   # (`pull_requests` is empty on fork runs); on lookup failure, skip the PR.
   head_sha=$(jq -r '.commits.nodes[0].commit.oid' pr.json)
