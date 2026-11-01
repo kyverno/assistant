@@ -92,6 +92,9 @@ cd assistant
 container/kyverno --build      # first time: builds the image (15 to 30 minutes), then starts it
 ```
 
+Step-by-step instructions for every case (Apple Silicon, Linux, Intel or Docker only, building from a clone, tokens, models,
+pushing, upgrading, troubleshooting) are in [`docs/getting-started.md`](docs/getting-started.md).
+
 If you do not say `--profile`, it first asks whether you want the maintainer or the contributor assistant. It asks you to authorize GitHub once (a browser sign-in with `gh`, or a pasted token), then shows a GitHub page
 and a code to approve for the model sign-in. After that, `container/kyverno` alone gets you back in. Everything it asks is explained in
 [Setup, step by step](#setup-step-by-step).
@@ -165,7 +168,7 @@ Pick one:
 | Option | Command | Time | Notes |
 |---|---|---|---|
 | **Build it yourself** | `container/kyverno --build` | 15 to 30 minutes, once | Works today on any supported machine. Downloads about 5 GB while building. |
-| **Download the published image** | `container/kyverno` | A few minutes | The default once a release is published (see [why](#why-it-is-built-this-way)). It pulls `ghcr.io/kyverno/assistant:latest`. Until the first release is published, use `--build`. |
+| **Download the published image** | `container/kyverno` | A few minutes (about 1.2 GB) | The default. It pulls `ghcr.io/kyverno/assistant:latest` (see [why](#why-it-is-built-this-way)); pin a version with `--image ghcr.io/kyverno/assistant:v0.1.0`. |
 
 ### 3. Start it
 
@@ -308,7 +311,7 @@ scheduled jobs run inside Hermes' gateway, which is not started. They work in th
 | `The requested model is not supported` | The model is not available on your Copilot plan. `/model gpt-4.1 --global` |
 | `No LLM provider configured ... openrouter` | You picked a mixture-of-agents option that needs an OpenRouter key. Pick a normal model with `/model` |
 | The chat looks frozen right after start | Give it 30 seconds. If it stays blank, press Enter once. If it still does nothing, run `container/kyverno --build --upgrade` |
-| `could not pull ...` | No image is published yet. Use `container/kyverno --build` |
+| `could not pull ...` | No network to the registry, or a version that does not exist. Check the tag, or use `container/kyverno --build`. A pull that crawls is usually your route to GitHub's download servers: try another network, the finished layers are kept |
 | The sandbox goes to `Error`, "UID or GID zero" | The image's default user must be 1000, not root. Rebuild with `--build` |
 | `could not register the provider profile` | OpenShell holds an older copy of this project's profile from an earlier run. Start clean (nothing is rebuilt): `openshell sandbox delete kyverno-assistant`, `openshell provider delete kyverno-repo-github`, `openshell profile delete kyverno-repo-github`, then `container/kyverno --image kyverno-assistant:dev` (or without `--image` once an image is published). The launcher asks for your GitHub token again |
 | `sandbox ... did not become Ready` | The launcher prints the sandbox's state and the last lines of its log. Retry from scratch: `openshell sandbox delete kyverno-assistant`, then run the launcher again |
@@ -548,6 +551,7 @@ The files below are the maintainer profile's, under `profiles/maintainer/`.
 
 | Doc | Contents |
 |---|---|
+| [`docs/getting-started.md`](docs/getting-started.md) | Setup for every case: Apple Silicon, Linux, Intel or Docker only, a clone; tokens, models, pushing to your fork, upgrading, removing, troubleshooting |
 | [`docs/container.md`](docs/container.md) | The sandbox in depth: what runs where, secrets, the network policy, what was verified, upgrades, a security review, how to update dependencies, publishing a release |
 | [`docs/host-install.md`](docs/host-install.md) | Running without the sandbox: install, Slack setup, the review digest |
 | [`docs/capabilities.md`](docs/capabilities.md) | A tour of what it can do, with example prompts |
