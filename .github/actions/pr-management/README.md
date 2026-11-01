@@ -115,7 +115,7 @@ All keys below are mandatory; unknown keys fail validation.
 Day values must be JSON integers from 1 through 3650; input day overrides must be
 positive whole numbers in the same range. `stale-days` and `warning_days` must not
 exceed `close_days`. Exemption labels are exact, case-sensitive names and apply
-to **all** stale/idle-review handlers. Adding an exemption removes an existing
+to **all** stale/idle-review handlers, and readiness leaves a PR with one untouched. Adding an exemption removes an existing
 `stale` label, so removing the exemption later starts a fresh cycle and warning
 period. `fallback_reviewers` is an
 `@organization/team`. An empty `milestone_prefix` disables milestone stamping;
