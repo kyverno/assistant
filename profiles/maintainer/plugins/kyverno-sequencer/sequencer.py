@@ -35,8 +35,16 @@ from __future__ import annotations
 import fnmatch
 import os
 import re
+import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Optional
+
+_PLUGINS_DIR = str(Path(__file__).resolve().parent.parent)
+if _PLUGINS_DIR not in sys.path:
+    sys.path.insert(0, _PLUGINS_DIR)
+
+from common.cross_ref import extract_cross_references
 
 # --- file classification ---------------------------------------------------------------------
 
@@ -71,14 +79,6 @@ GENERATED_INPUT_DEPENDENCY_MODULE = "github.com/kyverno/api"
 # The repo these candidates come from. A reference naming another repo ("depends on kyverno/api#72")
 # is not about a candidate with that number.
 REPO = "kyverno/kyverno"
-
-# Covers real phrasing variants seen in the wild, not just the canonical form: "Parent:
-# #17701", "Stacks on top of #17695", "depends on kyverno/kyverno#17720", "Blocked by #N".
-_CROSS_REF_PATTERN = re.compile(
-    r"\b(?:depends on|blocked by|requires|stack(?:s|ed)?\s+on(?:\s+top\s+of)?|parent)\b"
-    r"\s*:?\s*(?:([\w.-]+/[\w.-]+))?#(\d+)",
-    re.IGNORECASE,
-)
 
 
 def _norm(pattern: str) -> str:
@@ -210,10 +210,7 @@ def build_hard_edges(prs: list[PR], repo_default_branch: str) -> tuple[list[tupl
                 edges.append((base_pr.number, p.number, "stacked"))
 
         # 3. Explicit body reference.
-        for match in _CROSS_REF_PATTERN.finditer(p.body):
-            if match.group(1) and match.group(1).lower() != REPO:
-                continue
-            ref = int(match.group(2))
+        for ref in sorted(extract_cross_references(p.body, REPO)):
             if ref in by_number and ref != p.number:
                 edges.append((ref, p.number, "explicit reference"))
 
