@@ -86,8 +86,12 @@ The same commands as [Case 1](#case-1-a-mac-with-apple-silicon-recommended). Wha
 
 - The kernel must support Landlock: Linux 5.13 or newer.
 - Docker Engine works instead of Docker Desktop.
-- **Tested** end to end on a GitHub Linux runner (Ubuntu 24.04, x86_64). **Not tried** on a real Linux laptop, and
-  the launcher has not been tried on arm64 Linux, although the image is built for it.
+- **Verified on a CI runner:** on a GitHub Linux runner (Ubuntu 24.04, kernel 6.17, Docker Engine 28, x86_64) an image
+  was built and the whole stack ran: the token stayed a placeholder, the proxy refused a merge, the hooks were read-only
+  and the dashboard answered. That check ran before the contributor profile, the coding environment and
+  `--push-to-fork` existed, so those are untested on Linux.
+- **Not tried** on a real Linux laptop, and the launcher has not been tried on arm64 Linux, although the image is
+  built for it.
 
 ## Case 3: an Intel Mac, or Docker only
 
