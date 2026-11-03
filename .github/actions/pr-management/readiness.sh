@@ -128,6 +128,7 @@ detail_query='
         commits(last: 1) {
           nodes { commit {
             oid
+            committedDate
             statusCheckRollup { contexts(first: 100) { pageInfo { hasNextPage endCursor } nodes {
               ... on CheckRun { name conclusion status }
               ... on StatusContext { context state }
@@ -138,6 +139,9 @@ detail_query='
           pageInfo { hasNextPage endCursor }
           nodes { isResolved comments(last: 1) { nodes { author { login } createdAt } } }
         }
+        # Only the newest of each: a check about "the latest comment" never needs the older ones, so no pagination.
+        comments(last: 30) { nodes { author { login __typename } authorAssociation createdAt } }
+        reviews(last: 30) { nodes { author { login __typename } authorAssociation state submittedAt bodyText } }
       }
     }
   }'
