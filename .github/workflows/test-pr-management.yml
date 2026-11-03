@@ -1,0 +1,37 @@
+name: Test PR management
+
+on:
+  pull_request:
+    paths:
+      - .github/actions/pr-management/**
+      - .github/workflows/pr-management.yml
+      - .github/workflows/pr-management-validate.yml
+      - .github/workflows/test-pr-management.yml
+      - adopt-ci-templates/**
+  push:
+    branches: [main]
+    paths:
+      - .github/actions/pr-management/**
+      - .github/workflows/pr-management.yml
+      - .github/workflows/pr-management-validate.yml
+      - .github/workflows/test-pr-management.yml
+      - adopt-ci-templates/**
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Offline regression tests
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python3 -m unittest discover -s .github/actions/pr-management/tests -v
+      - name: Validate shell syntax
+        run: |
+          for script in .github/actions/pr-management/*.sh; do bash -n "$script"; done
