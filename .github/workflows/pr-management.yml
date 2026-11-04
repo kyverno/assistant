@@ -61,7 +61,7 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
       - name: Path labels and merge conflicts
-        uses: kyverno/assistant/.github/actions/pr-management@283f79c4b8a9da13d4b195a1e8e36ee6a9528c51
+        uses: kyverno/assistant/.github/actions/pr-management@4c6f111d5cc6fd1b89296052ecd2f505287c1255
         with:
           mode: labels
           dry-run: ${{ env.DRY_RUN }}
@@ -85,7 +85,7 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
       - name: Sync label metadata
-        uses: kyverno/assistant/.github/actions/pr-management@283f79c4b8a9da13d4b195a1e8e36ee6a9528c51
+        uses: kyverno/assistant/.github/actions/pr-management@4c6f111d5cc6fd1b89296052ecd2f505287c1255
         with:
           mode: sync-labels
           dry-run: ${{ env.DRY_RUN }}
@@ -112,7 +112,7 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
       - name: Readiness classification
-        uses: kyverno/assistant/.github/actions/pr-management@283f79c4b8a9da13d4b195a1e8e36ee6a9528c51
+        uses: kyverno/assistant/.github/actions/pr-management@4c6f111d5cc6fd1b89296052ecd2f505287c1255
         with:
           mode: readiness
           dry-run: ${{ env.DRY_RUN }}
@@ -137,7 +137,7 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
       - name: Stale handling and reviewer reminders
-        uses: kyverno/assistant/.github/actions/pr-management@283f79c4b8a9da13d4b195a1e8e36ee6a9528c51
+        uses: kyverno/assistant/.github/actions/pr-management@4c6f111d5cc6fd1b89296052ecd2f505287c1255
         with:
           mode: stale
           dry-run: ${{ env.DRY_RUN }}
