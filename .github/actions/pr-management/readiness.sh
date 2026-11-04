@@ -139,9 +139,10 @@ detail_query='
           pageInfo { hasNextPage endCursor }
           nodes { isResolved comments(last: 1) { nodes { author { login } createdAt } } }
         }
-        # Only the newest of each: a check about "the latest comment" never needs the older ones, so no pagination.
-        comments(last: 30) { nodes { author { login __typename } authorAssociation createdAt } }
-        reviews(last: 30) { nodes { author { login __typename } authorAssociation state submittedAt bodyText } }
+        # Only the newest 100 of each (the API page maximum), without pagination: a check about "the latest comment"
+        # never needs older ones, but a PR with over 100 newer events could hide an unanswered maintainer comment.
+        comments(last: 100) { nodes { author { login __typename } authorAssociation createdAt } }
+        reviews(last: 100) { nodes { author { login __typename } authorAssociation state submittedAt bodyText } }
       }
     }
   }'
