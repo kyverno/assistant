@@ -15,21 +15,20 @@ import concurrent.futures
 import json
 import os
 import re
+import sys
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any, Optional
+
+_PLUGINS_DIR = str(Path(__file__).resolve().parent.parent)
+if _PLUGINS_DIR not in sys.path:
+    sys.path.insert(0, _PLUGINS_DIR)
+
+from common.cross_ref import extract_cross_references
 
 _GRAPHQL_URL = "https://api.github.com/graphql"
 _USER_AGENT = "kyverno-assistant-fetch-plugin"
-
-# Mirror of kyverno-sequencer/sequencer.py's _CROSS_REF_PATTERN — kept in sync manually.
-# Covers real phrasing variants, not just the canonical form: "Parent: #17701", "Stacks on
-# top of #17695", "depends on kyverno/kyverno#17720", "Blocked by #N".
-_CROSS_REF_PATTERN = re.compile(
-    r"\b(?:depends on|blocked by|requires|stack(?:s|ed)?\s+on(?:\s+top\s+of)?|parent)\b"
-    r"\s*:?\s*(?:([\w.-]+/[\w.-]+))?#(\d+)",
-    re.IGNORECASE,
-)
 
 
 class FetchError(RuntimeError):
@@ -491,12 +490,7 @@ def fetch_pr_candidates(
     refs_by_pr: dict[int, set[int]] = {}
     current_repo = f"{owner}/{name}".lower()
     for p in prs:
-        refs: set[int] = set()
-        for match in _CROSS_REF_PATTERN.finditer(p.get("body") or ""):
-            repo_part, num_str = match.group(1), match.group(2)
-            if repo_part and repo_part.lower() != current_repo:
-                continue
-            refs.add(int(num_str))
+        refs = extract_cross_references(p.get("body") or "", current_repo)
         external = {r for r in refs if r not in fetched_numbers and r != p["number"]}
         if external:
             refs_by_pr[p["number"]] = external
