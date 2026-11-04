@@ -136,6 +136,38 @@ class AutomationTests(unittest.TestCase):
                 self.assertIn("exempt label present", result.stdout)
                 (self.work / "calls.jsonl").unlink(missing_ok=True)
 
+    def test_unanswered_maintainer_comment_blocks_readiness(self):
+        def review(state, days, body="please change this", assoc="MEMBER", login="maintainer", kind="User"):
+            return {"author": {"login": login, "__typename": kind}, "authorAssociation": assoc,
+                    "state": state, "submittedAt": at(days), "bodyText": body}
+
+        def comment(days, assoc="MEMBER", login="maintainer", kind="User"):
+            return {"author": {"login": login, "__typename": kind}, "authorAssociation": assoc, "createdAt": at(days)}
+
+        author_reply = comment(1, assoc="CONTRIBUTOR", login="contributor")
+        # (name, reviews, comments, days since the last commit, blocked)
+        cases = (
+            ("changes requested, no answer", [review("CHANGES_REQUESTED", 2)], [], 10, True),
+            ("review body comment, no answer", [review("COMMENTED", 2)], [], 10, True),
+            ("plain comment, no answer", [], [comment(2)], 10, True),
+            ("author replied afterwards", [review("CHANGES_REQUESTED", 2)], [author_reply], 10, False),
+            ("author pushed afterwards", [review("CHANGES_REQUESTED", 2)], [], 1, False),
+            ("bot comment", [], [comment(2, login="github-actions[bot]", kind="Bot")], 10, False),
+            ("non-maintainer review", [review("CHANGES_REQUESTED", 2, assoc="CONTRIBUTOR")], [], 10, False),
+            ("approval", [review("APPROVED", 2, body="")], [], 10, False),
+            ("inline-only review", [review("COMMENTED", 2, body="")], [], 10, False),
+        )
+        for name, reviews, comments, committed, blocked in cases:
+            with self.subTest(case=name):
+                pr = self.fixture["readiness_pr"]
+                pr["reviews"], pr["comments"] = connection(reviews), connection(comments)
+                pr["commits"]["nodes"][0]["commit"]["committedDate"] = at(committed)
+                self.run_action()
+                added = lambda label: any("--add-label" in call and label in call for call in self.mutations)
+                self.assertEqual(added("needs-author-action"), blocked)
+                self.assertEqual(added("ready-for-review"), not blocked)
+                (self.work / "calls.jsonl").unlink(missing_ok=True)
+
     def test_pending_and_empty_ci_never_ready(self):
         for contexts in ([], [{"name": "unit", "status": "IN_PROGRESS", "conclusion": None}],
                          [{"context": "legacy", "state": "PENDING"}], [{}],
