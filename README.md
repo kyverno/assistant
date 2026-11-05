@@ -82,7 +82,15 @@ repository or create a folder: this one command takes the launcher from the imag
 curl -fsSL https://raw.githubusercontent.com/kyverno/assistant/main/install.sh | sh
 ```
 
-To upgrade later, run the same command with `-s -- --upgrade` after `sh`. To work on the assistant itself, use a clone: `make run` builds the image from your checkout and starts it (see [Development automation](#development-automation)).
+To upgrade later, run the same command with `-s -- --upgrade` after `sh`. Prefer a clone, or want to build the image yourself? Then:
+
+```bash
+git clone https://github.com/kyverno/assistant.git
+cd assistant
+container/kyverno --build      # first time: builds the image (15 to 30 minutes), then starts it
+```
+
+For development, `make run` builds the image from your checkout and starts it (see [Development automation](#development-automation)).
 
 Step-by-step instructions for every case (Apple Silicon, Linux, Intel or Docker only, building from a clone, tokens, models,
 pushing, upgrading, troubleshooting) are in [`docs/getting-started.md`](docs/getting-started.md).
