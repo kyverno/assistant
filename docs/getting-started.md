@@ -4,8 +4,8 @@ Pick the case that matches you. Each one lists the exact commands, what the laun
 The [README](../README.md) explains how the assistant works and why it is safe; this page is only about getting it
 running.
 
-In the commands below, `kyverno` means the launcher: `~/.kyverno-launcher/launcher/kyverno` if you extracted it from the image,
-or `container/kyverno` in a clone.
+In the commands below, `kyverno` means the launcher: what the install command starts, or
+`container/kyverno` in a clone. Give the options after `sh -s --`.
 
 - [Which assistant do I want?](#which-assistant-do-i-want)
 - [Case 1: a Mac with Apple Silicon (recommended)](#case-1-a-mac-with-apple-silicon-recommended)
@@ -47,21 +47,14 @@ memory (Settings → Resources); about 20 GB of free disk; a way to authorize Gi
 ([Choosing a model](#choosing-a-model)). You do not install Hermes, Python or OpenShell: the launcher installs
 OpenShell if it is missing.
 
-**1. Get the launcher.** It is inside the image, so you do not clone the repository:
+**1. Run it.** No clone and no folder: the script takes the launcher from the image and runs it.
 
 ```bash
-mkdir -p ~/.kyverno-launcher
-docker run --rm ghcr.io/kyverno/assistant:latest tar -C /opt/kyverno -c launcher | tar -x -C ~/.kyverno-launcher
+curl -fsSL https://raw.githubusercontent.com/kyverno/assistant/main/install.sh | sh -s -- --profile contributor      # or --profile maintainer
 ```
 
 The first run downloads the image, about 1.2 GB compressed, so give it a few minutes. To use a fixed version instead
-of `latest`, put the version in both places, for example `ghcr.io/kyverno/assistant:v0.1.0`.
-
-**2. Start it:**
-
-```bash
-~/.kyverno-launcher/launcher/kyverno --profile contributor      # or --profile maintainer
-```
+of `latest`, add `--image ghcr.io/kyverno/assistant:v0.1.0` after `-s --`.
 
 It prints five numbered steps:
 
@@ -99,7 +92,7 @@ OpenShell supports macOS on Apple Silicon only, so on an Intel Mac, or if you do
 Docker:
 
 ```bash
-~/.kyverno-launcher/launcher/kyverno --no-openshell --profile contributor
+kyverno --no-openshell --profile contributor
 ```
 
 **This is weaker.** There is no network allowlist (the container can reach the internet), the GitHub token and
@@ -161,7 +154,7 @@ With it, it can run `git push` to branches of **your own forks** (`kyverno`, `we
 `KYVERNO_PUSH_REPOS` for others) and, as a maintainer, to the repo you manage, and nowhere else:
 
 ```bash
-KYVERNO_PUSH_REPOS="kyverno" ~/.kyverno-launcher/launcher/kyverno --profile contributor --push-to-fork
+KYVERNO_PUSH_REPOS="kyverno" kyverno --profile contributor --push-to-fork
 ```
 
 It asks for a push token once (your `gh` sign-in, or a fine-grained token with Contents Read and write on your fork)
@@ -173,11 +166,10 @@ it off again: `--no-push`. Not available with `--no-openshell`.
 Your memory, chat history, model choice, Copilot sign-in and cloned repositories are kept.
 
 ```bash
-docker run --rm ghcr.io/kyverno/assistant:latest tar -C /opt/kyverno -c launcher | tar -x -C ~/.kyverno-launcher
-~/.kyverno-launcher/launcher/kyverno --upgrade
+curl -fsSL https://raw.githubusercontent.com/kyverno/assistant/main/install.sh | sh -s -- --upgrade
 ```
 
-The first line refreshes the launcher, the second pulls the new image and recreates the sandbox. Add `--keep-caches`
+This takes the launcher from the new image, pulls the image and recreates the sandbox. Add `--keep-caches`
 to also carry the downloaded toolchains and build caches (large). From a clone: `git pull`, then
 `container/kyverno --build --upgrade`.
 
@@ -192,7 +184,6 @@ to also carry the downloaded toolchains and build caches (large). From a clone: 
 | Delete a model key | `openshell provider delete kyverno-anthropic` (or `-openai`, `-nvidia`) |
 | Delete the push token | `openshell provider delete kyverno-git-push` |
 | Delete the image | `docker rmi ghcr.io/kyverno/assistant:latest` |
-| Delete the extracted launcher | `rm -rf ~/.kyverno-launcher` |
 
 With `--no-openshell`, the clones and toolchains live in a Docker volume that outlives the container:
 `docker volume rm kyverno-contributor-docker-workspace` (the name follows the container's).

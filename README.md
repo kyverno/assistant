@@ -76,21 +76,21 @@ stores your token, creates or starts the sandbox, and opens the chat.
 ## Quick start
 
 You need Docker (and, on a Mac, Apple Silicon: see [what you need](#0-what-you-need)). You do not need to clone this
-repository: the launcher is inside the image, so one command copies it out and another runs it.
+repository or create a folder: this one command takes the launcher from the image and runs it.
 
 ```bash
-mkdir -p ~/.kyverno-launcher
-docker run --rm ghcr.io/kyverno/assistant:latest tar -C /opt/kyverno -c launcher | tar -x -C ~/.kyverno-launcher
-~/.kyverno-launcher/launcher/kyverno
+curl -fsSL https://raw.githubusercontent.com/kyverno/assistant/main/install.sh | sh
 ```
 
-To upgrade later, run the `docker run` line again, then start the launcher with `--upgrade`. Prefer a clone, or want to build the image yourself? Then:
+To upgrade later, run the same command with `-s -- --upgrade` after `sh`. Prefer a clone, or want to build the image yourself? Then:
 
 ```bash
 git clone https://github.com/kyverno/assistant.git
 cd assistant
 container/kyverno --build      # first time: builds the image (15 to 30 minutes), then starts it
 ```
+
+For development, `make run` builds the image from your checkout and starts it (see [Development automation](#development-automation)).
 
 Step-by-step instructions for every case (Apple Silicon, Linux, Intel or Docker only, building from a clone, tokens, models,
 pushing, upgrading, troubleshooting) are in [`docs/getting-started.md`](docs/getting-started.md).
