@@ -11,7 +11,7 @@ packages or repository-local tool actions are needed. Scripts are loaded from
 | --- | --- | --- |
 | `mode` | required | `labels`, `readiness`, `stale`, `sync-labels`, or `validate` |
 | `config` | `.github/pr-management.json` | Repository-specific JSON |
-| `readiness-checks` | `.github/pr-readiness-checks.yml` | Repository-specific jq checks |
+| `readiness-checks` | `.github/pr-readiness-checks.yml` | Optional: your changes to the built-in readiness checks |
 | `dry-run` | `'true'` | Exactly `'true'` or `'false'`; preview never mutates GitHub |
 | `stale-days` | `'7'` | Author inactivity before marking stale |
 | `review-nudge-days` | `'7'` | Maintainer inactivity before a reviewer reminder |
@@ -126,11 +126,36 @@ The label file maps each label name to `color` (quote six-digit hex values),
 `description`, and optional actions/labeler `rules`. Rules are rendered without
 changing matcher semantics. Metadata-only entries are not path-label rules.
 
-Readiness checks map identifiers to jq `test` and `message` strings evaluated
-against the fetched PR, with `$author` bound to its login. The optional
-`infra_checks` identifier is advisory, not blocking. **Which checks count as
-infrastructure is repository-specific**: maintain exclusions and explanations in
-the caller's YAML, never in the generic scripts. See `adopt-ci-templates/pr-readiness-checks.yml` for a starting point.
+## Readiness checks
+
+Readiness runs a built-in set, so a repository needs no check logic of its own:
+
+| Check | Blocks when |
+|---|---|
+| `dco` | the DCO check failed |
+| `ci` | any other check failed, except those in `infra_checks` |
+| `infra_checks` | a check named in `infra_checks` is red; an FYI only, it never blocks |
+| `conflicts` | the PR has `merge-conflicts` |
+| `threads` | a review thread is unresolved and its last comment is not the author's |
+| `unanswered` | a maintainer's latest review is *Request changes* and the author has neither replied nor pushed since |
+
+The jq for each is in [`default-readiness-checks.yml`](default-readiness-checks.yml). A repository changes them in
+`.github/pr-readiness-checks.yml`, which is optional:
+
+```yaml
+disable: [unanswered]          # turn a built-in check off
+threads:                       # same name as a built-in: replaces it
+  test: '...'                  # jq, evaluated against the PR, with $author bound to its login
+  message: '"..."'             # jq string for the comment
+needs_description:             # any other name: adds a check
+  test: '(.body // "") | length < 20'
+  message: '"describe what this PR changes and why"'
+```
+
+Red checks that are not the author's to fix go in `pr-management.json`, so `ci` keeps its logic:
+`"infra_checks": {"E2E Gate": "base-branch or CI-infrastructure issue"}`. Replace a built-in only when this is not
+enough: you then own that check and no longer receive changes to it. Fields available to jq are those requested by
+`detail_query` in `readiness.sh`; `unanswered` sees the newest 100 comments and 100 reviews.
 
 ## Safety and rollout
 
