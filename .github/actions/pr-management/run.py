@@ -16,7 +16,10 @@ KEYS = {
     "fallback_reviewers", "exempt_labels", "close_days", "warning_days",
     "backlog_days", "milestone_prefix", "labels_file",
 }
+OPTIONAL_KEYS = {"infra_checks"}
 ACTION = Path(__file__).resolve().parent
+DEFAULT_CHECKS = ACTION / "default-readiness-checks.yml"
+DEFAULT_CHECKS_PATH = ".github/pr-readiness-checks.yml"
 
 
 def days(value, name):
@@ -29,8 +32,14 @@ def days(value, name):
 
 
 def validate_config(config):
-    if not isinstance(config, dict) or set(config) != KEYS:
-        raise ValueError(f"config must contain exactly: {', '.join(sorted(KEYS))}")
+    if not isinstance(config, dict) or not KEYS <= set(config) <= KEYS | OPTIONAL_KEYS:
+        raise ValueError(f"config must contain {', '.join(sorted(KEYS))} and may add {', '.join(sorted(OPTIONAL_KEYS))}")
+    infra = config.get("infra_checks", {})
+    if not isinstance(infra, dict) or any(
+        not isinstance(name, str) or not name or not isinstance(reason, str) or not reason.strip()
+        or any(ord(c) < 32 for c in name + reason) for name, reason in infra.items()
+    ):
+        raise ValueError("infra_checks must map each check name to the reason a red result is not the author's to fix")
     for key in ("close_days", "warning_days", "backlog_days"):
         if type(config[key]) is not int:
             raise ValueError(f"{key} must be a JSON integer")
@@ -128,22 +137,54 @@ def validate_rules(rules):
                 raise ValueError(f"unsupported actions/labeler matcher: {key}")
 
 
-def readiness_program(raw):
-    if not isinstance(raw, dict) or not raw:
-        raise ValueError("readiness-checks must be a nonempty mapping")
-    expressions = []
+def check_definitions(raw, what):
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"{what} must be a mapping")
     for key, check in raw.items():
+        if key == "disable":
+            continue
         if not isinstance(key, str) or not re.fullmatch(r"[a-z_][a-z0-9_]*", key):
             raise ValueError("invalid readiness check identifier")
         if not isinstance(check, dict) or set(check) != {"test", "message"} or any(
             not isinstance(check[k], str) or not check[k].strip() for k in ("test", "message")
         ):
             raise ValueError(f"check {key} requires jq test and message strings")
-        expressions.append(
-            f'(if ({check["test"]}) then {{id: {json.dumps(key)}, '
-            f'message: ({check["message"]})}} else empty end)'
-        )
-    return ".author.login as $author | [\n" + ",\n".join(expressions) + "\n]\n"
+    return raw
+
+
+def readiness_program(repo_checks, infra):
+    """Built-in checks, minus `disable`, with the repository's own checks added or replacing one by name."""
+    defaults = check_definitions(yaml_file(DEFAULT_CHECKS), "default readiness checks")
+    repo = check_definitions(repo_checks, "readiness-checks")
+    disabled = repo.get("disable", [])
+    if not isinstance(disabled, list) or any(not isinstance(name, str) for name in disabled) \
+            or len(set(disabled)) != len(disabled):
+        raise ValueError("disable must be a list of unique built-in check names")
+    for name in disabled:
+        if name not in defaults:
+            raise ValueError(f"cannot disable {name}: built-in checks are {', '.join(defaults)}")
+        if name in repo:
+            raise ValueError(f"{name} is both disabled and defined")
+    merged = {**defaults, **{k: v for k, v in repo.items() if k != "disable"}}
+    expressions = [
+        f'(if ({check["test"]}) then {{id: {json.dumps(key)}, message: ({check["message"]})}} else empty end)'
+        for key, check in merged.items() if key not in disabled
+    ]
+    if not expressions:
+        raise ValueError("every readiness check is disabled")
+    # JSON is valid jq, so the map is bound as a literal: validate and readiness compile the same program.
+    return (f".author.login as $author | {json.dumps(infra)} as $infra | [\n"
+            + ",\n".join(expressions) + "\n]\n")
+
+
+def repo_checks_file(workspace):
+    """The repository's own checks; optional at the default path, since the built-in checks are enough."""
+    name = os.environ.get("READINESS_CHECKS", DEFAULT_CHECKS_PATH)
+    if name == DEFAULT_CHECKS_PATH and not (workspace / name).exists():
+        return None
+    return yaml_file(trusted_file(workspace, name))
 
 
 def gh_json(*args):
@@ -213,9 +254,7 @@ def main():
                EXEMPT_LABELS=json.dumps(config["exempt_labels"]), MILESTONE_PREFIX=config["milestone_prefix"])
     if mode == "validate":
         render_labels(yaml_file(trusted_file(workspace, config["labels_file"])))
-        program = readiness_program(yaml_file(trusted_file(
-            workspace, os.environ.get("READINESS_CHECKS", ".github/pr-readiness-checks.yml")
-        )))
+        program = readiness_program(repo_checks_file(workspace), config.get("infra_checks", {}))
         # A jq module can contain definitions, not a top-level program. Import without
         # invoking the function, so even expression-delimiter injection cannot run it.
         work = workspace / f".pr-management-validate-{uuid.uuid4().hex}"
@@ -256,9 +295,7 @@ def main():
     work.mkdir()
     try:
         if mode == "readiness":
-            program = readiness_program(yaml_file(trusted_file(
-                workspace, os.environ.get("READINESS_CHECKS", ".github/pr-readiness-checks.yml")
-            )))
+            program = readiness_program(repo_checks_file(workspace), config.get("infra_checks", {}))
             (work / "readiness-checks.jq").write_text(program)
         subprocess.run(["bash", str(ACTION / f"{mode}.sh")], cwd=work, env=env, check=True)
     finally:

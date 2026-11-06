@@ -131,7 +131,7 @@ Setting the variable to \`false\`, or deleting it, returns every scheduled and P
 ## What to check in this PR
 
 - \`.github/pr-management.json\`: reviewers (\`${reviewers}\`), exempt labels, timings.
-- \`.github/pr-readiness-checks.yml\`: the names of checks that should block, and any that are not the author's to fix.
+- \`.github/pr-readiness-checks.yml\`: optional changes to the built-in readiness checks (turn one off, replace it, or add your own). It starts as a commented example.
 - \`.github/labels.yml\`: add path rules for your areas. It must define the lifecycle labels \`needs-author-action\`,
   \`ready-for-review\`, \`workflow-approval-required\`, \`stale\` and \`merge-conflicts\`; any missing from an existing file are appended to it by this PR.
 

@@ -128,7 +128,6 @@ detail_query='
         commits(last: 1) {
           nodes { commit {
             oid
-            committedDate
             statusCheckRollup { contexts(first: 100) { pageInfo { hasNextPage endCursor } nodes {
               ... on CheckRun { name conclusion status }
               ... on StatusContext { context state }
@@ -142,7 +141,7 @@ detail_query='
         # Only the newest 100 of each (the API page maximum), without pagination: a check about "the latest comment"
         # never needs older ones, but a PR with over 100 newer events could hide an unanswered maintainer comment.
         comments(last: 100) { nodes { author { login __typename } authorAssociation createdAt } }
-        reviews(last: 100) { nodes { author { login __typename } authorAssociation state submittedAt bodyText } }
+        reviews(last: 100) { nodes { author { login __typename } authorAssociation state submittedAt commit { oid } } }
       }
     }
   }'

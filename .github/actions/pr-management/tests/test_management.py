@@ -136,37 +136,128 @@ class AutomationTests(unittest.TestCase):
                 self.assertIn("exempt label present", result.stdout)
                 (self.work / "calls.jsonl").unlink(missing_ok=True)
 
-    def test_unanswered_maintainer_comment_blocks_readiness(self):
-        def review(state, days, body="please change this", assoc="MEMBER", login="maintainer", kind="User"):
+    def test_requested_changes_block_readiness_until_answered(self):
+        def review(state, days, body="please change this", assoc="MEMBER", login="maintainer", kind="User",
+                   oid=SHA):
             return {"author": {"login": login, "__typename": kind}, "authorAssociation": assoc,
-                    "state": state, "submittedAt": at(days), "bodyText": body}
+                    "state": state, "submittedAt": at(days), "bodyText": body, "commit": {"oid": oid} if oid else None}
 
         def comment(days, assoc="MEMBER", login="maintainer", kind="User"):
             return {"author": {"login": login, "__typename": kind}, "authorAssociation": assoc, "createdAt": at(days)}
 
         author_reply = comment(1, assoc="CONTRIBUTOR", login="contributor")
-        # (name, reviews, comments, days since the last commit, blocked)
+        requested = review("CHANGES_REQUESTED", 3)
+        # (name, reviews, comments, blocked)
         cases = (
-            ("changes requested, no answer", [review("CHANGES_REQUESTED", 2)], [], 10, True),
-            ("review body comment, no answer", [review("COMMENTED", 2)], [], 10, True),
-            ("plain comment, no answer", [], [comment(2)], 10, True),
-            ("author replied afterwards", [review("CHANGES_REQUESTED", 2)], [author_reply], 10, False),
-            ("author pushed afterwards", [review("CHANGES_REQUESTED", 2)], [], 1, False),
-            ("bot comment", [], [comment(2, login="github-actions[bot]", kind="Bot")], 10, False),
-            ("non-maintainer review", [review("CHANGES_REQUESTED", 2, assoc="CONTRIBUTOR")], [], 10, False),
-            ("approval", [review("APPROVED", 2, body="")], [], 10, False),
-            ("inline-only review", [review("COMMENTED", 2, body="")], [], 10, False),
+            ("changes requested, no answer", [requested], [], True),
+            ("author replied afterwards", [requested], [author_reply], False),
+            ("author pushed afterwards", [review("CHANGES_REQUESTED", 3, oid="b" * 40)], [], False),
+            ("reviewed commit no longer exists", [review("CHANGES_REQUESTED", 3, oid=None)], [], False),
+            ("same maintainer approved later", [requested, review("APPROVED", 2, body="")], [], False),
+            ("review dismissed", [requested, review("DISMISSED", 2, body="")], [], False),
+            ("another maintainer approved", [requested, review("APPROVED", 2, body="", login="other")], [], True),
+            ("new request after the author replied", [requested, review("CHANGES_REQUESTED", 0.5)], [author_reply], True),
+            ("two maintainers, one approves", [requested, review("CHANGES_REQUESTED", 3, login="other"),
+                                               review("APPROVED", 2, body="")], [], True),
+            ("author's own review does not answer for a bot", [review("CHANGES_REQUESTED", 3, assoc="OWNER")],
+             [comment(1, assoc="OWNER", login="contributor")], False),
+            ("plain maintainer comment", [], [comment(2)], False),
+            ("comment-only review with a body", [review("COMMENTED", 2)], [], False),
+            ("bot request", [review("CHANGES_REQUESTED", 2, login="coderabbitai[bot]", kind="Bot")], [], False),
+            ("non-maintainer request", [review("CHANGES_REQUESTED", 2, assoc="CONTRIBUTOR")], [], False),
+            ("pending review", [review("PENDING", 2)], [], False),
         )
-        for name, reviews, comments, committed, blocked in cases:
+        for name, reviews, comments, blocked in cases:
             with self.subTest(case=name):
                 pr = self.fixture["readiness_pr"]
                 pr["reviews"], pr["comments"] = connection(reviews), connection(comments)
-                pr["commits"]["nodes"][0]["commit"]["committedDate"] = at(committed)
                 self.run_action()
                 added = lambda label: any("--add-label" in call and label in call for call in self.mutations)
                 self.assertEqual(added("needs-author-action"), blocked)
                 self.assertEqual(added("ready-for-review"), not blocked)
                 (self.work / "calls.jsonl").unlink(missing_ok=True)
+
+    def contexts(self, *nodes):
+        self.fixture["readiness_pr"]["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]["nodes"] = list(nodes)
+
+    def added(self, label):
+        return any("--add-label" in call and label in call for call in self.mutations)
+
+    def test_builtin_checks_apply_without_a_repo_file(self):
+        (self.work / ".github/pr-readiness-checks.yml").unlink()
+        self.contexts({"name": "build", "conclusion": "FAILURE", "status": "COMPLETED"})
+        self.run_action()
+        self.assertTrue(self.added("needs-author-action"))
+        (self.work / "calls.jsonl").unlink()
+        self.contexts({"name": "build", "conclusion": "SUCCESS", "status": "COMPLETED"})
+        self.fixture["readiness_pr"]["labels"] = connection(labels("merge-conflicts"))
+        self.run_action()
+        self.assertTrue(self.added("needs-author-action"))
+        (self.work / "calls.jsonl").unlink()
+        self.fixture["readiness_pr"]["labels"] = connection([])
+        self.run_action()
+        self.assertTrue(self.added("ready-for-review"))
+
+    def test_repo_file_can_disable_replace_and_add_checks(self):
+        checks = self.work / ".github/pr-readiness-checks.yml"
+        conflicting = connection(labels("merge-conflicts"))
+        unresolved = connection([{"isResolved": False, "comments": connection([
+            {"author": {"login": "reviewer"}, "createdAt": at(1)}])}])
+        cases = (
+            ("disable", "disable: [conflicts]\n", {"labels": conflicting}, False),
+            ("not disabled", "", {"labels": conflicting}, True),
+            ("replace", "threads:\n  test: 'false'\n  message: '\"unused\"'\n", {"reviewThreads": unresolved}, False),
+            ("built-in kept", "", {"reviewThreads": unresolved}, True),
+            ("add", "extra:\n  test: 'true'\n  message: '\"extra\"'\n", {}, True),
+        )
+        for name, content, pr_fields, blocked in cases:
+            with self.subTest(case=name):
+                checks.write_text(content)
+                self.fixture["readiness_pr"] = {**readiness(), **pr_fields}
+                self.run_action()
+                self.assertEqual(self.added("needs-author-action"), blocked)
+                self.assertEqual(self.added("ready-for-review"), not blocked)
+                (self.work / "calls.jsonl").unlink(missing_ok=True)
+
+    def test_infra_checks_come_from_the_config(self):
+        self.contexts({"name": "E2E Gate", "conclusion": "FAILURE", "status": "COMPLETED"})
+        self.run_action()
+        self.assertTrue(self.added("needs-author-action"))
+        (self.work / "calls.jsonl").unlink()
+        config = self.work / ".github/pr-management.json"
+        data = json.loads(config.read_text())
+        data["infra_checks"] = {"E2E Gate": "base-branch or CI-infrastructure issue"}
+        config.write_text(json.dumps(data))
+        self.run_action()
+        self.assertTrue(self.added("ready-for-review"))
+        self.assertTrue(any("E2E Gate" in " ".join(call) and "CI-infrastructure issue" in " ".join(call)
+                            for call in self.mutations))
+
+    def test_invalid_check_selection_fails_before_api(self):
+        checks = self.work / ".github/pr-readiness-checks.yml"
+        config = self.work / ".github/pr-management.json"
+        data = json.loads(config.read_text())
+        bad_files = (
+            "disable: [no_such_check]\n", "disable: conflicts\n", "disable: [conflicts, conflicts]\n",
+            "disable: [conflicts]\nconflicts:\n  test: 'true'\n  message: '\"x\"'\n",
+            "disable: [dco, ci, infra_checks, conflicts, threads, unanswered]\n",
+        )
+        for content in bad_files:
+            with self.subTest(file=content):
+                checks.write_text(content)
+                self.run_action(mode="validate", success=False)
+                self.assertEqual(self.calls, [])
+        checks.write_text("# nothing to change\n")
+        self.run_action(mode="validate")
+        checks.unlink()
+        self.run_action(mode="validate")
+        self.env["READINESS_CHECKS"] = ".github/missing.yml"
+        self.run_action(mode="validate", success=False)
+        del self.env["READINESS_CHECKS"]
+        for infra in ({"": "x"}, {"E2E Gate": ""}, ["E2E Gate"]):
+            with self.subTest(infra=infra):
+                config.write_text(json.dumps({**data, "infra_checks": infra}))
+                self.run_action(mode="validate", success=False)
 
     def test_pending_and_empty_ci_never_ready(self):
         for contexts in ([], [{"name": "unit", "status": "IN_PROGRESS", "conclusion": None}],

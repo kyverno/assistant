@@ -8,7 +8,7 @@ inputs:
     description: Trusted repository configuration JSON
     default: .github/pr-management.json
   readiness-checks:
-    description: Trusted repository-specific jq checks
+    description: Optional trusted repository changes to the built-in readiness checks
     default: .github/pr-readiness-checks.yml
   dry-run:
     description: Preview only; must be the string true or false
