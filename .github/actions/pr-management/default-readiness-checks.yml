@@ -51,7 +51,7 @@ conflicts:
 # Per unresolved thread, not a global timestamp comparison: the author owes a response unless the LAST comment
 # in that specific thread is already theirs (a fix pushed without replying still counts as owing a response).
 threads:
-  message: '"resolve all review comments — mark each thread resolved, or leave a response if you are not sure what to do"'
+  message: '"resolve all review comments - mark each thread resolved, or leave a response if you are not sure what to do"'
   test: |
     [.reviewThreads.nodes[]
       | select(.isResolved | not)
@@ -60,7 +60,8 @@ threads:
 
 # Only an explicit "Request changes" review asks the author to act; plain comments and comment-only reviews never do.
 # Each maintainer's latest approve/request-changes/dismiss review decides (so a later approval or dismissal clears
-# it), and it stays open until the author replies (comment or review) or pushes a newer commit. Maintainers are
+# it), and it stays open until the author replies (comment or review) or pushes: a review is for one commit, so once
+# the head is a different commit than the one reviewed the author has answered. Maintainers are
 # GitHub's OWNER, MEMBER and COLLABORATOR associations; bots and the author's own reviews are ignored.
 unanswered:
   message: '"reply to the requested changes, or push a fix"'
@@ -70,10 +71,10 @@ unanswered:
     | ([.comments.nodes[]? | select(human) | {who: (.author.login // ""), at: .createdAt}]
        + [$reviews[] | {who: (.author.login // ""), at: .submittedAt}]) as $events
     | ([$events[] | select(.who == $author) | .at] | max // "") as $answered
-    | (.commits.nodes[0].commit.committedDate // "") as $pushed
+    | (.commits.nodes[0].commit.oid // "") as $head
     | [$reviews | group_by(.author.login // "")[]
         | map(select(.state != "COMMENTED")) | sort_by(.submittedAt) | last // empty
         | select(.state == "CHANGES_REQUESTED" and .author.login != $author
             and (.authorAssociation == "OWNER" or .authorAssociation == "MEMBER" or .authorAssociation == "COLLABORATOR")
-            and .submittedAt > $answered and .submittedAt > $pushed)]
+            and .submittedAt > $answered and (.commit.oid // "") == $head)]
       | length > 0

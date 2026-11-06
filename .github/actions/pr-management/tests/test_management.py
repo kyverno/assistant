@@ -137,34 +137,40 @@ class AutomationTests(unittest.TestCase):
                 (self.work / "calls.jsonl").unlink(missing_ok=True)
 
     def test_requested_changes_block_readiness_until_answered(self):
-        def review(state, days, body="please change this", assoc="MEMBER", login="maintainer", kind="User"):
+        def review(state, days, body="please change this", assoc="MEMBER", login="maintainer", kind="User",
+                   oid=SHA):
             return {"author": {"login": login, "__typename": kind}, "authorAssociation": assoc,
-                    "state": state, "submittedAt": at(days), "bodyText": body}
+                    "state": state, "submittedAt": at(days), "bodyText": body, "commit": {"oid": oid} if oid else None}
 
         def comment(days, assoc="MEMBER", login="maintainer", kind="User"):
             return {"author": {"login": login, "__typename": kind}, "authorAssociation": assoc, "createdAt": at(days)}
 
         author_reply = comment(1, assoc="CONTRIBUTOR", login="contributor")
         requested = review("CHANGES_REQUESTED", 3)
-        # (name, reviews, comments, days since the last commit, blocked)
+        # (name, reviews, comments, blocked)
         cases = (
-            ("changes requested, no answer", [requested], [], 10, True),
-            ("author replied afterwards", [requested], [author_reply], 10, False),
-            ("author pushed afterwards", [requested], [], 1, False),
-            ("same maintainer approved later", [requested, review("APPROVED", 2, body="")], [], 10, False),
-            ("review dismissed", [requested, review("DISMISSED", 2, body="")], [], 10, False),
-            ("another maintainer approved", [requested, review("APPROVED", 2, body="", login="other")], [], 10, True),
-            ("plain maintainer comment", [], [comment(2)], 10, False),
-            ("comment-only review with a body", [review("COMMENTED", 2)], [], 10, False),
-            ("bot request", [review("CHANGES_REQUESTED", 2, login="coderabbitai[bot]", kind="Bot")], [], 10, False),
-            ("non-maintainer request", [review("CHANGES_REQUESTED", 2, assoc="CONTRIBUTOR")], [], 10, False),
-            ("pending review", [review("PENDING", 2)], [], 10, False),
+            ("changes requested, no answer", [requested], [], True),
+            ("author replied afterwards", [requested], [author_reply], False),
+            ("author pushed afterwards", [review("CHANGES_REQUESTED", 3, oid="b" * 40)], [], False),
+            ("reviewed commit no longer exists", [review("CHANGES_REQUESTED", 3, oid=None)], [], False),
+            ("same maintainer approved later", [requested, review("APPROVED", 2, body="")], [], False),
+            ("review dismissed", [requested, review("DISMISSED", 2, body="")], [], False),
+            ("another maintainer approved", [requested, review("APPROVED", 2, body="", login="other")], [], True),
+            ("new request after the author replied", [requested, review("CHANGES_REQUESTED", 0.5)], [author_reply], True),
+            ("two maintainers, one approves", [requested, review("CHANGES_REQUESTED", 3, login="other"),
+                                               review("APPROVED", 2, body="")], [], True),
+            ("author's own review does not answer for a bot", [review("CHANGES_REQUESTED", 3, assoc="OWNER")],
+             [comment(1, assoc="OWNER", login="contributor")], False),
+            ("plain maintainer comment", [], [comment(2)], False),
+            ("comment-only review with a body", [review("COMMENTED", 2)], [], False),
+            ("bot request", [review("CHANGES_REQUESTED", 2, login="coderabbitai[bot]", kind="Bot")], [], False),
+            ("non-maintainer request", [review("CHANGES_REQUESTED", 2, assoc="CONTRIBUTOR")], [], False),
+            ("pending review", [review("PENDING", 2)], [], False),
         )
-        for name, reviews, comments, committed, blocked in cases:
+        for name, reviews, comments, blocked in cases:
             with self.subTest(case=name):
                 pr = self.fixture["readiness_pr"]
                 pr["reviews"], pr["comments"] = connection(reviews), connection(comments)
-                pr["commits"]["nodes"][0]["commit"]["committedDate"] = at(committed)
                 self.run_action()
                 added = lambda label: any("--add-label" in call and label in call for call in self.mutations)
                 self.assertEqual(added("needs-author-action"), blocked)
