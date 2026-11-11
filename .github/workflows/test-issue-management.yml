@@ -1,0 +1,30 @@
+name: Test issue management
+
+on:
+  pull_request:
+    paths:
+      - .github/actions/issue-management/**
+      - .github/workflows/issue-management.yml
+      - .github/workflows/test-issue-management.yml
+  push:
+    branches: [main]
+    paths:
+      - .github/actions/issue-management/**
+      - .github/workflows/issue-management.yml
+      - .github/workflows/test-issue-management.yml
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Offline tests
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python3 -m unittest discover -s .github/actions/issue-management/tests -v
