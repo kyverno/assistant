@@ -1,0 +1,28 @@
+name: Shared issue management
+description: Label issues a merged PR may have resolved, warn and close issues waiting on their reporter, and flag idle untriaged issues
+inputs:
+  config:
+    description: Trusted repository configuration JSON; every key is optional
+    default: .github/issue-management.json
+  dry-run:
+    description: Preview only; must be the string true or false
+    default: 'true'
+  max-actions:
+    description: With dry-run false, the most issues one run changes
+    default: '30'
+runs:
+  using: composite
+  steps:
+    - name: Check runtime tools
+      shell: bash
+      run: |
+        for tool in python3 gh; do
+          command -v "$tool" > /dev/null || { echo "::error::Required tool '$tool' not found"; exit 1; }
+        done
+    - name: Run shared issue management
+      shell: bash
+      env:
+        ISSUE_CONFIG: ${{ inputs.config }}
+        DRY_RUN: ${{ inputs.dry-run }}
+        MAX_ACTIONS: ${{ inputs.max-actions }}
+      run: python3 "$GITHUB_ACTION_PATH/run.py" >> "$GITHUB_STEP_SUMMARY"
