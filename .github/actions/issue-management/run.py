@@ -11,8 +11,11 @@ The rules, configured in the repository's issue-management.json (every key is op
   idle-untriaged       An untriaged issue with no priority and no human activity for a long time. Labels with
                        `stale` and comments; never closes. Off unless triage_label is set.
 
-Any human comment after a managed label removes it. Exempt labels and milestoned issues are never touched. The
-script stores no state: labels and timelines are the state.
+Any human comment after `stale` or `possibly-resolved` removes it, and a reply from the reporter removes the
+needs-info label so a later request starts a fresh clock. Exempt labels and milestoned issues are never labelled or
+closed. The script stores no state: labels and timelines are the state.
+
+With triage_label set, the report also lists the oldest untriaged issues, so someone on triage duty has a queue.
 
 Dry-run unless DRY_RUN is the string false. Prints a Markdown report on stdout.
 Exit codes: 0 on success, 1 on an error.
@@ -25,6 +28,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import time
 
 DEFAULTS = {
     "stale_label": "stale",
@@ -38,6 +42,8 @@ DEFAULTS = {
     "close_days": 14,
     "idle_days": 180,
     "resolved_grace_days": 3,
+    # Untriaged issues listed in the report, oldest first; 0 turns the list off.
+    "digest_limit": 25,
     "warning_comment": (
         "This issue is waiting on more information from the reporter and has had no reply. It will be closed in "
         "{days} days unless there is a response. Any comment removes the `stale` label."
@@ -63,7 +69,10 @@ COMMENT_FIELDS = {
     "resolved_comment": {"pr"},
     "idle_comment": {"days"},
 }
-LABEL_COLORS = {"stale": "CFD3D7", "possibly-resolved": "0E8A16"}
+LABEL_INFO = {
+    "stale": ("CFD3D7", "No activity, or waiting on the reporter"),
+    "possibly-resolved": ("0E8A16", "A merged PR references this issue; needs confirmation that it is resolved"),
+}
 
 QUERY = """
 query($owner: String!, $name: String!, $after: String) {
@@ -84,7 +93,7 @@ query($owner: String!, $name: String!, $after: String) {
             ... on LabeledEvent { createdAt label { name } }
             ... on CrossReferencedEvent {
               willCloseTarget
-              source { ... on PullRequest { number merged mergedAt } }
+              source { ... on PullRequest { number state merged mergedAt } }
             }
           }
         }
@@ -117,6 +126,9 @@ def load_config(path):
         value = config[key]
         if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 3650:
             raise ValueError(f"{key} must be a whole number of days from 1 to 3650")
+    limit = config["digest_limit"]
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 0 <= limit <= 200:
+        raise ValueError("digest_limit must be a whole number from 0 to 200")
     for key in ("stale_label", "resolved_label", "triage_label", "priority_prefix"):
         if not isinstance(config[key], str):
             raise ValueError(f"{key} must be a string")
@@ -181,14 +193,25 @@ def last_human_comment(issue, after=None, by_author=False):
 
 
 def merged_references(issue):
-    """Merged PRs that mention the issue without closing it."""
+    """Merged PRs that mention the issue without closing it. A PR merged before the issue was opened can only
+    have been edited to mention it later, so it says nothing about a fix."""
+    created = parse_time(issue["createdAt"])
     return [
         (n["source"]["number"], parse_time(n["source"]["mergedAt"]))
         for n in issue["timelineItems"]["nodes"]
         if n["__typename"] == "CrossReferencedEvent"
         and not n["willCloseTarget"]
         and n["source"].get("merged")
+        and parse_time(n["source"]["mergedAt"]) > created
     ]
+
+
+def has_open_reference(issue):
+    """True while an open PR mentions the issue: a merged PR then is a step of work still in flight."""
+    return any(
+        n["__typename"] == "CrossReferencedEvent" and n["source"].get("state") == "OPEN"
+        for n in issue["timelineItems"]["nodes"]
+    )
 
 
 def decide(issue, now, cfg):
@@ -202,6 +225,13 @@ def decide(issue, now, cfg):
     for name in sorted(labels & managed):
         applied = label_time(issue, name)
         if applied and last_human_comment(issue, after=applied):
+            actions.append(("unlabel", name))
+            labels.discard(name)
+
+    # A reply from the reporter answers the request, so the label goes: the next request then starts a fresh clock.
+    for name in sorted(labels & set(cfg["needs_info_labels"])):
+        asked = label_time(issue, name)
+        if asked and last_human_comment(issue, after=asked, by_author=True):
             actions.append(("unlabel", name))
             labels.discard(name)
 
@@ -220,6 +250,11 @@ def decide(issue, now, cfg):
         asked = max(label_time(issue, name) or created for name in waiting)
         if not last_human_comment(issue, after=asked, by_author=True):
             stale_at = label_time(issue, cfg["stale_label"]) if cfg["stale_label"] in labels else None
+            if stale_at and stale_at <= asked:
+                # This `stale` came from another rule before the request, so it warned of nothing. Drop it: the
+                # next branch then warns for this request.
+                actions.append(("unlabel", cfg["stale_label"]))
+                stale_at = None
             if stale_at and days(stale_at) >= cfg["close_days"]:
                 actions.append(("close", cfg["close_comment"].format(days=cfg["warning_days"] + cfg["close_days"])))
             elif not stale_at and days(asked) >= cfg["warning_days"]:
@@ -227,7 +262,7 @@ def decide(issue, now, cfg):
         return actions
 
     # Rule: possibly resolved. Never closes.
-    if cfg["resolved_label"] not in labels:
+    if cfg["resolved_label"] not in labels and not has_open_reference(issue):
         for number, merged in sorted(merged_references(issue), key=lambda r: r[1], reverse=True):
             if days(merged) >= cfg["resolved_grace_days"] and activity < merged:
                 actions.append(("label", cfg["resolved_label"], cfg["resolved_comment"].format(pr=number)))
@@ -245,10 +280,24 @@ def decide(issue, now, cfg):
     return actions
 
 
+def untriaged_queue(issues, now, cfg):
+    """(issue, idle days) for issues with the triage label and no priority label, oldest first."""
+    queue = []
+    for issue in issues:
+        labels = {n["name"] for n in issue["labels"]["nodes"]}
+        if cfg["triage_label"] not in labels or issue["milestone"]:
+            continue
+        if cfg["priority_prefix"] and any(n.startswith(cfg["priority_prefix"]) for n in labels):
+            continue
+        activity = max(filter(None, [parse_time(issue["createdAt"]), last_human_comment(issue)]))
+        queue.append((issue, (now - activity).days))
+    return sorted(queue, key=lambda entry: -entry[1])
+
+
 def ensure_label(repo, name):
-    color = LABEL_COLORS.get(name, "EDEDED")
+    color, description = LABEL_INFO.get(name, ("EDEDED", ""))
     try:
-        gh("label", "create", name, "-R", repo, "--color", color)
+        gh("label", "create", name, "-R", repo, "--color", color, "--description", description)
     except RuntimeError as err:
         if "already exists" not in str(err):
             raise
@@ -256,6 +305,8 @@ def ensure_label(repo, name):
 
 def apply(repo, number, action):
     kind = action[0]
+    # GitHub's secondary rate limit asks for about a second between writes that create content.
+    time.sleep(1)
     if kind == "label":
         ensure_label(repo, action[1])
         gh("issue", "edit", str(number), "-R", repo, "--add-label", action[1])
@@ -310,6 +361,14 @@ def main():
     if rows:
         print("| Issue | Action | Title |\n|---|---|---|")
         print("\n".join(rows))
+    if cfg["triage_label"] and cfg["digest_limit"]:
+        queue = untriaged_queue(issues, now, cfg)
+        print(f"\n## Untriaged queue\n\n{len(queue)} issues have `{cfg['triage_label']}` and no priority.\n")
+        if queue:
+            print(f"Oldest {min(len(queue), cfg['digest_limit'])} first:\n")
+            print("| Issue | Idle days | Title |\n|---|---|---|")
+            for issue, idle in queue[: cfg["digest_limit"]]:
+                print(f"| #{issue['number']} | {idle} | {issue['title'][:70].replace('|', '/')} |")
     return 0
 
 

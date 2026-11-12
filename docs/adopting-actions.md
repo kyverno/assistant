@@ -94,7 +94,8 @@ permissions each mode needs are in [`.github/actions/pr-management/README.md`](.
 `.github/workflows/issue-management.yml` is a separate shared workflow for issues, called the same way from a short
 caller with a daily `schedule` and `workflow_dispatch`. It reads `.github/issue-management.json` (optional; every key
 has a default) and follows the `ISSUE_AUTOMATION_LIVE` repository variable, so it previews until that is exactly
-`true`. It is not part of `scripts/adopt-ci.sh` yet. The rules and keys are in
+`true`. It is not part of `scripts/adopt-ci.sh` yet: copy `adopt-ci-templates/workflows/issue-management.yaml` and, to
+override defaults, `adopt-ci-templates/issue-management.json`, and set the pin. The rules and keys are in
 [`.github/actions/issue-management/README.md`](../.github/actions/issue-management/README.md).
 
 ## Why a script, and what else was considered
