@@ -94,11 +94,11 @@ maintainer:
       - zz_generated.register.go
       - "pkg/client/**"
       - "pkg/clients/**/*.generated.go"
-      - "config/crds/*.yaml"
+      - "config/crds/**/*.yaml"
       - "cmd/cli/kubectl-kyverno/config/crds/**"
       - "cmd/cli/kubectl-kyverno/data/crds/**"
       - "charts/kyverno/charts/crds/templates/**"
-      - "charts/*/README.md"
+      - "charts/**/README.md"
       - "docs/user/crd/**"
       - pkg/config/mocks/mock_config.go
       - config/install-latest-testing.yaml
@@ -109,7 +109,7 @@ maintainer:
 
   # What feeds the generated files: a PR touching an input must merge before one touching the output.
   generated_inputs:
-    paths: ["api/*_types.go"]
+    paths: ["api/**/*_types.go"]
     dependency_modules: [github.com/kyverno/api]   # a go.mod bump of one of these is also an input change
 
   # Dependency bumps that need regenerated output in the same PR.

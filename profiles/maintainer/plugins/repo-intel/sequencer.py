@@ -13,8 +13,8 @@ Four hard-edge types, all mechanically derivable from already-fetched metadata �
 supplied hints needed:
 
 1. Stacked branches (`base_branch` is another candidate's `head_branch`).
-2. Generated-file input-before-output (a candidate touching an `api/**/*_types.go` path or a
-   `github.com/kyverno/api` bump must precede one touching the regenerated output it feeds).
+2. Generated-file input-before-output (a candidate touching a generated-file input, or bumping a
+   module the pack lists as one, must precede one touching the regenerated output it feeds).
 3. Explicit body reference — the PR's own body says "Depends on #N" / "Blocked by #N" /
    "Requires #N" / "Stacked on #N" naming another candidate.
 4. Closing-issue conflict — two candidates closing the *same* issue aren't ordered against
@@ -25,92 +25,26 @@ Interface-direction and dependency-usage edges (approximating "which PR's diff i
 other PR must come first" from a search rather than a real call graph) are deliberately not
 attempted here — see docs/v3-plan.md's gopls-integration entry for the real version of that.
 
-File-risk classification patterns below are a code mirror of
-skills/kyverno-context/SKILL.md's file-risk classification reference. Keep both in sync
-manually if Kyverno's generated-path list changes.
+What counts as generated, API surface, critical, a generated-file input or a gate comes from the
+organisation pack (pack.py), never from this file. With no pack those tiers are empty.
 """
 
 from __future__ import annotations
 
-import fnmatch
 import os
 import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-# --- file classification ---------------------------------------------------------------------
-
-GENERATED_GLOB_PATTERNS = [
-    "zz_generated.deepcopy.go",
-    "zz_generated.register.go",
-    "pkg/client/*",
-    "pkg/clients/*.generated.go",
-    "pkg/clients/*/interface.generated.go",
-    "config/crds/*.yaml",
-    "cmd/cli/kubectl-kyverno/config/crds/*",
-    "cmd/cli/kubectl-kyverno/data/crds/*",
-    "charts/kyverno/charts/crds/templates/*",
-    "charts/*/README.md",
-    "docs/user/crd/*",
-    "pkg/config/mocks/mock_config.go",
-    "config/install-latest-testing.yaml",
-]
-
-# The one documented hand-written exception inside an otherwise-generated directory.
-GENERATED_EXCEPTIONS = {"pkg/clients/dclient/client.go"}
-
-API_SURFACE_GLOB_PATTERNS = ["api/kyverno/*", "api/policyreport/*", "api/reports/*"]
-ADMISSION_CRITICAL_GLOB_PATTERNS = ["pkg/engine/*", "pkg/webhooks/*", "pkg/cel/*"]
-TEST_ONLY_GLOB_PATTERNS = ["*_test.go", "test/*", "*/testdata/*", "*/_testdata/*"]
-
-# Generated-file *inputs* — distinct from the API_SURFACE display tier above: this drives
-# edge-building (input-before-output), not what gets shown to the maintainer.
-GENERATED_INPUT_GLOB_PATTERNS = ["api/*_types.go"]
-GENERATED_INPUT_DEPENDENCY_MODULE = "github.com/kyverno/api"
-
-# The repo these candidates come from. A reference naming another repo ("depends on kyverno/api#72")
-# is not about a candidate with that number.
-REPO = "kyverno/kyverno"
+from .pack import Rules
 
 # Covers real phrasing variants seen in the wild, not just the canonical form: "Parent:
-# #17701", "Stacks on top of #17695", "depends on kyverno/kyverno#17720", "Blocked by #N".
+# #17701", "Stacks on top of #17695", "depends on owner/repo#17720", "Blocked by #N".
 _CROSS_REF_PATTERN = re.compile(
     r"\b(?:depends on|blocked by|requires|stack(?:s|ed)?\s+on(?:\s+top\s+of)?|parent)\b"
     r"\s*:?\s*(?:([\w.-]+/[\w.-]+))?#(\d+)",
     re.IGNORECASE,
 )
-
-
-def _norm(pattern: str) -> str:
-    """fnmatch's '*' already matches path separators, so a doc-style '**' collapses to '*'."""
-    return pattern.replace("**", "*")
-
-
-def _match_any(path: str, patterns: list[str]) -> bool:
-    """A pattern with no '/' matches the file name at any depth, the way the source rules it mirrors
-    (.claude/settings.json) read a bare `zz_generated.deepcopy.go`; fnmatch alone would only match
-    it at the repo root, where no such file exists."""
-    base = path.rsplit("/", 1)[-1]
-    for pat in patterns:
-        pat = _norm(pat)
-        if fnmatch.fnmatch(path, pat) or ("/" not in pat and fnmatch.fnmatch(base, pat)):
-            return True
-    return False
-
-
-def classify_file(path: str) -> str:
-    """'GENERATED' | 'API_SURFACE' | 'ADMISSION_CRITICAL' | 'TEST_ONLY' | 'STANDARD', checked
-    in that priority order — a file can match more than one tier's glob (e.g. a test file
-    under pkg/engine/), and the higher-priority tier wins."""
-    if path not in GENERATED_EXCEPTIONS and _match_any(path, GENERATED_GLOB_PATTERNS):
-        return "GENERATED"
-    if _match_any(path, API_SURFACE_GLOB_PATTERNS):
-        return "API_SURFACE"
-    if _match_any(path, ADMISSION_CRITICAL_GLOB_PATTERNS):
-        return "ADMISSION_CRITICAL"
-    if _match_any(path, TEST_ONLY_GLOB_PATTERNS):
-        return "TEST_ONLY"
-    return "STANDARD"
 
 
 _TIER_RANK = {"GENERATED": 0, "API_SURFACE": 1, "ADMISSION_CRITICAL": 2, "TEST_ONLY": 3, "STANDARD": 4}
@@ -134,20 +68,20 @@ class PR:
     def size(self) -> int:
         return len(self.changed_files)
 
-    def is_generated_input(self) -> bool:
-        return (GENERATED_INPUT_DEPENDENCY_MODULE in self.dependency_bumps
-                or any(_match_any(f, GENERATED_INPUT_GLOB_PATTERNS) for f in self.changed_files))
+    def is_generated_input(self, rules: Rules) -> bool:
+        return (any(m in self.dependency_bumps for m in rules.input_modules)
+                or any(rules.is_generated_input_path(f) for f in self.changed_files))
 
-    def is_generated_output_toucher(self) -> bool:
-        return any(classify_file(f) == "GENERATED" for f in self.changed_files)
+    def is_generated_output_toucher(self, rules: Rules) -> bool:
+        return any(rules.classify(f) == "GENERATED" for f in self.changed_files)
 
-    def has_bypass_label(self) -> bool:
-        return "e2e-gate-bypass" in self.labels
+    def has_bypass_label(self, rules: Rules) -> bool:
+        return bool(rules.gate and rules.gate.bypass_label in self.labels)
 
-    def file_classification(self) -> str:
+    def file_classification(self, rules: Rules) -> str:
         if not self.changed_files:
             return "STANDARD"
-        return min((classify_file(f) for f in self.changed_files), key=lambda t: _TIER_RANK[t])
+        return min((rules.classify(f) for f in self.changed_files), key=lambda t: _TIER_RANK[t])
 
 
 def pr_from_dict(d: dict) -> PR:
@@ -193,7 +127,8 @@ def pr_from_dict(d: dict) -> PR:
 
 # --- hard-edge graph ----------------------------------------------------------------------
 
-def build_hard_edges(prs: list[PR], repo_default_branch: str) -> tuple[list[tuple[int, int, str]], list[dict]]:
+def build_hard_edges(prs: list[PR], repo_default_branch: str, rules: Rules,
+                     repo: Optional[str] = None) -> tuple[list[tuple[int, int, str]], list[dict]]:
     """Returns (edges, unresolved) — an edge is (before, after, kind); unresolved covers pairs
     with no derivable direction (both inputs to the same generated output) or no direction at
     all (a closing-issue conflict)."""
@@ -211,16 +146,16 @@ def build_hard_edges(prs: list[PR], repo_default_branch: str) -> tuple[list[tupl
 
         # 3. Explicit body reference.
         for match in _CROSS_REF_PATTERN.finditer(p.body):
-            if match.group(1) and match.group(1).lower() != REPO:
-                continue
+            if match.group(1) and (repo is None or match.group(1).lower() != repo.lower()):
+                continue   # names another repository: not about a candidate with that number
             ref = int(match.group(2))
             if ref in by_number and ref != p.number:
                 edges.append((ref, p.number, "explicit reference"))
 
     # 2. Generated-file input-before-output.
-    input_only = [p for p in prs if p.is_generated_input() and not p.is_generated_output_toucher()]
-    output_touchers = [p for p in prs if p.is_generated_output_toucher()]
-    both_input = [p for p in prs if p.is_generated_input() and p.is_generated_output_toucher()]
+    input_only = [p for p in prs if p.is_generated_input(rules) and not p.is_generated_output_toucher(rules)]
+    output_touchers = [p for p in prs if p.is_generated_output_toucher(rules)]
+    both_input = [p for p in prs if p.is_generated_input(rules) and p.is_generated_output_toucher(rules)]
 
     for a in input_only:
         for b in output_touchers:
@@ -232,8 +167,9 @@ def build_hard_edges(prs: list[PR], repo_default_branch: str) -> tuple[list[tupl
         for b in all_inputs[i + 1:]:
             unresolved.append({
                 "prs": [a.number, b.number],
-                "why": "both touch a generated-file input (or a github.com/kyverno/api bump) "
-                       "feeding the same regenerated output, with no derivable order between them",
+                "why": "both touch a generated-file input"
+                       + (f" (or a {' / '.join(rules.input_modules)} bump)" if rules.input_modules else "")
+                       + " feeding the same regenerated output, with no derivable order between them",
             })
 
     # 4. Closing-issue conflict.
@@ -311,17 +247,17 @@ def layer_into_tiers(numbers: list[int], edges: list[tuple[int, int, str]]) -> l
 
 # --- annotations ---------------------------------------------------------------------------
 
-def gate_blocked(p: PR, blocking_branches: set[str], blocks_all_branches: bool) -> bool:
-    """True when GitHub's own 'E2E Gate' status would currently be red on this PR: an open
-    e2e-failure issue's branch marker matches this PR's base (or an issue has no marker at
-    all, which blocks every branch) — unconditionally, regardless of which files the PR
-    touches. The only escape is the PR carrying e2e-gate-bypass itself."""
-    if p.has_bypass_label():
+def gate_blocked(p: PR, blocking_branches: set[str], blocks_all_branches: bool, rules: Rules) -> bool:
+    """True when the pack's branch gate would currently be red on this PR: an open failure issue's
+    branch marker matches this PR's base (or an issue has no marker at all, which blocks every
+    branch) — unconditionally, regardless of which files the PR touches. The only escape is the
+    PR carrying the gate's bypass label itself. With no gate in the pack nothing is ever blocked."""
+    if rules.gate is None or p.has_bypass_label(rules):
         return False
     return blocks_all_branches or p.base_branch in blocking_branches
 
 
-def find_file_overlaps(prs: list[PR], edges: list[tuple[int, int, str]]) -> list[dict]:
+def find_file_overlaps(prs: list[PR], edges: list[tuple[int, int, str]], rules: Rules) -> list[dict]:
     """Pairs of candidates touching the exact same file, no existing hard edge between them —
     a real rebase-conflict *candidate*. Touching the same file doesn't mean the same lines;
     `fetch_file_diff_overlap` checks that. Each path is tagged with its file_classification so
@@ -337,12 +273,13 @@ def find_file_overlaps(prs: list[PR], edges: list[tuple[int, int, str]]) -> list
             if shared:
                 overlaps.append({
                     "prs": [a.number, b.number],
-                    "files": [{"path": f, "file_classification": classify_file(f)} for f in shared],
+                    "files": [{"path": f, "file_classification": rules.classify(f)} for f in shared],
                 })
     return overlaps
 
 
-def find_package_overlaps(prs: list[PR], edges: list[tuple[int, int, str]], file_overlap_pairs: set[frozenset]) -> list[dict]:
+def find_package_overlaps(prs: list[PR], edges: list[tuple[int, int, str]], file_overlap_pairs: set[frozenset],
+                          rules: Rules) -> list[dict]:
     """Pairs of candidates touching the same directory but *not* the same file — weaker than
     `find_file_overlaps`: different files can't git-conflict, this is only "review together,
     might interact" territory. Excludes pairs already reported as a file overlap, so the two
@@ -354,7 +291,7 @@ def find_package_overlaps(prs: list[PR], edges: list[tuple[int, int, str]], file
     edge_pairs = {frozenset((a, b)) for a, b, _kind in edges}
     dirs_by_pr = {
         p.number: {os.path.dirname(f) for f in p.changed_files
-                   if classify_file(f) != "GENERATED" and not _match_any(f, TEST_ONLY_GLOB_PATTERNS)}
+                   if rules.classify(f) != "GENERATED" and not rules.is_test_only(f)}
         for p in prs
     }
     overlaps: list[dict] = []
@@ -375,7 +312,10 @@ def sequence(
     pr_dicts: list[dict],
     repo_default_branch: str = "main",
     blocking_issue_branches: Optional[list[Optional[str]]] = None,
+    rules: Optional[Rules] = None,
+    repo: Optional[str] = None,
 ) -> dict[str, Any]:
+    rules = rules or Rules()
     prs = [pr_from_dict(d) for d in pr_dicts]
     numbers = [p.number for p in prs]
     by_number = {p.number: p for p in prs}
@@ -384,7 +324,7 @@ def sequence(
     blocking_branches = {b for b in branches if b is not None}
     blocks_all_branches = None in branches
 
-    edges, unresolved = build_hard_edges(prs, repo_default_branch)
+    edges, unresolved = build_hard_edges(prs, repo_default_branch, rules, repo)
 
     acyclic, cyclic = find_cycles_and_acyclic_order_candidates(numbers, edges)
     cyclic_set = set(cyclic)
@@ -393,9 +333,9 @@ def sequence(
     solved_numbers = [p.number for p in solved_prs]
 
     tiers_numbers = layer_into_tiers(solved_numbers, solved_edges)
-    file_overlaps = find_file_overlaps(solved_prs, solved_edges)
+    file_overlaps = find_file_overlaps(solved_prs, solved_edges, rules)
     file_overlap_pairs = {frozenset(o["prs"]) for o in file_overlaps}
-    package_overlaps = find_package_overlaps(solved_prs, solved_edges, file_overlap_pairs)
+    package_overlaps = find_package_overlaps(solved_prs, solved_edges, file_overlap_pairs, rules)
 
     preds: dict[int, list[tuple[int, str]]] = {n: [] for n in solved_numbers}
     succs: dict[int, list[tuple[int, str]]] = {n: [] for n in solved_numbers}
@@ -412,10 +352,10 @@ def sequence(
             hard_constraints = [f"must follow #{a} ({kind})" for a, kind in preds[number]]
             hard_constraints += [f"must precede #{b} ({kind})" for b, kind in succs[number]]
             rebase_flag = bool(set(p.changed_files) & earlier_files)
-            blocked = gate_blocked(p, blocking_branches, blocks_all_branches)
+            blocked = gate_blocked(p, blocking_branches, blocks_all_branches, rules)
             warnings = []
             if blocked:
-                warnings.append("gate_blocked: an open e2e-failure issue blocks merging on this branch")
+                warnings.append(f"gate_blocked: an open {rules.gate.failure_issue_label} issue blocks merging on this branch")
             if p.files_truncated:
                 warnings.append("files_truncated: changed_files is cut off at the fetch limit, so this PR's "
                                 "classification, overlaps and rebase_flag may be incomplete")
@@ -425,7 +365,7 @@ def sequence(
                 "rebase_flag": rebase_flag,
                 "warnings": warnings,
                 "gate_blocked": blocked,
-                "file_classification": p.file_classification(),
+                "file_classification": p.file_classification(rules),
             })
         earlier_files |= {f for n in tier_numbers for f in by_number[n].changed_files}
         tiers_out.append({"tier": tier_index, "prs": tier_prs_out})

@@ -51,3 +51,7 @@ between any two PRs, and ordering them is the agent's call — Slack context, mn
 history, whatever the maintainer said they care about this session — not this tool's.
 
 It has no GitHub or Slack access of its own: a pure function over its input, called once per queue-build.
+
+What counts as a generated file, API surface, critical path or generated-file input, and what the branch gate is,
+comes from the organisation pack (`maintainer:` in `org/org.yaml`, read by `pack.py`). Unknown keys are an error. With no
+pack the tool still runs: every file reads `STANDARD` and no PR is gate-blocked, and the result says `pack: none`.
