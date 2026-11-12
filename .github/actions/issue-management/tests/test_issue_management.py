@@ -40,7 +40,12 @@ def issue(labels=(), created=400, comments=(), events=(), milestone=None):
             nodes.append({
                 "__typename": "CrossReferencedEvent",
                 "willCloseTarget": e[3] if len(e) > 3 else False,
-                "source": {"number": e[1], "merged": True, "mergedAt": ago(e[2])},
+                "source": {
+                    "number": e[1],
+                    "state": e[4] if len(e) > 4 else "MERGED",
+                    "merged": (e[4] if len(e) > 4 else "MERGED") == "MERGED",
+                    "mergedAt": ago(e[2]) if (e[4] if len(e) > 4 else "MERGED") == "MERGED" else None,
+                },
             })
     return {
         "number": 1,
@@ -77,11 +82,28 @@ class WaitingOnReporter(unittest.TestCase):
     def test_reporter_reply_resets(self):
         i = issue(["needs-info", "stale"], comments=[(3, USER)],
                   events=[("label", "needs-info", 40), ("label", "stale", 15)])
-        self.assertEqual(decide(i), [("unlabel", "stale")])
+        self.assertEqual(decide(i), [("unlabel", "stale"), ("unlabel", "needs-info")])
+
+    def test_reply_removes_needs_info_even_when_exempt(self):
+        i = issue(["needs-info", "no-stale"], comments=[(3, USER)], events=[("label", "needs-info", 20)])
+        self.assertEqual(decide(i), [("unlabel", "needs-info")])
+
+    def test_second_request_starts_a_fresh_clock(self):
+        # Asked 60 days ago, answered 50 days ago, asked again 20 days ago with no reply since.
+        i = issue(["needs-info"], comments=[(50, USER)],
+                  events=[("label", "needs-info", 60), ("label", "needs-info", 20)])
+        self.assertEqual([(a[0], a[1]) for a in decide(i)], [("label", "stale")])
 
     def test_maintainer_comment_is_not_a_reply(self):
         i = issue(["needs-info"], comments=[(10, MAINT)], events=[("label", "needs-info", 15)])
         self.assertEqual([a[0] for a in decide(i)], ["label"])
+
+    def test_stale_from_another_rule_does_not_close(self):
+        # Idle-untriaged marked it stale 100 days ago; needs-info was asked 20 days ago with no reply.
+        i = issue(["needs-info", "stale"], events=[("label", "stale", 100), ("label", "needs-info", 20)])
+        acts = decide(i)
+        self.assertEqual([a[0] for a in acts], ["unlabel", "label"])
+        self.assertTrue(all(a[0] != "close" for a in acts))
 
     def test_exempt_never_closes(self):
         i = issue(["needs-info", "stale", "release-high"],
@@ -111,6 +133,13 @@ class PossiblyResolved(unittest.TestCase):
         i = issue(["possibly-resolved"], comments=[(2, USER)], events=[("label", "possibly-resolved", 5)])
         self.assertEqual(decide(i), [("unlabel", "possibly-resolved")])
 
+    def test_open_pr_in_flight_blocks(self):
+        i = issue(events=[("ref", 99, 10), ("ref", 100, 0, False, "OPEN")], created=30)
+        self.assertEqual(decide(i), [])
+
+    def test_pr_merged_before_the_issue_existed_is_ignored(self):
+        self.assertEqual(decide(issue(events=[("ref", 99, 40)], created=30)), [])
+
     def test_never_closes(self):
         acts = decide(issue(events=[("ref", 99, 400)], created=500))
         self.assertTrue(all(a[0] != "close" for a in acts))
@@ -136,6 +165,35 @@ class IdleUntriaged(unittest.TestCase):
     def test_never_closes(self):
         acts = decide(issue(["triage", "stale"], created=900, events=[("label", "stale", 400)]))
         self.assertTrue(all(a[0] != "close" for a in acts))
+
+
+class Digest(unittest.TestCase):
+    def queue(self, issues, cfg=CFG):
+        return [(i["number"], idle) for i, idle in lifecycle.untriaged_queue(issues, NOW, cfg)]
+
+    def numbered(self, number, **kwargs):
+        i = issue(**kwargs)
+        i["number"] = number
+        return i
+
+    def test_lists_untriaged_oldest_first(self):
+        issues = [self.numbered(1, labels=["triage"], created=10), self.numbered(2, labels=["triage"], created=90)]
+        self.assertEqual(self.queue(issues), [(2, 90), (1, 10)])
+
+    def test_skips_prioritised_milestoned_and_untriaged_issues(self):
+        issues = [
+            self.numbered(1, labels=["triage", "release-low"]),
+            self.numbered(2, labels=["triage"], milestone={"title": "m"}),
+            self.numbered(3, labels=["bug"]),
+        ]
+        self.assertEqual(self.queue(issues), [])
+
+    def test_human_comment_resets_idle_days(self):
+        issues = [self.numbered(1, labels=["triage"], created=90, comments=[(5, MAINT)])]
+        self.assertEqual(self.queue(issues), [(1, 5)])
+
+    def test_exempt_issue_is_still_untriaged(self):
+        self.assertEqual(self.queue([self.numbered(1, labels=["triage", "no-stale"], created=20)]), [(1, 20)])
 
 
 class Config(unittest.TestCase):
@@ -165,6 +223,12 @@ class Config(unittest.TestCase):
     def test_rejects_unknown_comment_field(self):
         with self.assertRaisesRegex(ValueError, "warning_comment"):
             self.load({"warning_comment": "closes in {when}"})
+
+    def test_rejects_bad_digest_limit(self):
+        for bad in (-1, 201, "25", True):
+            with self.assertRaises(ValueError, msg=bad):
+                self.load({"digest_limit": bad})
+        self.assertEqual(self.load({"digest_limit": 0})["digest_limit"], 0)
 
     def test_rejects_empty_managed_label(self):
         with self.assertRaises(ValueError):
