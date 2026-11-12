@@ -15,7 +15,7 @@ kyverno-assistant is a [Hermes profile distribution](https://hermes-agent.nousre
 
 ## What it can and can't do
 
-- Reads anything on `KYVERNO_REPO`: PRs, diffs, reviews, labels, CODEOWNERS, milestones,
+- Reads anything on `ASSISTANT_REPO`: PRs, diffs, reviews, labels, CODEOWNERS, milestones,
   issues, Discussions, security/Dependabot alerts, Actions logs. Reads the configured Slack
   channel.
 - Using the maintainer's own `REPO_GITHUB_TOKEN`: adds labels, posts comments, requests changes,
@@ -132,12 +132,12 @@ See `profiles/maintainer/skills/repo-context/SKILL.md` for the full codegen/CI r
 
 ## Why labels and CODEOWNERS are never hardcoded
 
-`KYVERNO_REPO` can point at `kyverno/kyverno` or a sandbox repo, each with its own label set
+`ASSISTANT_REPO` can point at `kyverno/kyverno` or a sandbox repo, each with its own label set
 and CODEOWNERS file. `repo-context` resolves both live every session (`list_label`,
 `get_file_contents` on `CODEOWNERS`) rather than assuming it already knows a repo's
 conventions — the same principle extends to `AGENTS.md`/`ARCHITECTURE.md` (cached into
 Mnemosyne by `scripts/install.sh`, recalled instead of re-fetched) and to arbitrary repo
-questions (`search_code`, scoped with `repo:${KYVERNO_REPO}` explicitly — it is not
+questions (`search_code`, scoped with `repo:${ASSISTANT_REPO}` explicitly — it is not
 auto-scoped).
 
 `search_code` approximates "what would this break" via text search — no real call graph, so

@@ -30,7 +30,7 @@ One image holds two assistants. Each has its own sandbox, its own GitHub token a
 | Can write to GitHub | Comments, labels, reviews, after you confirm each one | A comment on an issue or PR, and a pull request from your own fork, after you confirm the text |
 | Never | Merges (refused by the proxy, whatever the token can do) | Merges, approves, submits a formal review |
 | Token | Fine-grained, scoped to the repo ([details](#tokens)) | Your own account's token, or a `gh` sign-in |
-| Dashboard | Yes (`http://127.0.0.1:9219/kyverno?profile=kyverno`) | No |
+| Dashboard | Yes (`http://127.0.0.1:9219/maintainer?profile=kyverno`) | No |
 
 If you run the launcher without `--profile` it picks for you: the one you already have a sandbox for, otherwise it
 asks (1 maintainer, 2 contributor). Both can coexist; add `--profile` to choose.
@@ -150,11 +150,11 @@ Wrong, expired or revoked? A 404 means the token cannot see the repo. Replace it
 ## Letting it push to your fork
 
 Off by default. Without it, the assistant commits in the sandbox and hands you a patch to apply and push yourself.
-With it, it can run `git push` to branches of **your own forks** (`kyverno`, `website`, `policies`; set
-`KYVERNO_PUSH_REPOS` for others) and, as a maintainer, to the repo you manage, and nowhere else:
+With it, it can run `git push` to branches of **your own fork** of the repository you named (`ASSISTANT_REPO`; set
+`ASSISTANT_PUSH_REPOS` for more) and, as a maintainer, to the repo you manage, and nowhere else:
 
 ```bash
-KYVERNO_PUSH_REPOS="kyverno" kyverno --profile contributor --push-to-fork
+ASSISTANT_PUSH_REPOS="repo-a repo-b" container/kyverno --profile contributor --push-to-fork
 ```
 
 It asks for a push token once (your `gh` sign-in, or a fine-grained token with Contents Read and write on your fork)
@@ -196,7 +196,7 @@ With `--no-openshell`, the clones and toolchains live in a Docker volume that ou
 | `…already exists and keeps running the image it was made from` | The sandbox is from an older image. Add `--upgrade` |
 | Started the wrong assistant | It tells you which it chose. Pass `--profile maintainer` or `--profile contributor` |
 | `--build needs a checkout of the repository` | You are using the launcher extracted from an image. Use [Case 4](#case-4-building-from-a-clone), or drop `--build` |
-| `could not tell whose forks to allow` | An older launcher. Refresh it (see [Upgrading](#upgrading)); or set `KYVERNO_PUSH_LOGIN` to your username |
+| `could not tell whose forks to allow` | An older launcher. Refresh it (see [Upgrading](#upgrading)); or set `ASSISTANT_PUSH_LOGIN` to your username |
 | The banner says `github … connecting` | Normal for a moment: it connects after the banner is drawn |
 | The agent cannot find `find_issues` or the GitHub tools | An older image hides them from the model. Upgrade |
 | The agent runs `git clone` and then cannot push | An older image. Upgrade; the assistant should use `kyverno-workspace owner/repo` |

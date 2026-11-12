@@ -22,8 +22,9 @@ class OrgFileError(RuntimeError):
 def candidate_paths() -> list:
     
     paths = []
-    if os.environ.get("KYVERNO_ORG_FILE"):
-        paths.append(Path(os.environ["KYVERNO_ORG_FILE"]))
+    explicit = os.environ.get("ASSISTANT_ORG_FILE") or os.environ.get("KYVERNO_ORG_FILE")
+    if explicit:
+        paths.append(Path(explicit))
     paths.append(hermes_home() / "org" / "org.yaml")
     return paths
 

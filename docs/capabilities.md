@@ -232,7 +232,7 @@ won't regenerate now-stale generated files.
 ## Seeing results on the dashboard
 
 Everything the agent presents — PR queue, stale PRs, issue triage, Discussions — and
-every action you confirm is also written to the Kyverno tab of `hermes -p kyverno
+every action you confirm is also written to the Maintainer tab of `hermes -p kyverno
 dashboard`: linked items with verdicts, related PRs/issues, drafted comments, and an
 activity log. Use it to keep the full picture in front of you instead of scrolling the
 chat. See the README's "The dashboard".

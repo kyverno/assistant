@@ -45,7 +45,7 @@ milestone/fixed facts — assumed loaded, not re-derived here.
   configured.
 - `mnemosyne_recall`/`_triple_query` (read), `mnemosyne_remember`/`_triple_add`
   (write) — see `repo-context`'s memory reference.
-- Env: `KYVERNO_REPO`, `MAINTAINER_GITHUB_LOGIN`, `SLACK_HOME_CHANNEL`.
+- Env: `ASSISTANT_REPO`, `MAINTAINER_GITHUB_LOGIN`, `SLACK_HOME_CHANNEL`.
 
 ## Procedure: build the merge-sequence recommendation
 
@@ -66,7 +66,7 @@ search_query="label:ready-for-review", detail="digest", limit=60)`, rank
 client-side, take the top 10, then `fetch_pr_details(repo, pr_numbers=[...])`
 for just those 10. State the slice size against the digest's own `total_count`.
 
-1. **Fetch**: `fetch_pr_candidates(repo=KYVERNO_REPO, search_query="label:<ready label>")`
+1. **Fetch**: `fetch_pr_candidates(repo=ASSISTANT_REPO, search_query="label:<ready label>")`
    once for each label in the pack's `readiness.ready_labels` (`repo_pack`) — or one call
    with the labels comma-joined if the tool's search syntax supports an OR (check its
    schema). No ready labels in the pack means the repository has not adopted the
@@ -164,11 +164,11 @@ for just those 10. State the slice size against the digest's own `total_count`.
      suggest the gate's `bypass_label` to the maintainer — never imply it's already safe,
      never apply it yourself.
 5. **Diagnose every entry whose label means "a bot's PR needs a human look"** (the pack's
-   `facts` name it; Kyverno's is `needs-review`) — `pull_request_read(method="get_reviews")`
+   `facts` name it) — `pull_request_read(method="get_reviews")`
    for Copilot's verdict, `get_check_runs`/`get_status`/`get`'s mergeable-state for a
    conflict. Name the actual cause ("Copilot flagged the changelog note as missing,"
-   not "not approved yet"). For a major bump (Kyverno: `major-bump`), pull the module's own `list_releases`
-   and `search_code` its real call sites in `KYVERNO_REPO` — the actual blast radius.
+   not "not approved yet"). For a major bump (the pack's `facts` name its label), pull the module's own `list_releases`
+   and `search_code` its real call sites in `ASSISTANT_REPO` — the actual blast radius.
    A bump of a module in the pack's `generated_inputs.dependency_modules` additionally
    needs: (a) `search_code` for usage of its generated types or aliases in hand-written
    code; (b) whether this PR's own diff already includes the matching regenerated outputs — a
@@ -241,7 +241,7 @@ queue's file overlap, naming specific PRs and paths.
 ## Output format
 
 - Every PR or issue mentioned gets a real link:
-  `https://github.com/${KYVERNO_REPO}/pull/<n>` or `/issues/<n>` — not a bare `#n`.
+  `https://github.com/${ASSISTANT_REPO}/pull/<n>` or `/issues/<n>` — not a bare `#n`.
 - Every candidate uses the same per-position shape regardless of label or author:
   link, what it is, the cited reason(s), any `warnings`. No position gets special
   headings or verdict styling another doesn't.

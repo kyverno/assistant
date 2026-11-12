@@ -229,7 +229,7 @@ Type `/help` for the chat commands.
 |---|---|
 | Start, or come back later | `container/kyverno` |
 | Open a second chat at the same time | `container/kyverno` in another terminal |
-| Open the dashboard | http://127.0.0.1:9219/kyverno?profile=kyverno (the launcher prints it; see [the dashboard](#the-dashboard)) |
+| Open the dashboard | http://127.0.0.1:9219/maintainer?profile=kyverno (the launcher prints it; see [the dashboard](#the-dashboard)) |
 | Leave | Close the chat. The sandbox keeps running, idle |
 | Stop the sandbox | `openshell sandbox stop kyverno-assistant` (`container/kyverno` starts it again) |
 | See whether it is running | `openshell sandbox list` |
@@ -355,7 +355,7 @@ chat or copy links by hand. It runs inside the sandbox, and the launcher forward
 prints the address:
 
 ```
-http://127.0.0.1:9219/kyverno?profile=kyverno
+http://127.0.0.1:9219/maintainer?profile=kyverno
 ```
 
 Pick **Kyverno** in the sidebar under Plugins. It refreshes every 15 seconds. Keep it open next to the chat: it fills
@@ -368,9 +368,9 @@ when the agent answers a queue, stale-PR, issue-triage or Discussions request, n
 | **Detail panel** | Summary, unresolved threads, a graph of related PRs and issues, and any drafted comment awaiting your confirmation, with a copy button. |
 | **Activity** | Every action you confirmed (approvals, comments, nudges, closes, deferrals) with a timestamp and a link. |
 
-The Kyverno tab is read-only. Confirming and acting still happen in the chat. It is reachable only from your own
+The Maintainer tab is read-only. Confirming and acting still happen in the chat. It is reachable only from your own
 laptop (the port is forwarded to `127.0.0.1` explicitly), and port 9219 is used so it does not clash with a Hermes
-dashboard on 9119. Set `KYVERNO_DASHBOARD_PORT` to change it. Hermes protects the dashboard itself: a session token
+dashboard on 9119. Set `ASSISTANT_DASHBOARD_PORT` to change it. Hermes protects the dashboard itself: a session token
 that changes on every start, a check that the request's `Host` matches the address it listens on (against DNS
 rebinding), and cross-origin requests only from localhost. It is still Hermes' whole dashboard, not just our tab: its
 Settings and chat pages are served too, and the Settings pages can show what is in the sandbox's settings file, which
@@ -474,7 +474,7 @@ container/               the sandbox: Dockerfile, launcher, policy, provider pro
 .github/workflows/       builds and publishes the sandbox image
 profiles/maintainer/     the maintainer profile: distribution.yaml, SOUL.md, config.yaml, hooks/,
                          plugins/, skills/, cron/, sandbox/ (the host install's terminal image and policy)
-profiles/contributor/    the contributor profile: same shape, plus one plugin and scripts/kyverno-watch.py
+profiles/contributor/    the contributor profile: same shape, plus one plugin and scripts/contributor-watch.py
 container/org/           the organisation pack (org.yaml: everything specific to the organisation), installed
                          into both profiles as org/
 scripts/install.sh       the host install: idempotent installer, --profile maintainer|contributor [NAME]
@@ -528,7 +528,7 @@ The files below are the maintainer profile's, under `profiles/maintainer/`.
 - `profiles/maintainer/plugins/repo-intel/`: the fetch tools (`fetch_pr_candidates`, `fetch_file_diff_overlap` and the
   issue equivalents, one batched call over GitHub's GraphQL and REST APIs) `sequence_prs` (a hard-dependency graph
   with cycle detection and topological layering into tiers), and `repo_pack` (the organisation pack's rules and facts).
-- `profiles/maintainer/plugins/kyverno-dashboard/`: the `update_dashboard` tool and the Kyverno tab in
+- `profiles/maintainer/plugins/maintainer-dashboard/`: the `update_dashboard` tool and the Maintainer tab in
   `hermes dashboard`.
 
 **Skills**

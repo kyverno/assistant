@@ -9,7 +9,7 @@ platforms: [linux, macos, windows]
 
 # dashboard-sync Skill
 
-The maintainer's dashboard (`hermes -p kyverno dashboard`, Kyverno tab) shows
+The maintainer's dashboard (`hermes -p kyverno dashboard`, Maintainer tab) shows
 queues, triage results, Discussions and confirmed actions as linked items with
 verdicts and related PRs/issues, so nothing has to be scrolled back to or
 copy-pasted from the session. The other skills call this one at the points they
@@ -46,7 +46,7 @@ Write the answer first, then push. Keep the call small — it costs tokens.
    A single-PR brief sends items only.
 3. `section: "session"` — `focus`, `milestone`, `milestone_due`, `gate`, `counts`, only
    when they changed.
-4. End the reply with one line, e.g. "Added 12 items to your dashboard (Kyverno tab) —
+4. End the reply with one line, e.g. "Added 12 items to your dashboard (Maintainer tab) —
    open it to review."
 
 ## Procedure: log an action
@@ -70,6 +70,6 @@ Only after the write landed, never for a draft:
 
 ## Verification
 
-- After a presentation, the Kyverno tab lists every item named in the answer
+- After a presentation, the Maintainer tab lists every item named in the answer
   with the same verdict.
 - After a confirmed action, the Activity tab shows it once, with a link.

@@ -60,16 +60,16 @@ select_profile() {
       HERMES_PROFILE=kyverno; PROVIDER=kyverno-repo-github; PROVIDER_FILE=repo-github.yaml
       TOKEN_KEY=REPO_GITHUB_TOKEN; LOGIN_VAR=MAINTAINER_GITHUB_LOGIN
       DEFAULT_NAME=kyverno-assistant; DEFAULT_DOCKER_NAME=kyverno-assistant-docker
-      REPO_ASK="Repo to manage (owner/repo) [kyverno/kyverno]: "
+      REPO_ASK="Repo to manage (owner/repo): "
       TOKEN_SCOPE="the assistant still cannot merge."
       TOKEN_PASTE_HELP="Paste your fine-grained GitHub token (see README step 1)." ;;
     contributor)
       HERMES_PROFILE=kyverno-contributor; PROVIDER=kyverno-contributor-github; PROVIDER_FILE=repo-github-contributor.yaml
       TOKEN_KEY=CONTRIBUTOR_REPO_GITHUB_TOKEN; LOGIN_VAR=CONTRIBUTOR_GITHUB_LOGIN
       DEFAULT_NAME=kyverno-contributor; DEFAULT_DOCKER_NAME=kyverno-contributor-docker
-      REPO_ASK="Repo you contribute to (owner/repo) [kyverno/kyverno]: "
+      REPO_ASK="Repo you contribute to (owner/repo): "
       TOKEN_SCOPE="the assistant can only read, comment, and open a PR from your fork."
-      TOKEN_PASTE_HELP="Paste a fine-grained GitHub token of your own account (public repositories, read-only, is enough to read; commenting, and opening a PR, on kyverno repositories need a token that can write there)." ;;
+      TOKEN_PASTE_HELP="Paste a fine-grained GitHub token of your own account (public repositories, read-only, is enough to read; commenting, and opening a PR, on the repository need a token that can write there)." ;;
     *) echo "unknown profile '$1' (maintainer or contributor)" >&2; exit 2 ;;
   esac
 }
@@ -77,7 +77,7 @@ select_profile() {
 # What is yours across an --upgrade: memory, chat history, your repo and username, the Copilot sign-in, the model you
 # chose. Paths under the profile directory. The profile itself (skills, hooks, plugins, settings) comes from the new image.
 # shellcheck disable=SC2034  # used by the launchers that source this file
-STATE_FILES=".env config.yaml .kyverno-model-chosen mnemosyne/data memories sessions kyverno-dashboard kyverno-contributor state.db state.db-wal state.db-shm"
+STATE_FILES=".env config.yaml .kyverno-model-chosen mnemosyne/data memories sessions kyverno-dashboard maintainer-dashboard kyverno-contributor contributor-state state.db state.db-wal state.db-shm"
 
 # Build the image from this checkout (--build), or pull it when it is missing or --upgrade asks for the newest.
 ensure_image() {
@@ -109,8 +109,8 @@ ensure_image() {
 # token_note_gh (printed under the gh option) and token_note_paste (printed before the paste prompt), and picks the
 # default option in TOKEN_DEFAULT (1 = gh, 2 = paste).
 acquire_github_token() {
-  [ -z "$REPO" ] && read -r -p "  ${REPO_ASK:-Repo to manage (owner/repo) [kyverno/kyverno]: }" REPO
-  REPO="${REPO:-kyverno/kyverno}"
+  [ -z "$REPO" ] && read -r -p "  ${REPO_ASK:-Repo to manage (owner/repo): }" REPO
+  [ -n "$REPO" ] || { fail "no repository: type owner/repo, or set ASSISTANT_REPO"; exit 1; }
   valid_repo "$REPO" || { fail "'$REPO' is not an owner/repo name (letters, digits, dots, dashes, underscores)"; exit 1; }
   PAT=""
   local method="paste" choice="" code

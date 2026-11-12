@@ -1,4 +1,4 @@
-/* Kyverno dashboard. Built entirely on the host's theme tokens (--color-*, --radius,
+/* Maintainer dashboard. Built entirely on the host's theme tokens (--color-*, --radius,
    --font-mono) so it follows whatever Hermes theme is active. No palette of its own. */
 
 .kv {

@@ -9,7 +9,7 @@ platforms: [linux, macos, windows]
 
 # issue-triage Skill
 
-Reads and relates issues on `KYVERNO_REPO` — classification, which PR(s) address one,
+Reads and relates issues on `ASSISTANT_REPO` — classification, which PR(s) address one,
 how far along it is, and the wider issue graph. Relies on `repo-context` for live
 labels/CODEOWNERS — assumed loaded, not re-derived here. Taking an action on an issue
 (label, close, assign, raise a new one) is `issue-actions`' job, not this skill's.
@@ -41,7 +41,7 @@ labels/CODEOWNERS — assumed loaded, not re-derived here. Taking an action on a
 - `mnemosyne_recall` — `repo-doc:<path>` package docs for step 2's grounding (same
   cache `repo-context`/`pr-queue` already use), prior triage decisions, duplicate
   rulings, contributor patterns.
-- Env: `KYVERNO_REPO`, `MAINTAINER_GITHUB_LOGIN`, `SLACK_HOME_CHANNEL`.
+- Env: `ASSISTANT_REPO`, `MAINTAINER_GITHUB_LOGIN`, `SLACK_HOME_CHANNEL`.
 
 ## Procedure: triage queue
 

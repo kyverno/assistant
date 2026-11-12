@@ -6,11 +6,11 @@
 #
 # It copies the launcher out of the image, so the launcher and the image it starts come from the same release, runs it,
 # and removes the copy. Every argument goes to the launcher (container/kyverno --help). Besides the arguments, the
-# image comes from --image or $KYVERNO_IMAGE, else ghcr.io/kyverno/assistant:latest.
+# image comes from --image or $ASSISTANT_IMAGE, else ghcr.io/kyverno/assistant:latest.
 set -eu
 
 main() {
-  image="${KYVERNO_IMAGE:-ghcr.io/kyverno/assistant:latest}"
+  image="${ASSISTANT_IMAGE:-${KYVERNO_IMAGE:-ghcr.io/kyverno/assistant:latest}}"
   prev=""
   for a in "$@"; do
     [ "$prev" = "--image" ] && image="$a"
@@ -30,7 +30,7 @@ main() {
   trap 'rm -rf "$dir"' EXIT INT TERM
   docker run --rm "$image" tar -C /opt/kyverno -c launcher | tar -x -C "$dir"
 
-  KYVERNO_IMAGE="$image" "$dir/launcher/kyverno" "$@"
+  ASSISTANT_IMAGE="$image" "$dir/launcher/kyverno" "$@"
 }
 
 main "$@"

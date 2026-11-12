@@ -1,6 +1,6 @@
 """Background change detection for the contributor's PRs, issues and discussions.
 
-main() is the model-free scheduled check (run through scripts/kyverno-watch.py by `hermes cron --no-agent`):
+main() is the model-free scheduled check (run through scripts/contributor-watch.py by `hermes cron --no-agent`):
 it prints one line per new event and appends them to a local inbox. read_inbox() shows the inbox at the
 start of a session. The first run only records a baseline.
 """
@@ -181,7 +181,7 @@ def main(argv) -> int:
     for e in found:
         print(f"{e['text']} {e['url']}".strip())
     if found and "--notify" in argv:
-        notify("Kyverno contributor", f"{len(found)} update(s), first: {found[0]['text']}")
+        notify("Contributor assistant", f"{len(found)} update(s), first: {found[0]['text']}")
     if old is None:
         print(f"watch: baseline saved ({len(new['prs'])} open PRs); later runs report changes", file=sys.stderr)
     return 0
@@ -198,4 +198,4 @@ def read_inbox(mark_read: bool = True, limit: int = 30) -> Dict[str, Any]:
         path.write_text("".join(json.dumps({**r, "read": True}) + "\n" for r in rows[-500:]))
     started = (journey.base_dir() / "watch_state.json").exists()
     return {"success": True, "unread": len(unread), "events": unread[-limit:],
-            "watch": "running" if started else "not started: no baseline yet (enable the watch job or run scripts/kyverno-watch.py)"}
+            "watch": "running" if started else "not started: no baseline yet (enable the watch job or run scripts/contributor-watch.py)"}

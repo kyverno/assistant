@@ -101,7 +101,7 @@ skips the prompts and works this way from the start.
 |---|---|---|
 | `REPO_GITHUB_TOKEN` | yes | Token from step 2 |
 | `MAINTAINER_GITHUB_LOGIN` | yes | Your GitHub username |
-| `KYVERNO_REPO` | yes | `owner/repo` the assistant manages (default `kyverno/kyverno`) |
+| `ASSISTANT_REPO` | yes | `owner/repo` the assistant manages (default `kyverno/kyverno`) |
 | `ANTHROPIC_API_KEY`, `COPILOT_GITHUB_TOKEN`, … | no | Optional model keys; Hermes can also sign in to a provider for you (step 5) |
 | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN` | Slack only | Bot and app-level tokens |
 | `SLACK_ALLOWED_USERS` | Slack only | Your Slack member ID |
@@ -165,7 +165,7 @@ hermes -p kyverno dashboard
 ```
 
 Pick **Kyverno** in the sidebar under Plugins, or open
-`http://127.0.0.1:9119/kyverno?profile=kyverno`. It refreshes every 15 seconds. Keep it open next to
+`http://127.0.0.1:9119/maintainer?profile=kyverno`. It refreshes every 15 seconds. Keep it open next to
 the chat: it fills when the agent answers a queue, stale-PR, issue-triage or Discussions request,
-not in the background. The tabs are described in the [README](../README.md#the-dashboard). The Kyverno tab is
+not in the background. The tabs are described in the [README](../README.md#the-dashboard). The Maintainer tab is
 read-only; confirming and acting still happen in the chat.

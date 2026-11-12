@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cron entry point (hermes cron --no-agent --script kyverno-watch.py): runs the contributor plugin's
+"""Cron entry point (hermes cron --no-agent --script contributor-watch.py): runs the contributor plugin's
 watch check. Prints one line per new event; empty output stays silent."""
 import importlib.util
 import os

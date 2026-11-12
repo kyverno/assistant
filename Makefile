@@ -41,4 +41,4 @@ scan: image ## Build and scan the local image for fixable critical vulnerabiliti
 check: lint test ## Run linters and the Dockerfile integration checks
 
 run: image ## Build and launch the sandbox using the local image
-	KYVERNO_IMAGE=$(IMAGE):$(TAG) ./container/kyverno $(ARGS)
+	ASSISTANT_IMAGE=$(IMAGE):$(TAG) ./container/kyverno $(ARGS)

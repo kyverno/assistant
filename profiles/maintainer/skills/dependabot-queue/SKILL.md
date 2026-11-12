@@ -35,14 +35,14 @@ skill loads only when actually asked for.
   `pull_request_read`, `list_discussions`.
 - `mcp-slack`: `conversations_history` — only if configured.
 - `mnemosyne_recall`/`_triple_query` — see `repo-context`'s memory reference.
-- Env: `KYVERNO_REPO`, `SLACK_HOME_CHANNEL`.
+- Env: `ASSISTANT_REPO`, `SLACK_HOME_CHANNEL`.
 
 ## Procedure: Dependabot queue
 
 Every Dependabot PR appears exactly once.
 
 1. **Fetch by author, not label.** Ranking (security first, then severity) is
-   relational, not search-expressible: `fetch_pr_candidates(repo=KYVERNO_REPO,
+   relational, not search-expressible: `fetch_pr_candidates(repo=ASSISTANT_REPO,
    search_query="author:app/dependabot", detail="digest", limit=60)`, rank by
    security label/`GHSA-`/`CVE-` mention first, then `semver_level` (major/minor/
    patch, `unknown` treated as an unconfirmed major), take the top 10, then
@@ -62,7 +62,7 @@ Every Dependabot PR appears exactly once.
    bumps for its severity; a refused call means this token can't see alerts — say so
    and rely on the PR body.
 4. **Risk, per PR**, each claim cited:
-   - Go module: `search_code` the import path in `KYVERNO_REPO`, group call sites by
+   - Go module: `search_code` the import path in `ASSISTANT_REPO`, group call sites by
      package; hits in files the pack classes as `critical` (`repo_pack`'s `file_classes`)
      are elevated risk. For a major or minor bump, read the release notes
      the PR body embeds and name any breaking change or deprecation that touches those

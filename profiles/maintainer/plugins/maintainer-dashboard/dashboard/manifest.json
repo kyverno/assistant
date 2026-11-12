@@ -1,11 +1,11 @@
 {
-  "name": "kyverno-dashboard",
-  "label": "Kyverno",
+  "name": "maintainer-dashboard",
+  "label": "Maintainer",
   "description": "Maintainer workbench: PR queue, issue triage, Discussions and actions, kept current by the agent",
   "icon": "Shield",
   "version": "0.1.0",
   "tab": {
-    "path": "/kyverno",
+    "path": "/maintainer",
     "position": "after:skills"
   },
   "entry": "dist/index.js",

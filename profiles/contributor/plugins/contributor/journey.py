@@ -24,7 +24,16 @@ MAX_TEXT = 300
 
 
 def base_dir() -> Path:
-    return Path(os.environ.get("KYVERNO_CONTRIBUTOR_HOME") or hermes_home() / "kyverno-contributor")
+    explicit = os.environ.get("ASSISTANT_CONTRIBUTOR_HOME") or os.environ.get("KYVERNO_CONTRIBUTOR_HOME")
+    if explicit:
+        return Path(explicit)
+    new, old = hermes_home() / "contributor-state", hermes_home() / "kyverno-contributor"
+    if old.is_dir() and not new.exists():
+        try:
+            old.rename(new)    # the folder from before the rename: same files, new name
+        except OSError:
+            return old
+    return new
 
 
 def path() -> Path:

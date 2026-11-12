@@ -35,7 +35,7 @@ labelled `needs-author-action`, and the ones the stale sweep has since marked
   and posting the recommendation comment.
 - `issue-actions`' guardrail and assign/unassign action — the real write for
   "Reassign," on the closing issue, never the PR.
-- Env: `KYVERNO_REPO`.
+- Env: `ASSISTANT_REPO`.
 
 ## Procedure: stale PR decisions
 
@@ -92,7 +92,7 @@ slice. Fetch once they choose.
 
 ## Procedure: needs-author-action status (on request, before staling)
 
-`fetch_pr_candidates(repo=KYVERNO_REPO, search_query="label:needs-author-action")`
+`fetch_pr_candidates(repo=ASSISTANT_REPO, search_query="label:needs-author-action")`
 — `include_stale_detail` stays false, nothing has staled yet. Per PR: the blocker
 kind (the readiness comment's machine-readable marker, via `pull_request_read`),
 days until `stale` from the last author activity, and which PRs have had the

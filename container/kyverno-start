@@ -5,9 +5,11 @@
 #   openshell sandbox exec --tty -- kyverno-start [--profile maintainer|contributor] [--repo R] [--login L]
 # It is idempotent: later runs skip what is already done.
 #
-#   KYVERNO_SETUP_ONLY=1    stop after setup (no sign-in, no chat)
-#   KYVERNO_SKIP_COPILOT=1  don't offer the Copilot sign-in
+#   ASSISTANT_SETUP_ONLY=1    stop after setup (no sign-in, no chat)
+#   ASSISTANT_SKIP_COPILOT=1  don't offer the Copilot sign-in
 set -uo pipefail
+# These settings used to start with KYVERNO_; the old names still work.
+for _v in $(compgen -v KYVERNO_); do _n="ASSISTANT_${_v#KYVERNO_}"; [ -n "${!_n:-}" ] || export "$_n=${!_v}"; done; unset _v _n
 
 export HERMES_HOME=/opt/hermes-home/.hermes
 export PATH="/opt/hermes-home/.local/bin:$PATH"
@@ -24,7 +26,7 @@ fail() { printf '  \033[31m✗\033[0m %s\n' "$1" >&2; }
 info() { printf '  %s\n' "$1"; }
 step() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 
-REPO="${KYVERNO_REPO:-}"
+REPO="${ASSISTANT_REPO:-}"
 LOGIN=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -38,8 +40,8 @@ done
 
 # One image holds both profiles. Which one this sandbox runs is picked by the launcher.
 case "$KIND" in
-  maintainer) PROFILE=kyverno; LOGIN_VAR=MAINTAINER_GITHUB_LOGIN; REPO_ASK="Repo to manage (owner/repo) [kyverno/kyverno]: " ;;
-  contributor) PROFILE=kyverno-contributor; LOGIN_VAR=CONTRIBUTOR_GITHUB_LOGIN; REPO_ASK="Repo you contribute to (owner/repo) [kyverno/kyverno]: " ;;
+  maintainer) PROFILE=kyverno; LOGIN_VAR=MAINTAINER_GITHUB_LOGIN; REPO_ASK="Repo to manage (owner/repo): " ;;
+  contributor) PROFILE=kyverno-contributor; LOGIN_VAR=CONTRIBUTOR_GITHUB_LOGIN; REPO_ASK="Repo you contribute to (owner/repo): " ;;
   *) echo "unknown profile '$KIND' (maintainer or contributor)" >&2; exit 2 ;;
 esac
 PROFILE_DIR="$HERMES_HOME/profiles/$PROFILE"
@@ -50,7 +52,7 @@ DONE_MARK="$PROFILE_DIR/.kyverno-user-setup"
 step "Checks"
 if [ -d /run/openshell-supervisor-ca ]; then
   RUNTIME=openshell
-elif [ "${KYVERNO_RUNTIME:-}" = docker ]; then
+elif [ "${ASSISTANT_RUNTIME:-}" = docker ]; then
   # container/kyverno --no-openshell: plain Docker. The launcher keeps the keys in a tmpfs file, readable only by
   # this user; kyverno_load_secrets reads them (see kyverno-env).
   RUNTIME=docker
@@ -84,14 +86,18 @@ fi
 
 # --- helpers on the .env file (plain text, no YAML needed) ---
 env_get() {
+  # An ASSISTANT_ key also finds its KYVERNO_ spelling, for a profile made before the rename.
   ENV_FILE="$ENV_FILE" KEY="$1" python3 -c "
 import os
+key = os.environ['KEY']
+keys = [key] + (['KYVERNO_' + key[len('ASSISTANT_'):]] if key.startswith('ASSISTANT_') else [])
+values = {}
 for line in open(os.environ['ENV_FILE']):
     line = line.strip()
     if line and not line.startswith('#') and '=' in line:
         k, _, v = line.partition('=')
-        if k.strip() == os.environ['KEY']:
-            print(v.strip()); break
+        values[k.strip()] = v.strip()
+print(next((values[k] for k in keys if values.get(k)), ''))
 " 2>/dev/null
 }
 env_set() {
@@ -112,11 +118,11 @@ open(path, 'w').write('\n'.join(lines) + '\n')
 step "Settings"
 [ -f "$ENV_FILE" ] || { [ -f "$PROFILE_DIR/.env.EXAMPLE" ] && cp "$PROFILE_DIR/.env.EXAMPLE" "$ENV_FILE" || : > "$ENV_FILE"; }
 # The token is deliberately not in this file. Only who you are and which repo.
-if [ -z "$(env_get KYVERNO_REPO)" ]; then
+if [ -z "$(env_get ASSISTANT_REPO)" ]; then
   [ -z "$REPO" ] && read -r -p "  $REPO_ASK" REPO
-  REPO="${REPO:-kyverno/kyverno}"
+  [ -n "$REPO" ] || { fail "no repository: type owner/repo, or set ASSISTANT_REPO"; exit 1; }
   valid_repo "$REPO" || { fail "'$REPO' is not an owner/repo name (letters, digits, dots, dashes, underscores)"; exit 1; }
-  env_set KYVERNO_REPO "$REPO"
+  env_set ASSISTANT_REPO "$REPO"
 fi
 if [ -z "$(env_get "$LOGIN_VAR")" ]; then
   # The launcher knows the username only in the run that asked for the token. Otherwise ask GitHub who the token
@@ -132,7 +138,7 @@ print(json.load(urllib.request.urlopen(req, timeout=10)).get("login", ""))' 2>/d
     env_set "$LOGIN_VAR" "$LOGIN"
   fi
 fi
-pass "repo $(env_get KYVERNO_REPO), $KIND $(env_get "$LOGIN_VAR")"
+pass "repo $(env_get ASSISTANT_REPO), $KIND $(env_get "$LOGIN_VAR")"
 
 # Hermes hides MCP and plugin tools behind a search step by default. A small model never searches, so it never
 # finds find_issues or the GitHub tools and wanders through the terminal instead. Keep every tool in view. This runs
@@ -151,7 +157,9 @@ for line in open(os.environ["ENV_FILE"]):
     if line and not line.startswith("#") and "=" in line:
         k, _, v = line.partition("=")
         values[k.strip()] = v.strip()
-for var in ("KYVERNO_REPO", "MAINTAINER_GITHUB_LOGIN", "CONTRIBUTOR_GITHUB_LOGIN"):
+if not values.get("ASSISTANT_REPO") and values.get("KYVERNO_REPO"):
+    values["ASSISTANT_REPO"] = values["KYVERNO_REPO"]    # a profile made before the rename
+for var in ("ASSISTANT_REPO", "MAINTAINER_GITHUB_LOGIN", "CONTRIBUTOR_GITHUB_LOGIN"):
     val = values.get(var)
     if not val:
         continue
@@ -165,7 +173,7 @@ PY
   pass "skill instructions resolved to your repo and login"
 fi
 
-if [ "${KYVERNO_SETUP_ONLY:-}" = 1 ]; then
+if [ "${ASSISTANT_SETUP_ONLY:-}" = 1 ]; then
   info "setup only: stopping before sign-in and chat"
   exit 0
 fi
@@ -176,7 +184,7 @@ HAS_PROVIDER_KEY=0
 for v in ANTHROPIC_API_KEY OPENAI_API_KEY NVIDIA_API_KEY; do [ -n "${!v:-}" ] && HAS_PROVIDER_KEY=1; done
 
 NEW_LOGIN=0
-if [ "${KYVERNO_SKIP_COPILOT:-}" != 1 ] && [ -z "$(env_get COPILOT_GITHUB_TOKEN)" ] && [ "$HAS_PROVIDER_KEY" = 0 ]; then
+if [ "${ASSISTANT_SKIP_COPILOT:-}" != 1 ] && [ -z "$(env_get COPILOT_GITHUB_TOKEN)" ] && [ "$HAS_PROVIDER_KEY" = 0 ]; then
   step "GitHub Copilot sign-in"
   info "Open the page it prints in your browser on your laptop, enter the code, and approve."
   info "(To use another model provider instead, quit and start the launcher with --provider anthropic|openai|nvidia.)"

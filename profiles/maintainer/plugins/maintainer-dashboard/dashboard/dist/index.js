@@ -1,8 +1,8 @@
 /**
- * Kyverno maintainer dashboard — Hermes dashboard plugin.
+ * Maintainer dashboard — Hermes dashboard plugin.
  *
  * Renders the state the agent writes through update_dashboard (items / views / actions /
- * session), served by plugin_api.py at /api/plugins/kyverno-dashboard/state. Plain IIFE,
+ * session), served by plugin_api.py at /api/plugins/maintainer-dashboard/state. Plain IIFE,
  * no build step; React comes from window.__HERMES_PLUGIN_SDK__.
  */
 (function () {
@@ -15,7 +15,7 @@
   const h = React.createElement;
   const { useState, useEffect, useMemo, useCallback, useRef } = SDK.hooks;
 
-  const API = "/api/plugins/kyverno-dashboard";
+  const API = "/api/plugins/maintainer-dashboard";
   const POLL_MS = 15000;
   const PAGE = 30;
 
@@ -599,6 +599,6 @@
   }
 
   if (window.__HERMES_PLUGINS__ && typeof window.__HERMES_PLUGINS__.register === "function") {
-    window.__HERMES_PLUGINS__.register("kyverno-dashboard", Page);
+    window.__HERMES_PLUGINS__.register("maintainer-dashboard", Page);
   }
 })();

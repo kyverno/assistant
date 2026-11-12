@@ -1,4 +1,4 @@
-# kyverno-assistant — Hermes profile config.
+# Maintainer assistant — Hermes profile config.
 #
 # Security-critical, hand-edited only. Enforcement is layered, each layer
 # independently verified against the real upstream servers (see
@@ -184,7 +184,7 @@ mcp_servers:
 # already reduced to its verified tool list by mcp_servers.*.tools.include
 # above — this just groups them; it does not do any filtering of its own.
 custom_toolsets:
-  kyverno-assistant-tools:
+  maintainer-tools:
     - mcp-github
     - mcp-slack
     # repo-intel: a bundled plugin (plugins/repo-intel/), not an MCP server. Registers the fetch tools
@@ -192,11 +192,11 @@ custom_toolsets:
     # REPO_GITHUB_TOKEN, replacing N sequential pull_request_read calls with one tool call) and
     # sequence_prs, a pure function over already-fetched PR metadata. See docs/architecture.md.
     - repo-intel
-    # kyverno-dashboard: a bundled plugin (plugins/kyverno-dashboard/). Registers update_dashboard,
+    # maintainer-dashboard: a bundled plugin (plugins/maintainer-dashboard/). Registers update_dashboard,
     # which writes the maintainer's dashboard tab state; no GitHub/Slack access.
-    - kyverno-dashboard
+    - maintainer-dashboard
 
-toolsets: ["kyverno-assistant-tools"]
+toolsets: ["maintainer-tools"]
 
 # `toolsets:` only scopes MCP tool grants. Hermes' built-in tools (terminal,
 # file, browser, code_execution, etc.) ship enabled by default regardless —
@@ -278,5 +278,5 @@ plugins:
     # repo-intel: bundled at plugins/<name>/ (not the community catalog
     # like mnemosyne) — installed as part of this repo, not a separate `hermes plugins install`.
     - repo-intel
-    - kyverno-dashboard
+    - maintainer-dashboard
 agent: {}

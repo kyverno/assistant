@@ -34,6 +34,9 @@ readiness:
   # branch-wide gates and infra checks, mirrored from pr-readiness-checks.yml; not the author's to fix
   infra_checks: ["E2E Gate", "Sync E2E Gate status", "Upload coverage to Codecov"]
 
+# File-name endings that mean a test here, on top of the usual ones (_test.go, _test.py, .test.ts, .spec.ts, ...).
+test_files: [kyverno-test.yaml, chainsaw-test.yaml]
+
 entry_labels: ["good first issue", "help wanted", "Contribfest"]
 # Reserved for a program with its own rules (the maintainers ask for no PRs until a mentorship begins); never offered.
 reserved_labels: ["LFX mentorship project"]

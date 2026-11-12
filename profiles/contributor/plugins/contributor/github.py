@@ -51,10 +51,10 @@ def secret(name: str) -> Optional[str]:
 
 
 def default_repo(args: Optional[Dict[str, Any]] = None) -> Optional[str]:
-    """`repo` argument, else the profile's KYVERNO_REPO."""
+    """`repo` argument, else the profile's ASSISTANT_REPO (KYVERNO_REPO in profiles made before the rename)."""
     if args and args.get("repo"):
         return args["repo"]
-    return secret("KYVERNO_REPO")
+    return secret("ASSISTANT_REPO") or secret("KYVERNO_REPO")
 
 
 # transport(method, url, headers, body) -> (status, response_headers, body_bytes)

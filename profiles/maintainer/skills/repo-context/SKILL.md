@@ -24,7 +24,7 @@ read PR content: that is `pr-queue`.
 
 ## Prerequisites
 
-- `REPO_GITHUB_TOKEN` and `KYVERNO_REPO` (`owner/repo`) from the profile's `.env`. The `fetch_*` tools default `repo` to
+- `REPO_GITHUB_TOKEN` and `ASSISTANT_REPO` (`owner/repo`) from the profile's `.env`. The `fetch_*` tools default `repo` to
   it, so omit it.
 - `repo_pack` (plugin tool, `plugins/repo-intel/`).
 - `mcp-github` tools: `list_label`, `get_file_contents`, `get_team_members`, `get_teams`, `search_code`,
@@ -69,7 +69,7 @@ repository, and a stale answer from one is wrong for another.
 4. **Agent docs**: the files the pack's `agent_docs` globs name (`AGENTS.md` and `ARCHITECTURE.md` at the root and per
    package, instructions files). `scripts/install.sh` caches the ones it finds into mnemosyne under `repo-doc:<path>`
    (for example `repo-doc:pkg/engine/AGENTS.md`). `mnemosyne_recall` the one for the package in play before falling back
-   to `search_code(query="<terms> repo:${KYVERNO_REPO}")`. The cache is a snapshot from install time: a doc added or
+   to `search_code(query="<terms> repo:${ASSISTANT_REPO}")`. The cache is a snapshot from install time: a doc added or
    changed later is not in it, so prefer the live file when a decision turns on its wording. If the repository has no
    such docs, say so: your knowledge of the code is then only what the code, owners and history show.
 5. **Other repo docs on demand**: `search_code` for `CONTRIBUTING.md`, `docs/**` or a symbol's usages, scoped to the
@@ -118,7 +118,7 @@ slower cadence).
 
 ## Verification
 
-- Ask "what labels does `<repo>` have" for two different `KYVERNO_REPO` values and
+- Ask "what labels does `<repo>` have" for two different `ASSISTANT_REPO` values and
   confirm `list_label` runs each time, not a memorized list.
 - Ask "does `<path>` need sign-off from `<team>`" and confirm a real
   `get_file_contents` + `get_team_members` call backs the answer.

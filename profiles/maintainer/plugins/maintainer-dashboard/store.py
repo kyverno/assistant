@@ -27,7 +27,13 @@ def _home() -> Path:
 
 
 def state_path() -> Path:
-    return _home() / "kyverno-dashboard" / "state.json"
+    new, old = _home() / "maintainer-dashboard", _home() / "kyverno-dashboard"
+    if old.is_dir() and not new.exists():
+        try:
+            old.rename(new)    # the folder from before the rename: same state, new name
+        except OSError:
+            return old / "state.json"
+    return new / "state.json"
 
 
 def now() -> str:

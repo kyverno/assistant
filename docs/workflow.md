@@ -142,7 +142,7 @@ Maintainer can also ask the agent to draft and post a reply to a discussion thre
 
 ## Dashboard
 
-The dashboard is the Kyverno tab in `hermes -p kyverno dashboard` (`localhost:9119`), one URL for the lifetime of the installation. The agent updates it after every queue, brief, or triage it presents and after every confirmed action, through `update_dashboard` (the `dashboard-sync` skill). The tab re-reads its state every 15 seconds, so a reload is optional. The maintainer has everything in one place with proper links.
+The dashboard is the Maintainer tab in `hermes -p kyverno dashboard` (`localhost:9119`), one URL for the lifetime of the installation. The agent updates it after every queue, brief, or triage it presents and after every confirmed action, through `update_dashboard` (the `dashboard-sync` skill). The tab re-reads its state every 15 seconds, so a reload is optional. The maintainer has everything in one place with proper links.
 
 It should be a page the maintainer actually wants to leave open — real visual design, not a bare table dump, and interactive: sortable/filterable panels, click through from a summary row into its detail panel.
 
@@ -295,13 +295,13 @@ additions pushed it there. The split in `docs/v3-plan.md` item 1 is still not do
 
 The tab renders live and `dashboard-sync` is wired into `pr-queue`, `issue-triage`, `author-followup`, `discussions`, `pr-actions`, and `issue-actions`. The UI is styled entirely from the host's theme tokens so it follows the active Hermes theme.
 
-New bundled plugin, `profiles/maintainer/plugins/kyverno-dashboard/`:
+New bundled plugin, `profiles/maintainer/plugins/maintainer-dashboard/`:
 
 - Tool half (same `__init__.py`/`tools.py` contract as `repo-intel`):
   one tool, `update_dashboard(section, data)`, writing structured JSON to a local state file.
   Verify Hermes's real plugin writable-data-directory API live before picking a path.
 - Dashboard-tab half: `dashboard/manifest.json` + `plugin_api.py` (FastAPI, reading that same
-  state file, mounted at `/api/plugins/kyverno-dashboard/`) + `dist/index.js`/`style.css` — no
+  state file, mounted at `/api/plugins/maintainer-dashboard/`) + `dist/index.js`/`style.css` — no
   build pipeline unless the manifest genuinely requires one.
 - Real design effort — sortable/filterable, click-through to detail panels, not a JSON table
   dump. Every panel above (PR queue, issue, fork-approval, per-item detail, Discussions,

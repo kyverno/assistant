@@ -450,7 +450,7 @@ Go SDK and HTTP/Envoy server evaluating CEL over `http` requests; v0.4.0, in dev
   closing;
 - `POST /repos/*/*/pulls/*/reviews` allowed only when `body.event != "APPROVE"` unless an
   approval overlay is active;
-- writes restricted to `KYVERNO_REPO`;
+- writes restricted to `ASSISTANT_REPO`;
 - writes naming an embargoed item denied;
 - `sandbox-runner` calls limited to the template set and allowed repos.
 

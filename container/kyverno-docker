@@ -15,7 +15,7 @@
 #   --profile K       maintainer or contributor (asked if not given), as in container/kyverno. Each has its own container, GitHub
 #                     token (in the one secrets file) and state; model keys are shared.
 #   --build           build the image from this checkout (container/Dockerfile) instead of pulling one
-#   --image IMAGE     use this image (default: $KYVERNO_IMAGE, else ghcr.io/kyverno/assistant:latest)
+#   --image IMAGE     use this image (default: $ASSISTANT_IMAGE, else ghcr.io/kyverno/assistant:latest)
 #   --name NAME       container name (default: kyverno-assistant-docker, or kyverno-contributor-docker)
 #   --provider P      also use model provider P (anthropic, openai or nvidia): its API key is asked once and kept in
 #                     the secrets file. Without it, the assistant uses GitHub Copilot.
@@ -26,23 +26,25 @@
 #   --no-attach       set everything up but do not open the chat
 #   --reset           forget the stored GitHub token and ask for it again
 #
-# The dashboard works as with OpenShell: http://127.0.0.1:9219/kyverno?profile=kyverno (KYVERNO_DASHBOARD_PORT changes
+# The dashboard works as with OpenShell: http://127.0.0.1:9219/maintainer?profile=kyverno (ASSISTANT_DASHBOARD_PORT changes
 # the port). It listens on 127.0.0.1 in the container; a small relay passes it to a port Docker publishes on 127.0.0.1
 # of this machine, on a network only this container joins.
 #
-# Secrets file: ${KYVERNO_SECRETS_FILE:-~/.config/kyverno-assistant/secrets.env}, mode 600, KEY=value lines. The
+# Secrets file: ${ASSISTANT_SECRETS_FILE:-~/.config/kyverno-assistant/secrets.env}, mode 600, KEY=value lines. The
 # launcher copies it into a tmpfs inside the container on every start (so the keys are never in the image, in
 # `docker inspect`, or on the container's disk) and the agent reads them from there.
 set -uo pipefail
+# These settings used to start with KYVERNO_; the old names still work.
+for _v in $(compgen -v KYVERNO_); do _n="ASSISTANT_${_v#KYVERNO_}"; [ -n "${!_n:-}" ] || export "$_n=${!_v}"; done; unset _v _n
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/.." && pwd)"
-IMAGE="${KYVERNO_IMAGE:-ghcr.io/kyverno/assistant:latest}"
+IMAGE="${ASSISTANT_IMAGE:-ghcr.io/kyverno/assistant:latest}"
 KIND=""
 NAME=""
-DASH_PORT="${KYVERNO_DASHBOARD_PORT:-9219}"   # same default as the OpenShell launcher
+DASH_PORT="${ASSISTANT_DASHBOARD_PORT:-9219}"   # same default as the OpenShell launcher
 RELAY_PORT=38219                              # inside the container; Docker publishes it as DASH_PORT
-SECRETS_FILE="${KYVERNO_SECRETS_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/kyverno-assistant/secrets.env}"
+SECRETS_FILE="${ASSISTANT_SECRETS_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/kyverno-assistant/secrets.env}"
 BUILD=0
 RESET=0
 UPGRADE=0
@@ -139,7 +141,7 @@ restore_state() {
   local src="$1"
   docker exec -i "$NAME" sh -c 'cat > /tmp/kyverno-state.tar' < "$src/kyverno-state.tar" || return 1
   docker exec -i "$NAME" sh -c 'cat > /tmp/restore-state.sh' < "$HERE/restore-state.sh" || return 1
-  docker exec -e KYVERNO_STATE_TAR=/tmp/kyverno-state.tar "$NAME" bash /tmp/restore-state.sh "$HERMES_PROFILE"
+  docker exec -e ASSISTANT_STATE_TAR=/tmp/kyverno-state.tar "$NAME" bash /tmp/restore-state.sh "$HERMES_PROFILE"
 }
 
 step "1. Docker"
@@ -157,7 +159,7 @@ ensure_image
 step "3. Keys"
 info "secrets file: $SECRETS_FILE"
 [ "$RESET" = 1 ] && secrets_unset "$TOKEN_KEY"
-REPO="${KYVERNO_REPO:-}"
+REPO="${ASSISTANT_REPO:-}"
 LOGIN="${!LOGIN_VAR:-}"
 if [ -n "$(secrets_get "$TOKEN_KEY")" ]; then
   pass "GitHub token already in the secrets file (use --reset to replace it)"
@@ -223,9 +225,9 @@ else
     read -r -p "  Continue? [y/N] " ANSWER </dev/tty || ANSWER=""
     case "$ANSWER" in y|Y|yes|YES) ;; *) fail "not continuing (use --yes to skip this question)"; exit 1 ;; esac
   fi
-  ENV_ARGS=(-e KYVERNO_RUNTIME=docker -e "KYVERNO_DASHBOARD_PORT=$DASH_PORT" -e "KYVERNO_RELAY_PORT=$RELAY_PORT")
+  ENV_ARGS=(-e ASSISTANT_RUNTIME=docker -e "ASSISTANT_DASHBOARD_PORT=$DASH_PORT" -e "ASSISTANT_RELAY_PORT=$RELAY_PORT")
   ensure_network || { fail "could not create the Docker network $NAME-net"; exit 1; }
-  [ "$ALLOW_TERMINAL" = 1 ] && ENV_ARGS+=(-e KYVERNO_ALLOW_TERMINAL=1)
+  [ "$ALLOW_TERMINAL" = 1 ] && ENV_ARGS+=(-e ASSISTANT_ALLOW_TERMINAL=1)
   info "creating '$NAME'..."
   # --init: Hermes wants an init process above it to reap children. The dashboard is published on 127.0.0.1 only.
   # The keys go in through a tmpfs (mode 700, uid
@@ -265,6 +267,6 @@ step "5. Assistant"
 ARGS=()
 [ -n "$REPO" ] && ARGS+=(--repo "$REPO")
 [ -n "$LOGIN" ] && ARGS+=(--login "$LOGIN")
-[ "$KIND" = maintainer ] && info "dashboard: http://127.0.0.1:$DASH_PORT/kyverno?profile=kyverno"
+[ "$KIND" = maintainer ] && info "dashboard: http://127.0.0.1:$DASH_PORT/maintainer?profile=kyverno"
 [ "$NO_ATTACH" = 1 ] && { pass "ready (not opening the chat: --no-attach)"; exit 0; }
 exec docker exec -it "$NAME" kyverno-start --profile "$KIND" "${ARGS[@]+"${ARGS[@]}"}"

@@ -17,7 +17,8 @@ from .fetch import (
 
 
 def _repo(args: Dict[str, Any]):
-    """`repo` arg, else this profile's KYVERNO_REPO (scoped under a multiplexing gateway)."""
+    """`repo` arg, else this profile's ASSISTANT_REPO (KYVERNO_REPO in profiles made before the rename),
+    scoped under a multiplexing gateway."""
     if args.get("repo"):
         return args["repo"]
     try:
@@ -25,8 +26,8 @@ def _repo(args: Dict[str, Any]):
     except ImportError:
         import os
 
-        return os.environ.get("KYVERNO_REPO")
-    return get_secret("KYVERNO_REPO")
+        get_secret = os.environ.get
+    return get_secret("ASSISTANT_REPO") or get_secret("KYVERNO_REPO")
 
 
 def _schema(name: str, description: str, properties: Dict[str, Any], required=None) -> Dict[str, Any]:
@@ -78,7 +79,7 @@ FETCH_PR_CANDIDATES_SCHEMA = _schema(
     "qualifier (milestone:, sort:, a label) already narrows the result on its own, no digest "
     "needed.",
     {
-        "repo": {"type": "string", "description": "'owner/repo'. Omit to use KYVERNO_REPO."},
+        "repo": {"type": "string", "description": "'owner/repo'. Omit to use ASSISTANT_REPO."},
         "search_query": {
             "type": "string",
             "description": "Extra GitHub search qualifiers beyond 'repo:/is:pr/is:open/"
@@ -116,7 +117,7 @@ def handle_fetch_pr_candidates(args: Dict[str, Any], **_kw) -> str:
     repo = _repo(args)
     search_query = args.get("search_query")
     if not repo or not search_query:
-        return json.dumps({"success": False, "error": "repo (or KYVERNO_REPO) and search_query are required"})
+        return json.dumps({"success": False, "error": "repo (or ASSISTANT_REPO) and search_query are required"})
     try:
         result = fetch_pr_candidates(
             repo=str(repo),
@@ -137,7 +138,7 @@ FETCH_PR_DETAILS_SCHEMA = _schema(
     "'digest') result — skips the search step. Same per-PR fields as fetch_pr_candidates' "
     "full mode.",
     {
-        "repo": {"type": "string", "description": "'owner/repo'. Omit to use KYVERNO_REPO."},
+        "repo": {"type": "string", "description": "'owner/repo'. Omit to use ASSISTANT_REPO."},
         "pr_numbers": {"type": "array", "items": {"type": "integer"},
                         "description": "The exact PR numbers to fetch full detail for."},
         "include_stale_detail": {
@@ -153,7 +154,7 @@ def handle_fetch_pr_details(args: Dict[str, Any], **_kw) -> str:
     repo = _repo(args)
     pr_numbers = args.get("pr_numbers") or []
     if not repo or not pr_numbers:
-        return json.dumps({"success": False, "error": "repo (or KYVERNO_REPO) and pr_numbers are required"})
+        return json.dumps({"success": False, "error": "repo (or ASSISTANT_REPO) and pr_numbers are required"})
     try:
         result = fetch_pr_details(
             repo=str(repo),
@@ -189,7 +190,7 @@ FETCH_ISSUE_CANDIDATES_SCHEMA = _schema(
     "Only use digest for a filter search can't express directly — a label/milestone/sort "
     "qualifier already narrows the result on its own.",
     {
-        "repo": {"type": "string", "description": "'owner/repo'. Omit to use KYVERNO_REPO."},
+        "repo": {"type": "string", "description": "'owner/repo'. Omit to use ASSISTANT_REPO."},
         "search_query": {
             "type": "string",
             "description": "Extra GitHub search qualifiers beyond 'repo:/is:issue', which "
@@ -219,7 +220,7 @@ def handle_fetch_issue_candidates(args: Dict[str, Any], **_kw) -> str:
     repo = _repo(args)
     search_query = args.get("search_query")
     if not repo or not search_query:
-        return json.dumps({"success": False, "error": "repo (or KYVERNO_REPO) and search_query are required"})
+        return json.dumps({"success": False, "error": "repo (or ASSISTANT_REPO) and search_query are required"})
     try:
         result = fetch_issue_candidates(
             repo=str(repo),
@@ -239,7 +240,7 @@ FETCH_ISSUE_DETAILS_SCHEMA = _schema(
     "result — skips the search step. Same per-issue fields as fetch_issue_candidates' full "
     "mode.",
     {
-        "repo": {"type": "string", "description": "'owner/repo'. Omit to use KYVERNO_REPO."},
+        "repo": {"type": "string", "description": "'owner/repo'. Omit to use ASSISTANT_REPO."},
         "issue_numbers": {"type": "array", "items": {"type": "integer"},
                            "description": "The exact issue numbers to fetch full detail for."},
     },
@@ -251,7 +252,7 @@ def handle_fetch_issue_details(args: Dict[str, Any], **_kw) -> str:
     repo = _repo(args)
     issue_numbers = args.get("issue_numbers") or []
     if not repo or not issue_numbers:
-        return json.dumps({"success": False, "error": "repo (or KYVERNO_REPO) and issue_numbers are required"})
+        return json.dumps({"success": False, "error": "repo (or ASSISTANT_REPO) and issue_numbers are required"})
     try:
         result = fetch_issue_details(repo=str(repo), issue_numbers=[int(n) for n in issue_numbers])
     except FetchError as exc:
@@ -269,7 +270,7 @@ FETCH_FILE_DIFF_OVERLAP_SCHEMA = _schema(
     "genuinely interact. Only call this for a file_overlaps pair worth the extra look, not "
     "for every one automatically.",
     {
-        "repo": {"type": "string", "description": "'owner/repo'. Omit to use KYVERNO_REPO."},
+        "repo": {"type": "string", "description": "'owner/repo'. Omit to use ASSISTANT_REPO."},
         "path": {"type": "string", "description": "The exact file path both PRs changed."},
         "pr_numbers": {"type": "array", "items": {"type": "integer"},
                         "description": "The PRs to compare (usually 2, from one file_overlaps entry)."},

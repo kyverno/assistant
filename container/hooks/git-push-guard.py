@@ -38,7 +38,7 @@ def check(tokens):
     while i < len(args) and args[i].startswith("-"):
         i += 2 if args[i] in ("-C", "-c", "--git-dir", "--work-tree") else 1
     if i < len(args) and args[i] == "clone":
-        return ("do not use git clone: run `kyverno-workspace OWNER/REPO` (for example kyverno-workspace kyverno/kyverno). "
+        return ("do not use git clone: run `kyverno-workspace OWNER/REPO` (for example kyverno-workspace owner/repo). "
                 "It clones the repository into /sandbox and sets up your fork, sign-off and toolchains")
     if i >= len(args) or args[i] != "push":
         return None

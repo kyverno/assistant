@@ -4,19 +4,21 @@
 # memory, chat history, your repo and username, the Copilot sign-in, and the model you chose. The profile
 # itself (skills, hooks, plugins, settings) stays exactly as the new image ships it.
 set -uo pipefail
+# These settings used to start with KYVERNO_; the old names still work.
+for _v in $(compgen -v KYVERNO_); do _n="ASSISTANT_${_v#KYVERNO_}"; [ -n "${!_n:-}" ] || export "$_n=${!_v}"; done; unset _v _n
 
 export HERMES_HOME=/opt/hermes-home/.hermes
 PROFILE="${1:-kyverno}"      # the Hermes profile to restore into (kyverno-contributor for the contributor sandbox)
 P="$HERMES_HOME/profiles/$PROFILE"
 TMP=/tmp/kyverno-restore
 # Where the launcher put the bundle: /sandbox under OpenShell; the Docker launcher (--no-openshell) sets this.
-STATE_TAR="${KYVERNO_STATE_TAR:-/sandbox/kyverno-state.tar}"
+STATE_TAR="${ASSISTANT_STATE_TAR:-/sandbox/kyverno-state.tar}"
 
 rm -rf "$TMP" && mkdir -p "$TMP"
 tar -xf "$STATE_TAR" -C "$TMP" || { echo "could not read the saved state" >&2; exit 1; }
 
 # 1. data directories and files, replaced wholesale (the new image starts with empty ones)
-for d in mnemosyne/data memories sessions kyverno-dashboard kyverno-contributor; do
+for d in mnemosyne/data memories sessions kyverno-dashboard maintainer-dashboard kyverno-contributor contributor-state; do
   if [ -e "$TMP/$d" ]; then
     mkdir -p "$P/$(dirname "$d")"
     rm -rf "${P:?}/$d"
@@ -35,7 +37,7 @@ fi
 if [ -f "$TMP/.env" ]; then
   OLD_ENV="$TMP/.env" NEW_ENV="$P/.env" python3 - <<'PY'
 import os
-KEYS = ("COPILOT_GITHUB_TOKEN", "KYVERNO_REPO", "MAINTAINER_GITHUB_LOGIN", "CONTRIBUTOR_GITHUB_LOGIN")
+KEYS = ("COPILOT_GITHUB_TOKEN", "ASSISTANT_REPO", "KYVERNO_REPO", "MAINTAINER_GITHUB_LOGIN", "CONTRIBUTOR_GITHUB_LOGIN")
 old = {}
 for line in open(os.environ["OLD_ENV"]):
     line = line.strip()

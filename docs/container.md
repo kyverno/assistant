@@ -71,7 +71,7 @@ Verified means it was run in a real sandbox, on the image as built from this che
 | Agent terminal and file tools | Enabled, not exercised | They run locally in the sandbox; the hook allows them only inside OpenShell |
 | Slack | Not available | The Slack MCP server runs under Docker, which a sandbox does not have |
 | Linux (amd64) | Verified on a runner | On a GitHub runner (Ubuntu 24.04, kernel 6.17, Docker Engine 28): an amd64 image was built there and the whole stack ran, with the placeholder token, the proxy refusing a merge, read-only hooks and the dashboard answering. Not a real laptop, and not by the publish workflow; arm64 Linux is untried |
-| Dashboard | Verified | Runs in the sandbox; the launcher forwards `127.0.0.1:9219`. A sample item written through the agent's own `update_dashboard` function was served by it, with the Kyverno tab's script and styles loading |
+| Dashboard | Verified | Runs in the sandbox; the launcher forwards `127.0.0.1:9219`. A sample item written through the agent's own `update_dashboard` function was served by it, with the Maintainer tab's script and styles loading |
 | Scheduled jobs (cron, the Slack digest) | Not available | They run inside the Hermes gateway, which is not started |
 | `AGENTS.md` cache seeding | Not done | `repo-context` falls back to searching GitHub |
 | Keeping state when the image is upgraded | Verified | `--upgrade`: see below |
@@ -148,7 +148,7 @@ container/kyverno --no-openshell [--build | --image IMAGE] [--provider P ...] [-
 What it still does: the container runs as a non-root user with every Linux capability dropped, `no-new-privileges`
 and a process limit, and nothing from your machine is mounted. Docker is the only requirement. It was tried on Apple Silicon only.
 
-**Keys.** They live in `~/.config/kyverno-assistant/secrets.env` (override with `KYVERNO_SECRETS_FILE`), mode 600, as
+**Keys.** They live in `~/.config/kyverno-assistant/secrets.env` (override with `ASSISTANT_SECRETS_FILE`), mode 600, as
 `KEY=value` lines. On every start the launcher copies the allowed keys (`REPO_GITHUB_TOKEN`, `ANTHROPIC_API_KEY`,
 `OPENAI_API_KEY`, `NVIDIA_API_KEY`) into a tmpfs inside the container. They are not in the image, not in
 `docker inspect`, and not on the container's disk; the tmpfs is empty again when the container stops.
@@ -222,7 +222,7 @@ One-time setup for an org admin:
    launcher pulls without logging in.
 
 The launcher pulls `ghcr.io/kyverno/assistant:latest` by default. To pin a version, or to use a fork or a different
-registry, set `KYVERNO_IMAGE` or pass `--image`:
+registry, set `ASSISTANT_IMAGE` or pass `--image`:
 
 ```bash
 container/kyverno --image ghcr.io/kyverno/assistant:v0.1.0 --upgrade     # a release
