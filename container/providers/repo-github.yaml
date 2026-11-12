@@ -3,8 +3,8 @@
 # endpoints below, and only from the binaries listed. Import with:
 #   openshell profile import -f container/providers/repo-github.yaml
 id: kyverno-repo-github
-display_name: Kyverno assistant repo token
-description: GitHub token for the Kyverno assistant (read APIs plus the GitHub MCP server)
+display_name: assistant repo token
+description: GitHub token for the assistant (read APIs plus the GitHub MCP server)
 category: source_control
 credentials:
   - name: repo_token

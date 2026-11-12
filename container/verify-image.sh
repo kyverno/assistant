@@ -9,7 +9,7 @@ set -euo pipefail
 
 export HERMES_HOME=/opt/hermes-home/.hermes
 PY="$(compgen -G "$HERMES_HOME/tools/python-*/bin/python3" | head -n 1)"
-PROFILES="maintainer:kyverno:repo-github contributor:kyverno-contributor:repo-github-contributor"
+PROFILES="maintainer:maintainer:repo-github contributor:contributor:repo-github-contributor"
 HOOK_EVENT='{"tool_name":"merge_pull_request","tool_input":{}}'
 
 V="$(hermes --version)"
@@ -61,10 +61,10 @@ echo "== contributor: guard hook and organisation file"
 OUT="$(echo "$HOOK_EVENT" | "$PY" -I /opt/kyverno/profiles/contributor/hooks/contributor-guard.py)"
 echo "$OUT"
 echo "$OUT" | grep -q '"action": "block"'
-HERMES_HOME=$HERMES_HOME/profiles/kyverno-contributor "$PY" -I - <<'PYEOF'
+HERMES_HOME=$HERMES_HOME/profiles/contributor "$PY" -I - <<'PYEOF'
 import importlib.util, sys
 sys.path.insert(0, "/opt/hermes"); import hermes_bootstrap
-plugin = "/opt/hermes-home/.hermes/profiles/kyverno-contributor/plugins/contributor"
+plugin = "/opt/hermes-home/.hermes/profiles/contributor/plugins/contributor"
 spec = importlib.util.spec_from_file_location("contributor", plugin + "/__init__.py", submodule_search_locations=[plugin])
 module = importlib.util.module_from_spec(spec); sys.modules["contributor"] = module; spec.loader.exec_module(module)
 from contributor import rules, tools
@@ -73,25 +73,26 @@ print("organisation file loads:", org["name"], "|", len(tools.TOOLS), "tools")
 PYEOF
 
 echo "== workspace: script, toolchains and the shared skill"
-test -x /usr/local/bin/kyverno-workspace
+test -x /usr/local/bin/assistant-workspace
+test -x /usr/local/bin/kyverno-workspace    # the old name, kept as an alias
 # The launcher a user extracts from the image (README: Quick start): every file it reads next to itself, and it must parse.
-for f in kyverno kyverno-docker restore-state.sh lib.sh policy.yaml providers/repo-github.yaml providers/repo-github-contributor.yaml; do
+for f in assistant assistant-docker kyverno kyverno-docker restore-state.sh lib.sh policy.yaml providers/repo-github.yaml providers/repo-github-contributor.yaml; do
   test -f "/opt/kyverno/launcher/$f"
 done
-for f in kyverno kyverno-docker restore-state.sh lib.sh; do bash -n "/opt/kyverno/launcher/$f"; done
-for f in /usr/local/lib/kyverno/toolchains/*.sh /usr/local/bin/kyverno-workspace; do bash -n "$f"; done
-test -f "$HERMES_HOME/profiles/kyverno/skills/workspace/SKILL.md"
-test -f "$HERMES_HOME/profiles/kyverno-contributor/skills/workspace/SKILL.md"
+for f in assistant assistant-docker kyverno kyverno-docker restore-state.sh lib.sh; do bash -n "/opt/kyverno/launcher/$f"; done
+for f in /usr/local/lib/kyverno/toolchains/*.sh /usr/local/bin/assistant-workspace; do bash -n "$f"; done
+test -f "$HERMES_HOME/profiles/maintainer/skills/workspace/SKILL.md"
+test -f "$HERMES_HOME/profiles/contributor/skills/workspace/SKILL.md"
 # The push guard refuses a force push, a push to main, a push to an unknown remote and a bare git clone, and lets a normal push to the
 # fork through; a contributor may not push to origin, a maintainer may.
 for kind in maintainer contributor; do
   GUARD=/opt/kyverno/profiles/$kind/hooks/git-push-guard.py
-  profile=kyverno; [ "$kind" = contributor ] && profile=kyverno-contributor
+  profile=$kind
   guard() { echo "{\"tool_name\":\"terminal\",\"tool_input\":{\"command\":\"$1\"}}" | HERMES_HOME=$HERMES_HOME/profiles/$profile python3 -I "$GUARD"; }
   guard "git push --force fork x" | grep -q '"action": "block"'
   guard "git push fork main" | grep -q '"action": "block"'
   guard "git clone https://github.com/kyverno/kyverno.git" | grep -q '"action": "block"'
-  test "$(guard "kyverno-workspace kyverno/kyverno")" = '{}'
+  test "$(guard "assistant-workspace kyverno/kyverno")" = '{}'
   guard "git push https://example.com/x/y.git x" | grep -q '"action": "block"'
   test "$(guard "git push -u fork fix/x")" = '{}'
   if [ "$kind" = contributor ]; then guard "git push origin fix/x" | grep -q '"action": "block"'; else test "$(guard "git push origin fix/x")" = '{}'; fi

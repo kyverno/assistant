@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs inside the NEW sandbox during `container/kyverno --upgrade`: puts back what the old one saved.
+# Runs inside the NEW sandbox during `container/assistant --upgrade`: puts back what the old one saved.
 # The launcher uploads this script and /sandbox/kyverno-state.tar, then runs it. Only your state comes back:
 # memory, chat history, your repo and username, the Copilot sign-in, and the model you chose. The profile
 # itself (skills, hooks, plugins, settings) stays exactly as the new image ships it.
@@ -8,7 +8,7 @@ set -uo pipefail
 for _v in $(compgen -v KYVERNO_); do _n="ASSISTANT_${_v#KYVERNO_}"; [ -n "${!_n:-}" ] || export "$_n=${!_v}"; done; unset _v _n
 
 export HERMES_HOME=/opt/hermes-home/.hermes
-PROFILE="${1:-kyverno}"      # the Hermes profile to restore into (kyverno-contributor for the contributor sandbox)
+PROFILE="${1:-maintainer}"      # the Hermes profile to restore into (contributor for the contributor sandbox)
 P="$HERMES_HOME/profiles/$PROFILE"
 TMP=/tmp/kyverno-restore
 # Where the launcher put the bundle: /sandbox under OpenShell; the Docker launcher (--no-openshell) sets this.
@@ -75,7 +75,7 @@ if m:
             print(mm.group(1), mm.group(2))
 PY
   while read -r key value; do
-    [ -n "$key" ] && timeout 120 hermes -p kyverno config set "model.$key" "$value" </dev/null >/dev/null 2>&1
+    [ -n "$key" ] && timeout 120 hermes -p "$PROFILE" config set "model.$key" "$value" </dev/null >/dev/null 2>&1
   done < "$TMP/model.txt"
   echo "  restored model: $(tr '\n' ' ' < "$TMP/model.txt")"
 fi

@@ -4,12 +4,12 @@ Everything the assistant needs (Hermes, pinned, the maintainer profile and its m
 that runs inside an [OpenShell](https://github.com/NVIDIA/OpenShell) sandbox. You install nothing but Docker.
 
 ```bash
-container/kyverno --build                  # first time: build the image from this checkout, then start
-container/kyverno                          # later: reattach to (or start) the sandbox
-container/kyverno --provider anthropic     # also use another model provider (anthropic, openai, nvidia)
-container/kyverno --build --upgrade        # new version: recreate the sandbox, keeping your state
-container/kyverno --upgrade --keep-caches   # also carry the downloaded toolchains and build caches (clones always come along)
-container/kyverno --push-to-fork           # also let the assistant push branches to your own fork (off by default)
+container/assistant --build                  # first time: build the image from this checkout, then start
+container/assistant                          # later: reattach to (or start) the sandbox
+container/assistant --provider anthropic     # also use another model provider (anthropic, openai, nvidia)
+container/assistant --build --upgrade        # new version: recreate the sandbox, keeping your state
+container/assistant --upgrade --keep-caches   # also carry the downloaded toolchains and build caches (clones always come along)
+container/assistant --push-to-fork           # also let the assistant push branches to your own fork (off by default)
 ```
 
 What runs where, how secrets are kept, what the agent can reach, what works today and what doesn't, and
@@ -26,11 +26,11 @@ troubleshooting are all in **[docs/container.md](../docs/container.md)**.
 | `kyverno` | The launcher you run on your laptop |
 | `lib.sh` | Shared by both launchers: output helpers, the GitHub token prompt, the image build or pull, and the list of state kept across `--upgrade` |
 | `kyverno-env`, `dashboard-relay` | Used only by `--no-openshell`, inside the container: reads the keys the launcher copied in, and passes the dashboard to the port Docker publishes |
-| `kyverno-docker` | What `kyverno --no-openshell` runs: the same image in plain Docker, without OpenShell (less protection; see docs/container.md, "Running without OpenShell") |
+| `assistant-docker` | What `kyverno --no-openshell` runs: the same image in plain Docker, without OpenShell (less protection; see docs/container.md, "Running without OpenShell") |
 | `restore-state.sh` | Uploaded by the launcher during `--upgrade` to put your state back |
 | `policy.yaml` | The sandbox's filesystem and network policy. Keep the Copilot inference paths listed by name (see docs/container.md, "Safety layers") |
 | `providers/*.yaml` | OpenShell provider profiles: the GitHub token (with the MCP tool allowlist the proxy enforces) and the model-provider keys (each limited to chat and model-list paths) |
-| `kyverno-workspace`, `toolchains/*.sh` | Run inside the sandbox: clone a repo and download exactly the toolchains it declares (Go, Node, Kyverno CLI, Chainsaw), each checked against a vendor checksum. At run time, not in the image |
+| `assistant-workspace`, `toolchains/*.sh` | Run inside the sandbox: clone a repo and download exactly the toolchains it declares (Go, Node, Kyverno CLI, Chainsaw), each checked against a vendor checksum. At run time, not in the image |
 | `skills/workspace/` | The skill both profiles use to reproduce an issue, change code, prove it, and hand it over as a pushed branch or a patch |
 | `hooks/git-push-guard.py` | Terminal hook: pushes go to your fork (a maintainer: also the managed repository), never forced, never to main |
 | `hooks/require-sandbox-terminal.sh` | Lets the terminal run locally, but only inside an OpenShell sandbox (or a plain-Docker container started with `--no-openshell --allow-terminal`) |
@@ -38,4 +38,4 @@ troubleshooting are all in **[docs/container.md](../docs/container.md)**.
 ## Not done yet
 
 Slack and scheduled jobs are not available inside the sandbox yet. The published multi-architecture image is
-available from `ghcr.io/kyverno/assistant`; use `container/kyverno --build` to build it from a local checkout.
+available from `ghcr.io/kyverno/assistant`; use `container/assistant --build` to build it from a local checkout.

@@ -142,7 +142,7 @@ Maintainer can also ask the agent to draft and post a reply to a discussion thre
 
 ## Dashboard
 
-The dashboard is the Maintainer tab in `hermes -p kyverno dashboard` (`localhost:9119`), one URL for the lifetime of the installation. The agent updates it after every queue, brief, or triage it presents and after every confirmed action, through `update_dashboard` (the `dashboard-sync` skill). The tab re-reads its state every 15 seconds, so a reload is optional. The maintainer has everything in one place with proper links.
+The dashboard is the Maintainer tab in `hermes -p maintainer dashboard` (`localhost:9119`), one URL for the lifetime of the installation. The agent updates it after every queue, brief, or triage it presents and after every confirmed action, through `update_dashboard` (the `dashboard-sync` skill). The tab re-reads its state every 15 seconds, so a reload is optional. The maintainer has everything in one place with proper links.
 
 It should be a page the maintainer actually wants to leave open — real visual design, not a bare table dump, and interactive: sortable/filterable panels, click through from a summary row into its detail panel.
 

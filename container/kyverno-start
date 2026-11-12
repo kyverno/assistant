@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs inside the OpenShell sandbox (or the plain-Docker container, container/kyverno --no-openshell): what is specific to you on the first run, then the chat.
+# Runs inside the OpenShell sandbox (or the plain-Docker container, container/assistant --no-openshell): what is specific to you on the first run, then the chat.
 # The profile, its skills, hooks and memory plugin are already in the image (container/setup-profile.sh
 # ran when it was built), so this is quick. The launcher calls it with:
 #   openshell sandbox exec --tty -- kyverno-start [--profile maintainer|contributor] [--repo R] [--login L]
@@ -40,8 +40,8 @@ done
 
 # One image holds both profiles. Which one this sandbox runs is picked by the launcher.
 case "$KIND" in
-  maintainer) PROFILE=kyverno; LOGIN_VAR=MAINTAINER_GITHUB_LOGIN; REPO_ASK="Repo to manage (owner/repo): " ;;
-  contributor) PROFILE=kyverno-contributor; LOGIN_VAR=CONTRIBUTOR_GITHUB_LOGIN; REPO_ASK="Repo you contribute to (owner/repo): " ;;
+  maintainer) PROFILE=maintainer; LOGIN_VAR=MAINTAINER_GITHUB_LOGIN; REPO_ASK="Repo to manage (owner/repo): " ;;
+  contributor) PROFILE=contributor; LOGIN_VAR=CONTRIBUTOR_GITHUB_LOGIN; REPO_ASK="Repo you contribute to (owner/repo): " ;;
   *) echo "unknown profile '$KIND' (maintainer or contributor)" >&2; exit 2 ;;
 esac
 PROFILE_DIR="$HERMES_HOME/profiles/$PROFILE"
@@ -53,26 +53,26 @@ step "Checks"
 if [ -d /run/openshell-supervisor-ca ]; then
   RUNTIME=openshell
 elif [ "${ASSISTANT_RUNTIME:-}" = docker ]; then
-  # container/kyverno --no-openshell: plain Docker. The launcher keeps the keys in a tmpfs file, readable only by
+  # container/assistant --no-openshell: plain Docker. The launcher keeps the keys in a tmpfs file, readable only by
   # this user; kyverno_load_secrets reads them (see kyverno-env).
   RUNTIME=docker
   # shellcheck source=container/kyverno-env
   . /usr/local/bin/kyverno-env
   kyverno_load_secrets
 else
-  fail "this is not running inside an OpenShell sandbox — start it with the launcher (container/kyverno)"
+  fail "this is not running inside an OpenShell sandbox — start it with the launcher (container/assistant)"
   exit 1
 fi
 if [ -z "${REPO_GITHUB_TOKEN:-}" ]; then
   if [ "$RUNTIME" = docker ]; then
-    fail "REPO_GITHUB_TOKEN is not set — re-run the launcher (container/kyverno --no-openshell), which provides it"
+    fail "REPO_GITHUB_TOKEN is not set — re-run the launcher (container/assistant --no-openshell), which provides it"
   else
     fail "REPO_GITHUB_TOKEN is not set — the sandbox was created without the GitHub provider; re-run the launcher"
   fi
   exit 1
 fi
 if [ -z "$HERMES_PY" ] || [ ! -f "$PROFILE_DIR/distribution.yaml" ]; then
-  fail "the Hermes profile is missing from the image — rebuild it: container/kyverno --build"
+  fail "the Hermes profile is missing from the image — rebuild it: container/assistant --build"
   exit 1
 fi
 if [ "$RUNTIME" = docker ]; then

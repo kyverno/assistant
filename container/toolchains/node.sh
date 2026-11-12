@@ -1,6 +1,6 @@
 # shellcheck shell=bash disable=SC2153,SC2034
-# ARCH and TOOLS are set by kyverno-workspace, which sources this file.
-# Node.js toolchain for kyverno-workspace. The version comes from the repository (.node-version, .nvmrc or
+# ARCH and TOOLS are set by assistant-workspace, which sources this file.
+# Node.js toolchain for assistant-workspace. The version comes from the repository (.node-version, .nvmrc or
 # package.json "engines"); dependencies are the project's own `npm ci`, run by whoever needs them.
 tc_want() {
   local d="$1" v=""

@@ -28,8 +28,8 @@ env_requires:
     description: "owner/repo this assistant manages (for example your-org/your-repo)"
     required: true
   - name: ANTHROPIC_API_KEY
-    description: "Optional. Anthropic API key; or choose any provider with `hermes -p kyverno model`."
+    description: "Optional. Anthropic API key; or choose any provider with `hermes -p maintainer model`."
     required: false
   - name: COPILOT_GITHUB_TOKEN
-    description: "Optional. Copilot PAT (Copilot Requests permission), or sign in with `hermes -p kyverno model`."
+    description: "Optional. Copilot PAT (Copilot Requests permission), or sign in with `hermes -p maintainer model`."
     required: false

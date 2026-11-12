@@ -11,7 +11,7 @@
 # for the machine it runs on, and takes about 5 minutes on a GitHub runner.
 #
 # One-time setup by an org admin: allow this repository to publish packages, and after the first
-# publish set the package's visibility to public so that `container/kyverno` can pull it without logging in.
+# publish set the package's visibility to public so that `container/assistant` can pull it without logging in.
 name: container-image
 
 on:

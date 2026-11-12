@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# Shared by the two launchers, container/kyverno (OpenShell) and container/kyverno-docker (--no-openshell).
+# Shared by the two launchers, container/assistant (OpenShell) and container/assistant-docker (--no-openshell).
 # Sourced, never run. The caller sets HERE, REPO_ROOT, IMAGE, BUILD and UPGRADE first, and defines
 # instance_exists (is the sandbox or container already there?) and INSTANCE (its name).
 
@@ -26,15 +26,22 @@ provider_env_var() {
 
 # What differs between the two assistants, for both launchers. They share the image, not the sandbox (or container),
 # the GitHub token or the state. Sets HERMES_PROFILE, PROVIDER and PROVIDER_FILE (OpenShell), TOKEN_KEY (the name the
-# token has in the secrets file without OpenShell), LOGIN_VAR, DEFAULT_NAME and DEFAULT_DOCKER_NAME, and the wording.
+# token has in the secrets file without OpenShell), LOGIN_VAR, DEFAULT_NAME (the existing instance's name, else the new
+# default) and the wording. The provider names keep their kyverno- prefix: they hold the stored token, which cannot be moved.
 # Picks the profile when --profile was not given: the one you already have a sandbox for, else it asks (on a terminal)
 # or falls back to maintainer. Args: names of the existing sandboxes or containers, then the maintainer and the
 # contributor default names.
+# New instances get neutral names. One made before the rename (kyverno-assistant, kyverno-contributor) keeps working
+# under the name it has: FOUND_M and FOUND_C are the existing instance's name, whichever of the two it is.
+# Args: the existing names, then the maintainer's new and old name, then the contributor's new and old name.
 choose_profile() {
+  local existing="$1" m="$2" m_old="$3" c="$4" c_old="$5" has_m=0 has_c=0 choice
+  NEW_M="$m"; NEW_C="$c"; FOUND_M=""; FOUND_C=""
+  if grep -qx "$m" <<<"$existing"; then FOUND_M="$m"; elif grep -qx "$m_old" <<<"$existing"; then FOUND_M="$m_old"; fi
+  if grep -qx "$c" <<<"$existing"; then FOUND_C="$c"; elif grep -qx "$c_old" <<<"$existing"; then FOUND_C="$c_old"; fi
   [ -n "$KIND" ] && return 0
-  local existing="$1" m="$2" c="$3" has_m=0 has_c=0 choice
-  grep -qx "$m" <<<"$existing" && has_m=1
-  grep -qx "$c" <<<"$existing" && has_c=1
+  [ -n "$FOUND_M" ] && has_m=1
+  [ -n "$FOUND_C" ] && has_c=1
   if [ "$has_m$has_c" = 10 ]; then
     KIND=maintainer; info "starting the maintainer assistant, the only one you have (--profile contributor for the other)"; return 0
   fi
@@ -57,21 +64,34 @@ choose_profile() {
 select_profile() {
   case "$1" in
     maintainer)
-      HERMES_PROFILE=kyverno; PROVIDER=kyverno-repo-github; PROVIDER_FILE=repo-github.yaml
+      HERMES_PROFILE=maintainer; PROVIDER=kyverno-repo-github; PROVIDER_FILE=repo-github.yaml
       TOKEN_KEY=REPO_GITHUB_TOKEN; LOGIN_VAR=MAINTAINER_GITHUB_LOGIN
-      DEFAULT_NAME=kyverno-assistant; DEFAULT_DOCKER_NAME=kyverno-assistant-docker
+      DEFAULT_NAME="${FOUND_M:-${NEW_M:-assistant-maint}}"
       REPO_ASK="Repo to manage (owner/repo): "
       TOKEN_SCOPE="the assistant still cannot merge."
       TOKEN_PASTE_HELP="Paste your fine-grained GitHub token (see README step 1)." ;;
     contributor)
-      HERMES_PROFILE=kyverno-contributor; PROVIDER=kyverno-contributor-github; PROVIDER_FILE=repo-github-contributor.yaml
+      HERMES_PROFILE=contributor; PROVIDER=kyverno-contributor-github; PROVIDER_FILE=repo-github-contributor.yaml
       TOKEN_KEY=CONTRIBUTOR_REPO_GITHUB_TOKEN; LOGIN_VAR=CONTRIBUTOR_GITHUB_LOGIN
-      DEFAULT_NAME=kyverno-contributor; DEFAULT_DOCKER_NAME=kyverno-contributor-docker
+      DEFAULT_NAME="${FOUND_C:-${NEW_C:-assistant-contrib}}"
       REPO_ASK="Repo you contribute to (owner/repo): "
       TOKEN_SCOPE="the assistant can only read, comment, and open a PR from your fork."
       TOKEN_PASTE_HELP="Paste a fine-grained GitHub token of your own account (public repositories, read-only, is enough to read; commenting, and opening a PR, on the repository need a token that can write there)." ;;
     *) echo "unknown profile '$1' (maintainer or contributor)" >&2; exit 2 ;;
   esac
+}
+
+# The Hermes profile folder an existing instance really has. One made before the rename calls it kyverno or
+# kyverno-contributor, and an --upgrade has to read the state from there; the new image's own name is HERMES_PROFILE.
+# The launcher defines instance_exec (run a command inside the instance). Sets INSTANCE_PROFILE.
+instance_profile() {
+  local old have
+  case "$KIND" in maintainer) old=kyverno ;; *) old=kyverno-contributor ;; esac
+  INSTANCE_PROFILE="$HERMES_PROFILE"
+  instance_exists || return 0
+  have="$(instance_exec ls /opt/hermes-home/.hermes/profiles 2>/dev/null)" || return 0
+  if ! grep -qx "$HERMES_PROFILE" <<<"$have" && grep -qx "$old" <<<"$have"; then INSTANCE_PROFILE="$old"; fi
+  return 0
 }
 
 # What is yours across an --upgrade: memory, chat history, your repo and username, the Copilot sign-in, the model you
@@ -83,7 +103,7 @@ STATE_FILES=".env config.yaml .kyverno-model-chosen mnemosyne/data memories sess
 ensure_image() {
   if [ "$BUILD" = 1 ]; then
     [ -f "$REPO_ROOT/container/Dockerfile" ] || { fail "--build needs a checkout of the repository (this launcher was taken from an image)"; exit 1; }
-    IMAGE="kyverno-assistant:dev"
+    IMAGE="assistant:dev"
     info "building $IMAGE from this checkout (the first build takes several minutes)..."
     docker build -f "$REPO_ROOT/container/Dockerfile" -t "$IMAGE" "$REPO_ROOT" || { fail "image build failed"; exit 1; }
     if [ "$UPGRADE" != 1 ] && instance_exists; then
@@ -162,7 +182,7 @@ acquire_github_token() {
   fi
 }
 
-# --- pushing to your own fork (container/kyverno --push-to-fork) ---
+# --- pushing to your own fork (container/assistant --push-to-fork) ---
 # The login a GitHub token belongs to. The token goes in through stdin, so it never shows in a process list.
 token_login() {
   printf 'header = "Authorization: Bearer %s"\n' "$1" \
@@ -177,7 +197,7 @@ git_push_profile() {
   local login="$1" t; shift
   cat <<EOF
 id: kyverno-git-push
-display_name: Kyverno assistant git push
+display_name: assistant git push
 description: Lets the sandbox push branches to ${login}'s own forks (and a maintainer's own repository), and nowhere else
 category: source_control
 credentials:

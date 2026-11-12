@@ -1,8 +1,8 @@
-# Model provider key for the Kyverno assistant, held by OpenShell. The sandbox only sees a placeholder in
+# Model provider key for the assistant, held by OpenShell. The sandbox only sees a placeholder in
 # ANTHROPIC_API_KEY; the proxy swaps in the real key on requests to api.anthropic.com, and only from Hermes' Python.
 id: kyverno-anthropic
-display_name: Anthropic (Kyverno assistant)
-description: Anthropic API key for the Kyverno assistant's model, injected by the proxy only
+display_name: Anthropic (assistant)
+description: Anthropic API key for the assistant's model, injected by the proxy only
 category: inference
 inference_capable: true
 credentials:

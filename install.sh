@@ -5,7 +5,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/kyverno/assistant/main/install.sh | sh -s -- --profile contributor
 #
 # It copies the launcher out of the image, so the launcher and the image it starts come from the same release, runs it,
-# and removes the copy. Every argument goes to the launcher (container/kyverno --help). Besides the arguments, the
+# and removes the copy. Every argument goes to the launcher (container/assistant --help). Besides the arguments, the
 # image comes from --image or $ASSISTANT_IMAGE, else ghcr.io/kyverno/assistant:latest.
 set -eu
 
@@ -30,7 +30,10 @@ main() {
   trap 'rm -rf "$dir"' EXIT INT TERM
   docker run --rm "$image" tar -C /opt/kyverno -c launcher | tar -x -C "$dir"
 
-  ASSISTANT_IMAGE="$image" "$dir/launcher/kyverno" "$@"
+  # An image from before the rename has the launcher under its old name.
+  launcher="$dir/launcher/assistant"
+  [ -x "$launcher" ] || launcher="$dir/launcher/kyverno"
+  ASSISTANT_IMAGE="$image" "$launcher" "$@"
 }
 
 main "$@"

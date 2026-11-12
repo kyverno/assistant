@@ -16,8 +16,8 @@ env_requires:
     description: "owner/repo you contribute to (for example your-org/your-repo)"
     required: true
   - name: ANTHROPIC_API_KEY
-    description: "Optional. Anthropic API key; or choose any provider with `hermes -p kyverno-contributor model`."
+    description: "Optional. Anthropic API key; or choose any provider with `hermes -p contributor model`."
     required: false
   - name: COPILOT_GITHUB_TOKEN
-    description: "Optional. Copilot PAT (Copilot Requests permission), or sign in with `hermes -p kyverno-contributor model`."
+    description: "Optional. Copilot PAT (Copilot Requests permission), or sign in with `hermes -p contributor model`."
     required: false

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Get a repository ready to work on inside the sandbox: clone it and install the toolchains it needs.
-#   kyverno-workspace <owner/repo>
+#   assistant-workspace <owner/repo>
 # The repository goes to /sandbox/<name>. What it needs is read from the repository itself (go.mod -> Go,
 # package.json -> Node.js, .chainsaw.yaml -> the Kyverno CLI and Chainsaw), at the version the repository pins, from
 # toolchains/<name>.sh. Tools land in /sandbox/.toolchains, and `source /sandbox/.toolchains/env.sh` puts them on PATH.
@@ -30,7 +30,7 @@ info() { printf '  %s\n' "$1"; }
 
 REPO="${1:-}"
 if [[ ! "$REPO" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+$ || "${REPO#*/}" == "." || "${REPO#*/}" == ".." ]]; then
-  echo "usage: kyverno-workspace <owner/repo>" >&2
+  echo "usage: assistant-workspace <owner/repo>" >&2
   exit 2
 fi
 DIR="/sandbox/${REPO#*/}"
@@ -57,7 +57,7 @@ if [ -n "${GIT_PUSH_TOKEN:-}" ] && [ -n "$OWNER" ]; then
   git -C "$DIR" config remote.pushDefault fork
   pass "pushes go to your fork: git push fork <branch> ($OWNER/${REPO#*/})"
 else
-  info "pushing is off (container/kyverno --push-to-fork turns it on); the assistant hands you a patch instead"
+  info "pushing is off (container/assistant --push-to-fork turns it on); the assistant hands you a patch instead"
 fi
 
 # What the sandbox really has: the smaller of the memory cgroup's limit and the machine's total, in MB.

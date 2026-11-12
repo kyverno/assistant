@@ -28,7 +28,7 @@ manual use.
 
 `hermes profile install` does **not** prompt for or write any env vars —
 it just installs the profile and tells you to copy `.env.EXAMPLE` to `.env`
-(`~/.hermes/profiles/kyverno/.env` — separate from this repo, never
+(`~/.hermes/profiles/maintainer/.env` — separate from this repo, never
 committed) and fill in these yourself:
 
 - `REPO_GITHUB_TOKEN` — fine-grained PAT: Contents Read, Pull requests Read & Write,
@@ -63,7 +63,7 @@ committed) and fill in these yourself:
 - `ASSISTANT_REPO` — `owner/repo` this instance manages. Defaults to
   `kyverno/kyverno`.
 - `ANTHROPIC_API_KEY`, `COPILOT_GITHUB_TOKEN` or another provider key — optional.
-  The model is chosen in Hermes (`hermes -p kyverno model`, or `/model` in a
+  The model is chosen in Hermes (`hermes -p maintainer model`, or `/model` in a
   chat), and the installer never changes it. `COPILOT_GITHUB_TOKEN` is separate
   from `REPO_GITHUB_TOKEN`, which stays the repo-scoped PAT for the GitHub tools.
 

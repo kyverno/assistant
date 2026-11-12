@@ -89,7 +89,7 @@ The script is idempotent: re-run it as often as you like and it only does what i
 
 1. **Install and prompts:** installs the profile, then asks for each missing credential (GitHub
    token, username, repo) and whether to set up Slack and the sandboxed terminal. Values are saved to
-   `~/.hermes/profiles/kyverno/.env`. Press Enter at any prompt to skip it.
+   `~/.hermes/profiles/maintainer/.env`. Press Enter at any prompt to skip it.
 2. **Checks:** installs the messaging gateway (only if Slack is configured), checks that the GitHub
    and Slack tools are reachable and the hooks are approved, and prints ✓ or ✗ for each check.
 
@@ -119,7 +119,7 @@ kyverno chat
 
 Or mention the bot in the Slack channel you invited it to.
 
-The model is yours to choose, the way Hermes does it: run `hermes -p kyverno model` and pick any
+The model is yours to choose, the way Hermes does it: run `hermes -p maintainer model` and pick any
 provider, type `/model` in a chat, or add a provider key such as `ANTHROPIC_API_KEY` to the profile's
 `.env`. A Claude Pro or Max login works only with purchased extra usage
 ([Anthropic's rules](https://code.claude.com/docs/en/legal-and-compliance),
@@ -161,11 +161,11 @@ A browser board that shows what the agent just told you, linked, grouped and sor
 scroll the chat or copy links by hand. (The sandbox runs it too; see the [README](../README.md#the-dashboard).)
 
 ```bash
-hermes -p kyverno dashboard
+hermes -p maintainer dashboard
 ```
 
 Pick **Kyverno** in the sidebar under Plugins, or open
-`http://127.0.0.1:9119/maintainer?profile=kyverno`. It refreshes every 15 seconds. Keep it open next to
+`http://127.0.0.1:9119/maintainer?profile=maintainer`. It refreshes every 15 seconds. Keep it open next to
 the chat: it fills when the agent answers a queue, stale-PR, issue-triage or Discussions request,
 not in the background. The tabs are described in the [README](../README.md#the-dashboard). The Maintainer tab is
 read-only; confirming and acting still happen in the chat.

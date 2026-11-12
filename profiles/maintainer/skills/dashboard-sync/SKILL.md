@@ -9,7 +9,7 @@ platforms: [linux, macos, windows]
 
 # dashboard-sync Skill
 
-The maintainer's dashboard (`hermes -p kyverno dashboard`, Maintainer tab) shows
+The maintainer's dashboard (`hermes -p maintainer dashboard`, Maintainer tab) shows
 queues, triage results, Discussions and confirmed actions as linked items with
 verdicts and related PRs/issues, so nothing has to be scrolled back to or
 copy-pasted from the session. The other skills call this one at the points they

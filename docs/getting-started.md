@@ -4,8 +4,8 @@ Pick the case that matches you. Each one lists the exact commands, what the laun
 The [README](../README.md) explains how the assistant works and why it is safe; this page is only about getting it
 running.
 
-In the commands below, `kyverno` means the launcher: what the install command starts, or
-`container/kyverno` in a clone. Give the options after `sh -s --`.
+In the commands below, `assistant` means the launcher: what the install command starts, or
+`container/assistant` in a clone. Give the options after `sh -s --`.
 
 - [Which assistant do I want?](#which-assistant-do-i-want)
 - [Case 1: a Mac with Apple Silicon (recommended)](#case-1-a-mac-with-apple-silicon-recommended)
@@ -30,7 +30,7 @@ One image holds two assistants. Each has its own sandbox, its own GitHub token a
 | Can write to GitHub | Comments, labels, reviews, after you confirm each one | A comment on an issue or PR, and a pull request from your own fork, after you confirm the text |
 | Never | Merges (refused by the proxy, whatever the token can do) | Merges, approves, submits a formal review |
 | Token | Fine-grained, scoped to the repo ([details](#tokens)) | Your own account's token, or a `gh` sign-in |
-| Dashboard | Yes (`http://127.0.0.1:9219/maintainer?profile=kyverno`) | No |
+| Dashboard | Yes (`http://127.0.0.1:9219/maintainer?profile=maintainer`) | No |
 
 If you run the launcher without `--profile` it picks for you: the one you already have a sandbox for, otherwise it
 asks (1 maintainer, 2 contributor). Both can coexist; add `--profile` to choose.
@@ -92,7 +92,7 @@ OpenShell supports macOS on Apple Silicon only, so on an Intel Mac, or if you do
 Docker:
 
 ```bash
-kyverno --no-openshell --profile contributor
+assistant --no-openshell --profile contributor
 ```
 
 **This is weaker.** There is no network allowlist (the container can reach the internet), the GitHub token and
@@ -110,7 +110,7 @@ For people changing the assistant itself, or who want to build the image on thei
 ```bash
 git clone https://github.com/kyverno/assistant.git
 cd assistant
-container/kyverno --build --profile contributor        # the first build takes 15 to 30 minutes and downloads about 5 GB
+container/assistant --build --profile contributor        # the first build takes 15 to 30 minutes and downloads about 5 GB
 ```
 
 `--build` needs the checkout, so it does not work from the launcher extracted from an image. Add `--upgrade` when you
@@ -144,7 +144,7 @@ Wrong, expired or revoked? A 404 means the token cannot see the repo. Replace it
   and `gpt-4o-mini` answered on a free account).
 - **A small model works.** The assistant is set up so every tool is visible to the model without searching. If you hit
   a rate limit, it ends in an API error and a retry; wait and try again.
-- **Another provider:** `kyverno --provider anthropic` (or `openai`, `nvidia`). The launcher asks for the key once and
+- **Another provider:** `assistant --provider anthropic` (or `openai`, `nvidia`). The launcher asks for the key once and
   stores it in OpenShell. Then choose a model with `/model`.
 
 ## Letting it push to your fork
@@ -154,7 +154,7 @@ With it, it can run `git push` to branches of **your own fork** of the repositor
 `ASSISTANT_PUSH_REPOS` for more) and, as a maintainer, to the repo you manage, and nowhere else:
 
 ```bash
-ASSISTANT_PUSH_REPOS="repo-a repo-b" container/kyverno --profile contributor --push-to-fork
+ASSISTANT_PUSH_REPOS="repo-a repo-b" container/assistant --profile contributor --push-to-fork
 ```
 
 It asks for a push token once (your `gh` sign-in, or a fine-grained token with Contents Read and write on your fork)
@@ -171,22 +171,22 @@ curl -fsSL https://raw.githubusercontent.com/kyverno/assistant/main/install.sh |
 
 This takes the launcher from the new image, pulls the image and recreates the sandbox. Add `--keep-caches`
 to also carry the downloaded toolchains and build caches (large). From a clone: `git pull`, then
-`container/kyverno --build --upgrade`.
+`container/assistant --build --upgrade`.
 
 ## Starting over and removing everything
 
 | To | Run |
 |---|---|
-| Forget the stored GitHub token | `kyverno --reset` |
-| Stop the sandbox | `openshell sandbox stop kyverno-contributor` (the launcher starts it again) |
-| Delete a sandbox and everything in it | `openshell sandbox delete kyverno-contributor` (maintainer: `kyverno-assistant`) |
+| Forget the stored GitHub token | `assistant --reset` |
+| Stop the sandbox | `openshell sandbox stop assistant-contrib` (the launcher starts it again) |
+| Delete a sandbox and everything in it | `openshell sandbox delete assistant-contrib` (maintainer: `assistant-maint`) |
 | Delete the stored GitHub token | `openshell provider delete kyverno-contributor-github` (maintainer: `kyverno-repo-github`) |
 | Delete a model key | `openshell provider delete kyverno-anthropic` (or `-openai`, `-nvidia`) |
 | Delete the push token | `openshell provider delete kyverno-git-push` |
 | Delete the image | `docker rmi ghcr.io/kyverno/assistant:latest` |
 
 With `--no-openshell`, the clones and toolchains live in a Docker volume that outlives the container:
-`docker volume rm kyverno-contributor-docker-workspace` (the name follows the container's).
+`docker volume rm assistant-contrib-docker-workspace` (the name follows the container's).
 
 ## Troubleshooting
 
@@ -199,7 +199,7 @@ With `--no-openshell`, the clones and toolchains live in a Docker volume that ou
 | `could not tell whose forks to allow` | An older launcher. Refresh it (see [Upgrading](#upgrading)); or set `ASSISTANT_PUSH_LOGIN` to your username |
 | The banner says `github … connecting` | Normal for a moment: it connects after the banner is drawn |
 | The agent cannot find `find_issues` or the GitHub tools | An older image hides them from the model. Upgrade |
-| The agent runs `git clone` and then cannot push | An older image. Upgrade; the assistant should use `kyverno-workspace owner/repo` |
+| The agent runs `git clone` and then cannot push | An older image. Upgrade; the assistant should use `assistant-workspace owner/repo` |
 | The dashboard address does not answer | Only the maintainer assistant has a dashboard. If another sandbox left a dead forward, `openshell forward stop 9219` |
 | The chat looks frozen after start | Give it 30 seconds, press Enter once, then try `--upgrade` |
 | `Docker Desktop … is older than 4.60` | Update Docker Desktop |

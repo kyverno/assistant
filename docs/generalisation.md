@@ -81,7 +81,7 @@ What is Kyverno-specific today, and where it goes:
 | `ASSISTANT_REPO` env var | `ASSISTANT_REPOS` (comma list of `owner/repo`); `ASSISTANT_REPO` kept as an alias for one release |
 | `skills/repo-context` (labels, codegen facts, `Kyverno Release X.Y.Z`) | a generic `repo-context` skill that does the live lookups, plus a **context pack** per org supplying the fixed facts |
 | `plugins/kyverno-fetch`, `plugins/kyverno-sequencer` | merged into one plugin, `plugins/repo-intel`; file classes (`GENERATED`, `API_SURFACE`, `ADMISSION_CRITICAL`) and the "e2e gate" check name move from code to the context pack |
-| `SOUL.md`, README, image and launcher names (`kyverno`, `kyverno-assistant`) | neutral names; Kyverno becomes the first context pack |
+| `SOUL.md`, README, image and launcher names (`kyverno`, `kyverno-assistant`) | Done: launcher `assistant`, sandboxes `assistant-maint` and `assistant-contrib`, profiles `maintainer` and `contributor`; instances made before the rename keep working. Provider ids (`kyverno-*`) and `/opt/kyverno` stay: they hold the stored token and the read-only safety hooks |
 | hard-coded Kyverno hosts and paths in the sandbox policy | derived from `ASSISTANT_REPOS`; extra hosts listed in the pack |
 
 A **context pack** is a directory (`contexts/<org>/`) with `context.yaml` (milestone naming, release branches,

@@ -42,7 +42,7 @@ for people contributing to Kyverno. See [Contributor profile](#contributor-profi
  your laptop
  ┌────────────────────────────────────────────────────────────────────────────┐
  │                                                                            │
- │   you ──► container/kyverno ──► OpenShell gateway                          │
+ │   you ──► container/assistant ──► OpenShell gateway                          │
  │           (the launcher)         • keeps your GitHub token (and any model  │
  │                                    API key) so the sandbox never holds it  │
  │                                  • a proxy that allows only listed hosts   │
@@ -70,7 +70,7 @@ Three pieces, and each one has a job:
   credentials, it would print a meaningless placeholder. The gateway also refuses everything not on an allowlist,
   including merging.
 
-The launcher, `container/kyverno`, ties them together. Each run it checks Docker, installs OpenShell if needed,
+The launcher, `container/assistant`, ties them together. Each run it checks Docker, installs OpenShell if needed,
 stores your token, creates or starts the sandbox, and opens the chat.
 
 ## Quick start
@@ -87,7 +87,7 @@ To upgrade later, run the same command with `-s -- --upgrade` after `sh`. Prefer
 ```bash
 git clone https://github.com/kyverno/assistant.git
 cd assistant
-container/kyverno --build      # first time: builds the image (15 to 30 minutes), then starts it
+container/assistant --build      # first time: builds the image (15 to 30 minutes), then starts it
 ```
 
 For development, `make run` builds the image from your checkout and starts it (see [Development automation](#development-automation)).
@@ -96,7 +96,7 @@ Step-by-step instructions for every case (Apple Silicon, Linux, Intel or Docker 
 pushing, upgrading, troubleshooting) are in [`docs/getting-started.md`](docs/getting-started.md).
 
 If you do not say `--profile`, it first asks whether you want the maintainer or the contributor assistant. It asks you to authorize GitHub once (a browser sign-in with `gh`, or a pasted token), then shows a GitHub page
-and a code to approve for the model sign-in. After that, `container/kyverno` alone gets you back in. Everything it asks is explained in
+and a code to approve for the model sign-in. After that, `container/assistant` alone gets you back in. Everything it asks is explained in
 [Setup, step by step](#setup-step-by-step).
 
 ## Setup, step by step
@@ -124,7 +124,7 @@ build-time checks on both. What decides whether the whole thing runs is Docker, 
 | **Mac with Apple Silicon** | Tested: this is where everything was developed and checked, including real chats |
 | **Linux, x86_64** | Checked end to end on a GitHub Linux runner (Ubuntu 24.04, kernel 6.17, Docker Engine 28): OpenShell installed, the sandbox started, the token stayed a placeholder, merges were refused by the proxy, the hooks were read-only and the dashboard answered. Not tried on a real Linux laptop. The kernel needs Landlock (Linux 5.13 or newer) |
 | **Linux, arm64** | The image is built for it; the launcher has not been tried there |
-| **Intel Mac** | Not supported with OpenShell (it supports macOS on Apple Silicon only). `container/kyverno --no-openshell` needs only Docker, with less protection (not tried on Intel): see [docs/container.md](docs/container.md#running-without-openshell) |
+| **Intel Mac** | Not supported with OpenShell (it supports macOS on Apple Silicon only). `container/assistant --no-openshell` needs only Docker, with less protection (not tried on Intel): see [docs/container.md](docs/container.md#running-without-openshell) |
 | **Windows** | OpenShell supports it through WSL2 (experimental); run the launcher inside WSL2. Untested |
 
 The launcher checks your machine first and says so plainly if it is one it cannot support.
@@ -167,13 +167,13 @@ Pick one:
 
 | Option | Command | Time | Notes |
 |---|---|---|---|
-| **Build it yourself** | `container/kyverno --build` | 15 to 30 minutes, once | Works today on any supported machine. Downloads about 5 GB while building. |
-| **Download the published image** | `container/kyverno` | A few minutes (about 1.2 GB) | The default. It pulls `ghcr.io/kyverno/assistant:latest` (see [why](#why-it-is-built-this-way)); pin a version with `--image ghcr.io/kyverno/assistant:v0.1.0`. |
+| **Build it yourself** | `container/assistant --build` | 15 to 30 minutes, once | Works today on any supported machine. Downloads about 5 GB while building. |
+| **Download the published image** | `container/assistant` | A few minutes (about 1.2 GB) | The default. It pulls `ghcr.io/kyverno/assistant:latest` (see [why](#why-it-is-built-this-way)); pin a version with `--image ghcr.io/kyverno/assistant:v0.1.0`. |
 
 ### 3. Start it
 
 ```bash
-container/kyverno --build        # or just: container/kyverno
+container/assistant --build        # or just: container/assistant
 ```
 
 It prints five numbered steps. This is what each one does and what you answer:
@@ -203,7 +203,7 @@ The assistant needs a model. Copilot is the default because the sign-in is one c
   `gpt-4.1` and `gpt-4o-mini` answered on a free account. `--global` keeps the choice for next time.
 - **Another provider.** Its API key is stored in OpenShell like the GitHub token, so the sandbox never sees it:
   ```bash
-  container/kyverno --provider anthropic      # or openai, or nvidia
+  container/assistant --provider anthropic      # or openai, or nvidia
   ```
   The launcher asks for the key once. Then use `/model` to pick one of its models.
 
@@ -227,23 +227,23 @@ Type `/help` for the chat commands.
 
 | To | Run |
 |---|---|
-| Start, or come back later | `container/kyverno` |
-| Open a second chat at the same time | `container/kyverno` in another terminal |
-| Open the dashboard | http://127.0.0.1:9219/maintainer?profile=kyverno (the launcher prints it; see [the dashboard](#the-dashboard)) |
+| Start, or come back later | `container/assistant` |
+| Open a second chat at the same time | `container/assistant` in another terminal |
+| Open the dashboard | http://127.0.0.1:9219/maintainer?profile=maintainer (the launcher prints it; see [the dashboard](#the-dashboard)) |
 | Leave | Close the chat. The sandbox keeps running, idle |
-| Stop the sandbox | `openshell sandbox stop kyverno-assistant` (`container/kyverno` starts it again) |
+| Stop the sandbox | `openshell sandbox stop assistant-maint` (`container/assistant` starts it again) |
 | See whether it is running | `openshell sandbox list` |
-| See what it contacted, and what was blocked | `openshell logs kyverno-assistant` |
-| Update to a new version | `git pull`, then `container/kyverno --build --upgrade` (or `container/kyverno --upgrade` once images are published). Keeps your memory, history, sign-in and model |
+| See what it contacted, and what was blocked | `openshell logs assistant-maint` |
+| Update to a new version | `git pull`, then `container/assistant --build --upgrade` (or `container/assistant --upgrade` once images are published). Keeps your memory, history, sign-in and model |
 | Replace your GitHub token | `bash -c 'read -rs -p "New GitHub token: " REPO_GITHUB_TOKEN; echo; export REPO_GITHUB_TOKEN; openshell provider update kyverno-repo-github --credential REPO_GITHUB_TOKEN'`, then open a new chat. Chats already open keep the old token |
-| Use another model provider | `container/kyverno --provider anthropic` (or `openai`, `nvidia`) |
-| Set up without opening the chat | `container/kyverno --no-attach` |
+| Use another model provider | `container/assistant --provider anthropic` (or `openai`, `nvidia`) |
+| Set up without opening the chat | `container/assistant --no-attach` |
 
 ## Where your data lives
 
 Your memory, chat history, notes, settings and the model sign-in live **inside the sandbox**, in the profile
-folder `/opt/hermes-home/.hermes/profiles/kyverno`. They survive stopping and starting it, and
-`container/kyverno --upgrade` carries them to a new image. Deleting the sandbox deletes them.
+folder `/opt/hermes-home/.hermes/profiles/maintainer`. They survive stopping and starting it, and
+`container/assistant --upgrade` carries them to a new image. Deleting the sandbox deletes them.
 
 Your GitHub token is not in the sandbox: it lives in OpenShell, on your laptop. The Copilot sign-in token is in
 the sandbox (it only grants access to Copilot's models).
@@ -310,11 +310,11 @@ scheduled jobs run inside Hermes' gateway, which is not started. They work in th
 |---|---|
 | `The requested model is not supported` | The model is not available on your Copilot plan. `/model gpt-4.1 --global` |
 | `No LLM provider configured ... openrouter` | You picked a mixture-of-agents option that needs an OpenRouter key. Pick a normal model with `/model` |
-| The chat looks frozen right after start | Give it 30 seconds. If it stays blank, press Enter once. If it still does nothing, run `container/kyverno --build --upgrade` |
-| `could not pull ...` | No network to the registry, or a version that does not exist. Check the tag, or use `container/kyverno --build`. A pull that crawls is usually your route to GitHub's download servers: try another network, the finished layers are kept |
+| The chat looks frozen right after start | Give it 30 seconds. If it stays blank, press Enter once. If it still does nothing, run `container/assistant --build --upgrade` |
+| `could not pull ...` | No network to the registry, or a version that does not exist. Check the tag, or use `container/assistant --build`. A pull that crawls is usually your route to GitHub's download servers: try another network, the finished layers are kept |
 | The sandbox goes to `Error`, "UID or GID zero" | The image's default user must be 1000, not root. Rebuild with `--build` |
-| `could not register the provider profile` | OpenShell holds an older copy of this project's profile from an earlier run. Start clean (nothing is rebuilt): `openshell sandbox delete kyverno-assistant`, `openshell provider delete kyverno-repo-github`, `openshell profile delete kyverno-repo-github`, then `container/kyverno --image kyverno-assistant:dev` (or without `--image` once an image is published). The launcher asks for your GitHub token again |
-| `sandbox ... did not become Ready` | The launcher prints the sandbox's state and the last lines of its log. Retry from scratch: `openshell sandbox delete kyverno-assistant`, then run the launcher again |
+| `could not register the provider profile` | OpenShell holds an older copy of this project's profile from an earlier run. Start clean (nothing is rebuilt): `openshell sandbox delete assistant-maint`, `openshell provider delete kyverno-repo-github`, `openshell profile delete kyverno-repo-github`, then `container/assistant --image assistant:dev` (or without `--image` once an image is published). The launcher asks for your GitHub token again |
+| `sandbox ... did not become Ready` | The launcher prints the sandbox's state and the last lines of its log. Retry from scratch: `openshell sandbox delete assistant-maint`, then run the launcher again |
 | The build is very slow or runs out of memory | Docker Desktop's VM memory. Raise it in Settings → Resources (at least 4 GB) |
 | `Docker Desktop ... is older than 4.60` | The sandbox needs a newer Docker Desktop. Update it |
 | GitHub says the token is rejected | Wrong, expired or revoked: create a new one. A 404 means the token cannot see that repo (scope it to the repo, or have the org approve it) |
@@ -322,14 +322,14 @@ scheduled jobs run inside Hermes' gateway, which is not started. They work in th
 ## Removing everything
 
 ```bash
-openshell sandbox delete kyverno-assistant          # the sandbox and everything in it (memory, history, sign-in)
+openshell sandbox delete assistant-maint          # the sandbox and everything in it (memory, history, sign-in)
 openshell provider delete kyverno-repo-github       # your stored GitHub token
 openshell provider delete kyverno-anthropic         # model keys you added, if any (also kyverno-openai, kyverno-nvidia)
-docker rmi kyverno-assistant:dev                    # the image, if you built it yourself
+docker rmi assistant:dev                    # the image, if you built it yourself
 ```
 
 If you used `--push-to-fork`, also `openshell provider delete kyverno-git-push` (or run the launcher with `--no-push`). With `--no-openshell`, the clones and toolchains live in a Docker volume that outlives the container:
-`docker volume rm kyverno-assistant-docker-workspace` (the name follows the container's).
+`docker volume rm assistant-maint-docker-workspace` (the name follows the container's).
 
 ## What it does
 
@@ -355,7 +355,7 @@ chat or copy links by hand. It runs inside the sandbox, and the launcher forward
 prints the address:
 
 ```
-http://127.0.0.1:9219/maintainer?profile=kyverno
+http://127.0.0.1:9219/maintainer?profile=maintainer
 ```
 
 Pick **Kyverno** in the sidebar under Plugins. It refreshes every 15 seconds. Keep it open next to the chat: it fills
@@ -380,19 +380,19 @@ includes the Copilot sign-in token. Your GitHub token is not there. If you do no
 ## Coding in the sandbox
 
 Both profiles have a terminal inside the sandbox, which cannot reach your laptop. Ask the assistant to reproduce an
-issue or fix a PR and it follows the `workspace` skill: `kyverno-workspace <owner/repo>` clones the repo and downloads
+issue or fix a PR and it follows the `workspace` skill: `assistant-workspace <owner/repo>` clones the repo and downloads
 the toolchains it declares (Go, Node, or the Kyverno CLI and Chainsaw), then it builds, runs the tests, and shows you
 the real output. The toolchains are downloaded the first time, not baked into the image: the network policy allows
 only those hosts, GET only, and every download is checked against the vendor's checksum. Caches live in the sandbox, so
 recreating it downloads them again, unless you pass `--keep-caches` to `--upgrade`. Your cloned repositories and their
 unpushed commits always come along on `--upgrade`. When a toolchain's rough memory need is above what the sandbox really
-has, `kyverno-workspace` says so with both numbers. Things that need a real cluster cannot run, and the assistant says so
+has, `assistant-workspace` says so with both numbers. Things that need a real cluster cannot run, and the assistant says so
 (see [#25](https://github.com/kyverno/assistant/issues/25)).
 
 The result comes back as a patch (`openshell sandbox download`), or as a pushed branch if you turn on pushing:
 
 ```bash
-container/kyverno --push-to-fork      # off by default; --no-push removes it
+container/assistant --push-to-fork      # off by default; --no-push removes it
 ```
 
 That stores a second credential in OpenShell (your `gh` sign-in's token, or a token with write on your fork). OpenShell
@@ -417,10 +417,10 @@ merge, approve, submit a formal
 review; hooks enforce that. It can push to your own fork only if you start the launcher with `--push-to-fork`.
 
 ```bash
-container/kyverno --profile contributor     # or just container/kyverno, which asks which assistant you want
+container/assistant --profile contributor     # or just container/assistant, which asks which assistant you want
 ```
 
-It has its own sandbox (`kyverno-contributor`) and its own GitHub token, apart from the maintainer's. It needs a GitHub
+It has its own sandbox (`assistant-contrib`) and its own GitHub token, apart from the maintainer's. It needs a GitHub
 token of your own account (a fine-grained PAT; "Public repositories (read-only)" is enough to read everything, or sign in
 with `gh`), your GitHub username (read from the token), and the repo (default `kyverno/kyverno`). The coding environment
 below lets it clone the repo, build and test in the sandbox, which holds no real tokens. It runs only in the
@@ -493,7 +493,7 @@ Run `make help` to see the available commands. The most useful targets are:
 | Command | Purpose |
 |---|---|
 | `make lint` | Run ShellCheck and Hadolint using the same pinned images as CI |
-| `make image` | Build `kyverno-assistant:dev` locally |
+| `make image` | Build `assistant:dev` locally |
 | `make test` | Build the image and run its offline startup, plugin and memory checks |
 | `make scan` | Scan the local image for fixable critical vulnerabilities |
 | `make check` | Run lint and image-build checks |

@@ -1,5 +1,5 @@
 # shellcheck shell=bash disable=SC2153,SC2034
-# ARCH and TOOLS are set by kyverno-workspace, which sources this file.
+# ARCH and TOOLS are set by assistant-workspace, which sources this file.
 # The Kyverno CLI (kyverno test / apply, which need no cluster) and Chainsaw, for repositories of policies and tests.
 # Released binaries, not built: they are small and the releases are the supported way to get them. Each release
 # publishes a checksums.txt, which the download is checked against.

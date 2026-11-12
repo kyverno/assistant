@@ -12,7 +12,7 @@ export HERMES_HOME=/opt/hermes-home/.hermes
 export PATH="/opt/hermes-home/.local/bin:$PATH"
 PORT="${ASSISTANT_DASHBOARD_PORT:-9219}"
 
-# Without OpenShell (container/kyverno --no-openshell) the launcher writes the keys into a tmpfs file a moment after
+# Without OpenShell (container/assistant --no-openshell) the launcher writes the keys into a tmpfs file a moment after
 # the container starts. Wait for it, so the dashboard starts with them.
 if [ "${ASSISTANT_RUNTIME:-}" = docker ]; then
   for _ in $(seq 1 120); do [ -f /run/kyverno-secrets/env ] && break; sleep 1; done
@@ -30,7 +30,7 @@ if [ "${1:-maintainer}" != maintainer ]; then exec sleep infinity; fi
       . /usr/local/bin/kyverno-env
       kyverno_load_secrets
     fi
-    hermes -p kyverno dashboard --isolated --no-open --skip-build --port "$PORT" || true
+    hermes -p maintainer dashboard --isolated --no-open --skip-build --port "$PORT" || true
     sleep 5
   done
 ) >> /tmp/dashboard.log 2>&1 &
