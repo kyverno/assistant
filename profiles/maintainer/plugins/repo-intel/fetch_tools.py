@@ -47,8 +47,9 @@ FETCH_PR_CANDIDATES_SCHEMA = _schema(
     "branch, size (files/additions/deletions — a review-effort signal, distinct from "
     "priority), milestone, milestone_due_on (cite when close — real urgency, not a guess), "
     "labels, changed_files, unresolved_review_threads, "
-    "coderabbit_approved, ci_state (the PR's own checks only, excluding the E2E Gate "
-    "status — see gate_blocked for that), closing_issues (each with its own milestone, "
+    "bot_approved (a bot the organisation pack counts as an approver has approved), "
+    "ci_state (the PR's own checks only, excluding the pack's branch-gate status — see "
+    "gate_blocked for that), closing_issues (each with its own milestone, "
     "whether it's open, and its own labels — release-* lives here, not on the PR), and "
     "external_references: for a body reference ('Parent: #N', 'Depends on #N', ...) to a "
     "number outside this fetched set, its real kind/state/title. Cite that directly; never "
@@ -82,10 +83,10 @@ FETCH_PR_CANDIDATES_SCHEMA = _schema(
             "type": "string",
             "description": "Extra GitHub search qualifiers beyond 'repo:/is:pr/is:open/"
             "draft:false', which this tool adds itself — e.g. 'label:ready-for-review', "
-            "'label:ready-for-review milestone:\"Kyverno Release 1.20.0\"', "
+            "'label:ready-for-review milestone:\"<milestone title>\"', "
             "'label:needs-review', 'label:workflow-approval-required', 'author:someuser', "
             "'author:app/dependabot' (every open Dependabot PR, labelled or not), "
-            "'label:stale milestone:\"Kyverno Release 1.20.0\"' (stale PRs scoped to one "
+            "'label:stale milestone:\"<milestone title>\"' (stale PRs scoped to one "
             "milestone, with include_stale_detail=true).",
         },
         "limit": {

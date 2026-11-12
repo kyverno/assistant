@@ -56,11 +56,11 @@ an area (package/folder), `workflow-approval-required` PRs instead of the review
 queue, or the 10 most urgent `ready-for-review` PRs. Never default to
 oldest-first or "all PRs." Exception: `cron/jobs.json`'s `kyverno-review-digest` has
 no one to ask — use a fixed fallback (highest-urgency closing-issue label, then
-`coderabbit_approved` + zero unresolved threads, then most-recently-updated) and
+`bot_approved` + zero unresolved threads, then most-recently-updated) and
 label it as the digest default, not the general rule.
 
 "Most urgent 10" ranks by the same ladder step 4 uses (closing-issue severity,
-milestone proximity, `coderabbit_approved`, author association, size) — none of
+milestone proximity, `bot_approved`, author association, size) — none of
 that is a search qualifier, so it needs the digest pass: `fetch_pr_candidates(
 search_query="label:ready-for-review", detail="digest", limit=60)`, rank
 client-side, take the top 10, then `fetch_pr_details(repo, pr_numbers=[...])`
@@ -142,7 +142,7 @@ for just those 10. State the slice size against the digest's own `total_count`.
         b. `release-critical`/`-high`/`-medium`/`-low` on the closing issue
            (not the PR's own labels — see `kyverno-context`), then
            `milestone_due_on` proximity.
-        c. `coderabbit_approved` + zero unresolved threads.
+        c. `bot_approved` + zero unresolved threads.
         d. `author_association` (`MEMBER` > `COLLABORATOR` > `CONTRIBUTOR` >
            `FIRST_TIME_CONTRIBUTOR`/`NONE`).
         e. `size` — smaller first, a pure tiebreak, never a priority driver.
@@ -275,7 +275,7 @@ queue's file overlap, naming specific PRs and paths.
 - With an open `e2e-failure` issue: confirm `gate_blocked` is stated for every
   non-bypass PR on that branch, and any bypass read is the agent's own, not
   mechanical.
-- Confirm two candidates in the same tier, differing only in `coderabbit_approved`,
+- Confirm two candidates in the same tier, differing only in `bot_approved`,
   get that stated as the tiebreak.
 - Ask about a PR with a related GitHub Discussion: confirm `list_discussions` is
   checked and the thread is cited.

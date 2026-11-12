@@ -78,7 +78,7 @@ Every Dependabot PR appears exactly once.
    - `mnemosyne_triple_query` for `caused_e2e_failure` on the packages the call sites
      fall in; `mnemosyne_recall` for an earlier decision on this dependency (a
      deliberate skip, a known-bad version).
-5. **Reviews**: `copilot_review.verdict`/`summary`/`findings`, and `coderabbit_approved`.
+5. **Reviews**: `copilot_review.verdict`/`summary`/`findings`, and `bot_approved`.
    When Copilot isn't approving, `pull_request_read(method="get_review_comments")` and
    say whether each finding needs a code change (blocking) or is advisory (changelog,
    docs). Any human review is read the same way.

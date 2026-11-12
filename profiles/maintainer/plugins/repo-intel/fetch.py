@@ -19,21 +19,21 @@ import urllib.error
 import urllib.request
 from typing import Any, Optional
 
+from .pack import PackError, Rules, load as load_pack
+from .sequencer import CROSS_REF_PATTERN
+
 _GRAPHQL_URL = "https://api.github.com/graphql"
-_USER_AGENT = "kyverno-assistant-fetch-plugin"
-
-# Mirror of sequencer.py's _CROSS_REF_PATTERN — kept in sync manually.
-# Covers real phrasing variants, not just the canonical form: "Parent: #17701", "Stacks on
-# top of #17695", "depends on kyverno/kyverno#17720", "Blocked by #N".
-_CROSS_REF_PATTERN = re.compile(
-    r"\b(?:depends on|blocked by|requires|stack(?:s|ed)?\s+on(?:\s+top\s+of)?|parent)\b"
-    r"\s*:?\s*(?:([\w.-]+/[\w.-]+))?#(\d+)",
-    re.IGNORECASE,
-)
-
+_USER_AGENT = "repo-intel-fetch-plugin"
 
 class FetchError(RuntimeError):
     pass
+
+
+def _rules() -> Rules:
+    try:
+        return load_pack()
+    except PackError as exc:
+        raise FetchError(f"organisation pack: {exc}") from exc
 
 
 def _token() -> str:
@@ -141,12 +141,12 @@ query($owner: String!, $name: String!, $number: Int!) {
 """
 
 
-def _compute_ci_state(contexts: list[dict]) -> str:
-    """statusCheckRollup's own single .state field can't be trusted: it blends the 'E2E Gate'
-    status context (the branch-wide gate, already surfaced separately via gate_blocked) in
-    with the PR's own checks, so a gated PR shows FAILURE here even when every real check is
-    green. Exclude that one context and derive the real state from what's left."""
-    relevant = [c for c in contexts if c.get("context") != "E2E Gate"]
+def _compute_ci_state(contexts: list[dict], gate_contexts: frozenset = frozenset()) -> str:
+    """statusCheckRollup's own single .state field can't be trusted: it blends a branch gate's
+    status context (already surfaced separately via gate_blocked) in with the PR's own checks,
+    so a gated PR shows FAILURE here even when every real check is green. Exclude the pack's
+    gate contexts and derive the real state from what's left."""
+    relevant = [c for c in contexts if c.get("context") not in gate_contexts]
     if not relevant:
         return "UNKNOWN"
     has_failure = False
@@ -267,7 +267,7 @@ def _copilot_review(reviews: list[dict]) -> Optional[dict[str, Any]]:
     }
 
 
-def _fetch_one(owner: str, name: str, number: int) -> dict[str, Any]:
+def _fetch_one(owner: str, name: str, number: int, rules: Rules) -> dict[str, Any]:
     data = _graphql(_DETAIL_QUERY, {"owner": owner, "name": name, "number": number})
     pr = data["repository"]["pullRequest"]
     if pr is None:
@@ -275,10 +275,10 @@ def _fetch_one(owner: str, name: str, number: int) -> dict[str, Any]:
 
     threads = pr["reviewThreads"]["nodes"]
     reviews = pr["reviews"]["nodes"]
-    # CodeRabbit's real GraphQL author.login is "coderabbitai" (no "[bot]" suffix — that's a
-    # REST/UI-only convention; GraphQL's Bot actor doesn't carry it).
-    coderabbit_approved = any(
-        r["author"] and r["author"]["login"] == "coderabbitai" and r["state"] == "APPROVED"
+    # GraphQL's Bot actor login has no "[bot]" suffix (that's a REST/UI-only convention), so the
+    # pack's approval_bots are written the bare way, e.g. "coderabbitai".
+    bot_approved = any(
+        r["author"] and r["author"]["login"] in rules.approval_bots and r["state"] == "APPROVED"
         for r in reviews
     )
     author_login = (pr["author"] or {}).get("login")
@@ -319,8 +319,8 @@ def _fetch_one(owner: str, name: str, number: int) -> dict[str, Any]:
         "files_truncated": pr["files"]["pageInfo"]["hasNextPage"],
         "unresolved_review_threads": sum(1 for t in threads if not t["isResolved"]),
         "review_threads_truncated": pr["reviewThreads"]["pageInfo"]["hasNextPage"],
-        "coderabbit_approved": coderabbit_approved,
-        "ci_state": _compute_ci_state(contexts_conn["nodes"]),
+        "bot_approved": bot_approved,
+        "ci_state": _compute_ci_state(contexts_conn["nodes"], frozenset(g.status_context for g in rules.gates)),
         "ci_state_truncated": contexts_conn["pageInfo"]["hasNextPage"],
         "closing_issues": [
             {
@@ -344,7 +344,7 @@ _PR_DIGEST_FIELDS = (
     "bumps", "semver_level", "author_association", "created_at", "base_branch", "head_branch",
     "size", "milestone", "milestone_due_on", "labels", "labels_truncated", "changed_files",
     "files_truncated", "unresolved_review_threads", "review_threads_truncated",
-    "coderabbit_approved", "ci_state", "ci_state_truncated", "closing_issues",
+    "bot_approved", "ci_state", "ci_state_truncated", "closing_issues",
     "external_references", "maintainer_can_modify", "staled_at", "last_commit_at",
     "comment_count", "author_comments_since_stale",
 )
@@ -402,13 +402,13 @@ query($owner: String!, $name: String!, $number: Int!) {
 """
 
 
-def _fetch_one_stale(owner: str, name: str, number: int) -> dict[str, Any]:
+def _fetch_one_stale(owner: str, name: str, number: int, rules: Rules) -> dict[str, Any]:
     """Enriches _fetch_one's normal PR fetch with the extra facts an author-blocked decision
     needs: when it actually went stale, the author's own comments since, days since their last
     commit, whether the maintainer can push to the branch, and — reusing _fetch_issue_one rather
     than a second closing-issue lookup — each closing issue's real assignees and every other open
     PR also claiming to close it."""
-    pr = _fetch_one(owner, name, number)
+    pr = _fetch_one(owner, name, number, rules)
     if "error" in pr:
         return pr
 
@@ -470,12 +470,13 @@ def fetch_pr_candidates(
     numbers = [n["number"] for n in search_result["nodes"] if n]
     total_count = search_result["issueCount"]
 
+    rules = _rules()
     fetch_one = _fetch_one_stale if include_stale_detail else _fetch_one
     prs: list[dict[str, Any]] = []
     errors: list[str] = []
     if numbers:
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(numbers))) as pool:
-            futures = {pool.submit(fetch_one, owner, name, n): n for n in numbers}
+            futures = {pool.submit(fetch_one, owner, name, n, rules): n for n in numbers}
             for future in concurrent.futures.as_completed(futures):
                 n = futures[future]
                 try:
@@ -492,7 +493,7 @@ def fetch_pr_candidates(
     current_repo = f"{owner}/{name}".lower()
     for p in prs:
         refs: set[int] = set()
-        for match in _CROSS_REF_PATTERN.finditer(p.get("body") or ""):
+        for match in CROSS_REF_PATTERN.finditer(p.get("body") or ""):
             repo_part, num_str = match.group(1), match.group(2)
             if repo_part and repo_part.lower() != current_repo:
                 continue
@@ -538,12 +539,13 @@ def fetch_pr_details(
         raise FetchError(f"repo must be 'owner/name', got {repo!r}")
     owner, name = repo.split("/", 1)
 
+    rules = _rules()
     fetch_one = _fetch_one_stale if include_stale_detail else _fetch_one
     prs: list[dict[str, Any]] = []
     errors: list[str] = []
     if pr_numbers:
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(pr_numbers))) as pool:
-            futures = {pool.submit(fetch_one, owner, name, n): n for n in pr_numbers}
+            futures = {pool.submit(fetch_one, owner, name, n, rules): n for n in pr_numbers}
             for future in concurrent.futures.as_completed(futures):
                 n = futures[future]
                 try:

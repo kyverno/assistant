@@ -40,7 +40,7 @@ from .pack import Rules
 
 # Covers real phrasing variants seen in the wild, not just the canonical form: "Parent:
 # #17701", "Stacks on top of #17695", "depends on owner/repo#17720", "Blocked by #N".
-_CROSS_REF_PATTERN = re.compile(
+CROSS_REF_PATTERN = re.compile(
     r"\b(?:depends on|blocked by|requires|stack(?:s|ed)?\s+on(?:\s+top\s+of)?|parent)\b"
     r"\s*:?\s*(?:([\w.-]+/[\w.-]+))?#(\d+)",
     re.IGNORECASE,
@@ -145,7 +145,7 @@ def build_hard_edges(prs: list[PR], repo_default_branch: str, rules: Rules,
                 edges.append((base_pr.number, p.number, "stacked"))
 
         # 3. Explicit body reference.
-        for match in _CROSS_REF_PATTERN.finditer(p.body):
+        for match in CROSS_REF_PATTERN.finditer(p.body):
             if match.group(1) and (repo is None or match.group(1).lower() != repo.lower()):
                 continue   # names another repository: not about a candidate with that number
             ref = int(match.group(2))
