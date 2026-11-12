@@ -1,0 +1,41 @@
+name: CI health
+description: Summarise failures, flakes and cost of one workflow from the Actions API; read-only
+inputs:
+  mode:
+    description: collect, or validate (offline configuration check)
+    required: true
+  config:
+    description: Trusted repository configuration JSON
+    default: .github/ci-health.json
+  repository:
+    description: owner/name of the repository whose workflow runs are analysed
+    default: ${{ github.repository }}
+  output-dir:
+    description: Directory that receives report.json and report.md
+    default: ci-health
+outputs:
+  report-path:
+    description: Path of the JSON report
+    value: ${{ steps.collect.outputs.report-path }}
+runs:
+  using: composite
+  steps:
+    - name: Check runtime tools
+      shell: bash
+      env:
+        CI_HEALTH_MODE: ${{ inputs.mode }}
+      run: |
+        tools=(python3)
+        [[ "$CI_HEALTH_MODE" == "validate" ]] || tools+=(gh)
+        for tool in "${tools[@]}"; do
+          command -v "$tool" > /dev/null || { echo "::error::Required tool '$tool' not found"; exit 1; }
+        done
+    - name: Run CI health
+      id: collect
+      shell: bash
+      env:
+        CI_HEALTH_MODE: ${{ inputs.mode }}
+        CI_HEALTH_CONFIG: ${{ inputs.config }}
+        CI_HEALTH_REPOSITORY: ${{ inputs.repository }}
+        CI_HEALTH_OUT: ${{ inputs.output-dir }}
+      run: python3 "$GITHUB_ACTION_PATH/run.py"

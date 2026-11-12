@@ -58,12 +58,13 @@ config key is an error, not ignored; every mutating mode defaults to dry run.
 
 ## Roadmap for the actions
 
-Only `pr-management` exists. The others are possible later work, deliberately not started.
+`pr-management` and `ci-health` exist. The others are possible later work, deliberately not started.
 
 | Action | Sketch | Config keys (all repo-owned) | Output other layers use |
 | --- | --- | --- | --- |
 | `pr-management` | Done: ported as is from #18275; only a comment was changed | see its README | labels `needs-author-action`, `stale`, `ready-for-review` |
-| `flaky-tests` | Read recent runs of named workflows through the Actions API, find tests that both pass and fail on the same commit or alternate across runs, open or update one tracking issue per test, optionally label the failing PR "known flaky" so authors are not blamed | workflows to watch, how test names are parsed (JUnit or `go test -json`), history window, failure-rate threshold, issue labels, quarantine label | `flaky` issues; the readiness `infra_checks` list can name known-flaky checks |
+| `ci-health` | Done as a read-only report: reads recent runs of one workflow, groups failures by root cause, classifies jobs as flaky, persistent, cross-version, intermittent or fan-out-only, lists commits since the last green run and the slowest jobs. Opening issues and an optional model step come later | see its README | the report artifact and job summary; later one tracking issue |
+| `flaky-tests` (folded into `ci-health`) | Read recent runs of named workflows through the Actions API, find tests that both pass and fail on the same commit or alternate across runs, open or update one tracking issue per test, optionally label the failing PR "known flaky" so authors are not blamed | workflows to watch, how test names are parsed (JUnit or `go test -json`), history window, failure-rate threshold, issue labels, quarantine label | `flaky` issues; the readiness `infra_checks` list can name known-flaky checks |
 | `security-triage` | Collect code-scanning, secret-scanning and Dependabot alerts, group by severity and age, open or update a single tracking issue, ping the configured security team on new critical ones, flag alerts past SLA | severity SLAs in days, security team, alert sources enabled, exempt rules or paths, issue label | one issue per repo; severity labels |
 | `vuln-scan` | Run a pinned scanner (Trivy) on the repo filesystem and named images, de-duplicate against open tracking issues, open one issue per distinct CVE with the fixed version when there is one | scan targets, severity floor, ignore list with expiry, whether to fail the job | issues labelled `vulnerability`; SARIF upload as an option |
 

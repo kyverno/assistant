@@ -1,0 +1,20 @@
+{
+  "workflow": "tests.yaml",
+  "branch": "main",
+  "event": "push",
+  "runs": 30,
+  "mass_failure_threshold": 10,
+  "max_log_jobs": 40,
+  "failed_test_pattern": "--- FAIL: (\\S+)",
+  "infra_patterns": [
+    "TLS handshake timeout",
+    "i/o timeout",
+    "502 Bad Gateway",
+    "503 Service Unavailable",
+    "toomanyrequests",
+    "rate limit",
+    "Error response from daemon",
+    "connection reset by peer",
+    "could not resolve host"
+  ]
+}

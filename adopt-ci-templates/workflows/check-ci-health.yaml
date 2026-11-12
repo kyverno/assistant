@@ -1,0 +1,23 @@
+name: Check CI health configuration
+
+on:
+  pull_request:
+    paths:
+      - .github/ci-health.json
+      - .github/workflows/ci-health.yaml
+      - .github/workflows/check-ci-health.yaml
+
+  push:
+    branches: [main]
+    paths:
+      - .github/ci-health.json
+      - .github/workflows/ci-health.yaml
+      - .github/workflows/check-ci-health.yaml
+
+permissions: {}
+
+jobs:
+  validate:
+    permissions:
+      contents: read
+    uses: kyverno/assistant/.github/workflows/ci-health-validate.yml@<full-commit-SHA>

@@ -1,0 +1,49 @@
+# Reusable workflow: reports how one workflow of the CALLING repository has been doing (root causes, persistent and
+# flaky jobs, commits since the last green run, cost). Read-only: it writes the job summary and an artifact and
+# changes no issue, label or status. A caller supplies the triggers; the trusted default-branch checkout, the
+# concurrency group and the least-privilege token live here. See docs/adopting-actions.md.
+#
+# The action is referenced by full path and commit because a local `./` path would resolve in the caller's checkout.
+# That commit is always older than this file's own; move it when the action changes.
+name: CI health (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      config:
+        description: Path of the repository's CI health configuration
+        type: string
+        default: .github/ci-health.json
+
+# The caller must grant at least the permissions of the job below.
+permissions: {}
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: ci-health
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout trusted default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Collect CI health
+        uses: kyverno/assistant/.github/actions/ci-health@<full-commit-SHA>
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          mode: collect
+          config: ${{ inputs.config }}
+      - name: Upload report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-health
+          path: ci-health/
+          if-no-files-found: error
