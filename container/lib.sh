@@ -100,12 +100,23 @@ instance_profile() {
 STATE_FILES=".env config.yaml .kyverno-model-chosen mnemosyne/data memories sessions kyverno-dashboard maintainer-dashboard kyverno-contributor contributor-state state.db state.db-wal state.db-shm"
 
 # Build the image from this checkout (--build), or pull it when it is missing or --upgrade asks for the newest.
+# --org NAME (or ASSISTANT_ORG) picks the organisation pack, container/org/NAME/, to bake into a build; the default is
+# kyverno's, the worked example.
 ensure_image() {
+  ORG_PACK="${ORG_PACK:-${ASSISTANT_ORG:-kyverno}}"
+  if [[ ! "$ORG_PACK" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then fail "'$ORG_PACK' is not a valid pack name"; exit 2; fi
+  if [ "$BUILD" != 1 ] && [ "$ORG_PACK" != kyverno ]; then
+    fail "--org NAME bakes your pack into an image you build: add --build (the published image carries Kyverno's pack)"; exit 2
+  fi
+  if [ "$BUILD" = 1 ] && [ ! -f "$REPO_ROOT/container/org/$ORG_PACK/org.yaml" ]; then
+    fail "no pack at container/org/$ORG_PACK/org.yaml (see docs/organisation-pack.md)"; exit 2
+  fi
   if [ "$BUILD" = 1 ]; then
     [ -f "$REPO_ROOT/container/Dockerfile" ] || { fail "--build needs a checkout of the repository (this launcher was taken from an image)"; exit 1; }
     IMAGE="assistant:dev"
     info "building $IMAGE from this checkout (the first build takes several minutes)..."
-    docker build -f "$REPO_ROOT/container/Dockerfile" -t "$IMAGE" "$REPO_ROOT" || { fail "image build failed"; exit 1; }
+    docker build -f "$REPO_ROOT/container/Dockerfile" -t "$IMAGE" --build-arg "ORG_PACK=$ORG_PACK" "$REPO_ROOT" \
+      || { fail "image build failed"; exit 1; }
     if [ "$UPGRADE" != 1 ] && instance_exists; then
       info "note: '$INSTANCE' already exists and keeps running the image it was made from; add --upgrade to switch it to this build"
     fi

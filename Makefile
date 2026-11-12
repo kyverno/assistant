@@ -1,10 +1,11 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
-IMAGE ?= kyverno-assistant
+IMAGE ?= assistant
 TAG ?= dev
 DOCKERFILE := container/Dockerfile
 SHELLCHECK_IMAGE := koalaman/shellcheck@sha256:bb596a0d169b85ddd81d8b6d3a2ff6d5baf5fca10b97f575ebc647c3dff62b3d
+ORG ?= kyverno
 HADOLINT_IMAGE := hadolint/hadolint@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d
 TRIVY_IMAGE := aquasec/trivy@sha256:2416d1f74045b57274df1a340eee6b510cacd73c66a6ccb8da092b117eb7d222
 SHELL_SCRIPTS := install.sh scripts/adopt-ci.sh container/assistant container/assistant-docker container/kyverno container/kyverno-docker container/lib.sh container/kyverno-start container/kyverno-main container/kyverno-env \
@@ -29,7 +30,7 @@ lint-providers: ## Fail if a provider profile allows every path (read-write or f
 		|| { echo "provider profiles must list the paths they allow (rules:), not use access: read-write/full"; exit 1; }
 
 image: ## Build the local sandbox image (override IMAGE and TAG as needed)
-	docker build -f $(DOCKERFILE) -t $(IMAGE):$(TAG) .
+	docker build -f $(DOCKERFILE) -t $(IMAGE):$(TAG) --build-arg ORG_PACK=$(ORG) .
 
 test: image ## Build and run the Dockerfile's offline integration checks
 

@@ -48,8 +48,10 @@ COPY profiles/contributor/plugins /opt/kyverno/profiles/contributor/plugins
 COPY profiles/contributor/skills  /opt/kyverno/profiles/contributor/skills
 COPY profiles/contributor/cron    /opt/kyverno/profiles/contributor/cron
 # The organisation pack both profiles read (one source, installed with each profile as org/).
-COPY container/org/kyverno /opt/kyverno/profiles/maintainer/org
-COPY container/org/kyverno /opt/kyverno/profiles/contributor/org
+# Which pack: container/org/<ORG_PACK>/ (build with `container/assistant --build --org NAME`, or `make image ORG=NAME`).
+ARG ORG_PACK=kyverno
+COPY container/org/${ORG_PACK} /opt/kyverno/profiles/maintainer/org
+COPY container/org/${ORG_PACK} /opt/kyverno/profiles/contributor/org
 COPY profiles/contributor/scripts /opt/kyverno/profiles/contributor/scripts
 # The terminal runs locally inside the sandbox here, not over ssh into a second one.
 COPY container/hooks/require-sandbox-terminal.sh /opt/kyverno/profiles/maintainer/hooks/require-sandbox-terminal.sh

@@ -64,6 +64,7 @@ while [ $# -gt 0 ]; do
     --no-openshell) shift ;;
     --profile) KIND="${2:-}"; shift 2 ;;
     --build) BUILD=1; shift ;;
+    --org) ORG_PACK="${2:-}"; shift 2 ;;
     --image) IMAGE="${2:-}"; shift 2 ;;
     --name) NAME="${2:-}"; shift 2 ;;
     --provider) WANT_PROVIDERS+=("${2:-}"); shift 2 ;;

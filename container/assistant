@@ -12,6 +12,7 @@
 #   --profile K    which assistant (asked if you do not say and have no sandbox yet): maintainer (reviews the PR queue of a repo you maintain) or
 #                  contributor (helps you contribute to a repo). Each has its own sandbox and its own GitHub token.
 #   --build        build the image from this checkout (container/Dockerfile) instead of pulling one
+#   --org NAME     with --build: bake the organisation pack container/org/NAME/ into the image (default: kyverno)
 #   --image IMAGE  use this image (default: $ASSISTANT_IMAGE, else ghcr.io/kyverno/assistant:latest)
 #   --name NAME    sandbox name (default: assistant-maint, or assistant-contrib; an existing kyverno-assistant or
 #                  kyverno-contributor sandbox keeps its name)
@@ -55,6 +56,7 @@ WANT_PROVIDERS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --build) BUILD=1; shift ;;
+    --org) ORG_PACK="${2:-}"; shift 2 ;;
     --image) IMAGE="${2:-}"; shift 2 ;;
     --profile) KIND="${2:-}"; shift 2 ;;
     --name) SANDBOX="${2:-}"; shift 2 ;;
