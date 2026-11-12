@@ -1,0 +1,10 @@
+name: repo-intel
+version: 0.1.0
+description: "Repository data for the maintainer assistant: one-call GraphQL fetch of PR-candidate and issue-candidate metadata (body, files, labels, milestone, review/thread/CI state, closing issues, comments), with a digest mode for ranking a whole set and a details call after ranking; fetch_file_diff_overlap to check whether two PRs touching the same file touch the same lines; and sequence_prs, a deterministic hard-dependency graph (stacked, generated-file, explicit-reference and closing-issue-conflict edges) with cycle detection, tiers, overlaps and gate status over already-fetched PRs. Stdlib-only; talks to GitHub directly with the profile's own REPO_GITHUB_TOKEN; no GitHub or Slack MCP access of its own."
+provides_tools:
+  - fetch_pr_candidates
+  - fetch_pr_details
+  - fetch_issue_candidates
+  - fetch_issue_details
+  - fetch_file_diff_overlap
+  - sequence_prs

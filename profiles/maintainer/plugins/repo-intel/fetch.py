@@ -22,7 +22,7 @@ from typing import Any, Optional
 _GRAPHQL_URL = "https://api.github.com/graphql"
 _USER_AGENT = "kyverno-assistant-fetch-plugin"
 
-# Mirror of kyverno-sequencer/sequencer.py's _CROSS_REF_PATTERN — kept in sync manually.
+# Mirror of sequencer.py's _CROSS_REF_PATTERN — kept in sync manually.
 # Covers real phrasing variants, not just the canonical form: "Parent: #17701", "Stacks on
 # top of #17695", "depends on kyverno/kyverno#17720", "Blocked by #N".
 _CROSS_REF_PATTERN = re.compile(

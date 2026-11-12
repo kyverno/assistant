@@ -201,7 +201,7 @@ independently-shippable phases, in this order:
   only Mnemosyne's id-keyed `remember`/`recall` and its 5-predicate triple store, neither a
   good fit for sortable dashboard state or a session-to-session diff snapshot. The dashboard
   plugin owns its own small local JSON state file instead.
-- `profiles/maintainer/plugins/kyverno-fetch/fetch.py`'s GraphQL/REST helpers (search → concurrent detail pass →
+- `profiles/maintainer/plugins/repo-intel/fetch.py`'s GraphQL/REST helpers (search → concurrent detail pass →
   cross-ref extraction/resolution, the `issueOrPullRequest` union lookup, the cross-reference
   regex) are directly reusable for an issue-side fetch — read, not assumed from the PR-side
   tool's shape.
@@ -214,7 +214,7 @@ independently-shippable phases, in this order:
 
 ### Phase 1 — Issue work (triage, actions, relationship graph, staleness, raising) — BUILT
 
-`fetch_issue_candidates` (`profiles/maintainer/plugins/kyverno-fetch/fetch.py`/`tools.py`), `profiles/maintainer/skills/issue-triage/`,
+`fetch_issue_candidates` (`profiles/maintainer/plugins/repo-intel/fetch.py`/`tools.py`), `profiles/maintainer/skills/issue-triage/`,
 and `profiles/maintainer/skills/issue-actions/` landed 2026-10-05. `closedByPullRequestsReferences` and
 `ClosedEvent.closer` were verified live end to end against `kyverno/kyverno` (not just schema
 introspection) — see `docs/architecture.md`. No `config.yaml` tool grant changed —
@@ -229,7 +229,7 @@ surfacing and staleness housekeeping are written as on-request procedures in `is
 not yet run against a real backlog in a live session; the revert-detection heuristic there is
 explicitly best-effort.
 
-- `profiles/maintainer/plugins/kyverno-fetch/fetch.py` gained `fetch_issue_candidates(repo, search_query, limit)` —
+- `profiles/maintainer/plugins/repo-intel/fetch.py` gained `fetch_issue_candidates(repo, search_query, limit)` —
   same template as `fetch_pr_candidates`, swapped to `is:issue`/`... on Issue`, plus an
   issue-relevant field set (`labels`, `assignees`, `milestone`, `comments`, `closedByPullRequestsReferences`,
   `timelineItems` for closer/revert detection — field names verified live, not assumed).
@@ -297,7 +297,7 @@ The tab renders live and `dashboard-sync` is wired into `pr-queue`, `issue-triag
 
 New bundled plugin, `profiles/maintainer/plugins/kyverno-dashboard/`:
 
-- Tool half (same `__init__.py`/`tools.py` contract as `kyverno-fetch`/`kyverno-sequencer`):
+- Tool half (same `__init__.py`/`tools.py` contract as `repo-intel`):
   one tool, `update_dashboard(section, data)`, writing structured JSON to a local state file.
   Verify Hermes's real plugin writable-data-directory API live before picking a path.
 - Dashboard-tab half: `dashboard/manifest.json` + `plugin_api.py` (FastAPI, reading that same

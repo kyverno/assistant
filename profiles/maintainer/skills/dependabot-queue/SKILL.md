@@ -25,10 +25,10 @@ skill loads only when actually asked for.
 
 ## Prerequisites
 
-- `fetch_pr_candidates`/`fetch_pr_details` (plugin tools, `plugins/kyverno-fetch/`)
+- `fetch_pr_candidates`/`fetch_pr_details` (plugin tools, `plugins/repo-intel/`)
   — ranking here (security first, then `semver_level`) isn't search-expressible,
   so always digest-then-detail, never one flat fetch.
-- `sequence_prs` (plugin tool, `plugins/kyverno-sequencer/`) — for step 6's
+- `sequence_prs` (plugin tool, `plugins/repo-intel/`) — for step 6's
   blocks/blocked-by pass.
 - `mcp-github`: `search_pull_requests`, `search_code`, `list_dependabot_alerts`,
   `get_dependabot_alert`, `list_releases`, `get_latest_release`,

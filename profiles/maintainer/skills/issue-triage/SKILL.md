@@ -25,7 +25,7 @@ labels/CODEOWNERS — assumed loaded, not re-derived here. Taking an action on a
 
 - `kyverno-context` loaded this session (live labels, and the `kyverno-doc:<path>`
   cache step 2's grounding reads from).
-- `fetch_issue_candidates` (plugin tool, `plugins/kyverno-fetch/`) — one call fetches
+- `fetch_issue_candidates` (plugin tool, `plugins/repo-intel/`) — one call fetches
   every candidate issue's full metadata, including `closing_prs` (every PR that
   references closing it, not just the one that merges), `closed_by`/
   `reopened_since_closed`, and `parent`/`sub_issues`/`tracked_in_issues` (GitHub's own

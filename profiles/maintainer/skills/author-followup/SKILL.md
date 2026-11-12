@@ -25,7 +25,7 @@ labelled `needs-author-action`, and the ones the stale sweep has since marked
 
 - `kyverno-context` loaded (CODEOWNERS, for needs-help hand-off candidates).
 - `fetch_pr_candidates(..., include_stale_detail=true)` (plugin tool,
-  `plugins/kyverno-fetch/`) — adds `maintainer_can_modify`, `staled_at`,
+  `plugins/repo-intel/`) — adds `maintainer_can_modify`, `staled_at`,
   `last_commit_at`, `author_comments_since_stale`, and per closing issue its real
   `assignees` and `other_closing_prs`. `detail="digest"` (capped at 60) drops
   body/review text for ranking a whole stale set by something search can't

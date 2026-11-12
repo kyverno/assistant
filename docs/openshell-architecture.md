@@ -321,7 +321,7 @@ production adopter.
 | Purpose | Agents that fix issues, open PRs, and at level 6 merge on green CI | One maintainer's conversational assistant; reads, sequences, drafts, never merges |
 | Autonomy | Six levels, advanced by test coverage; agents: scanner, quality, security, architect, ops | Three levels, human-granted, capped before merge |
 | Containment | CLI deny lists, scoped GitHub tokens, a MITM proxy that constrains API writes by mode | Kernel confinement (Landlock, seccomp), default-deny egress per binary, credential swap, execution sandboxes for untrusted code |
-| Determinism | Shell and Go pipeline filters and gates work before any model sees it | Same idea: `kyverno-fetch` and `kyverno-sequencer` compute facts before the model reasons |
+| Determinism | Shell and Go pipeline filters and gates work before any model sees it | Same idea: `repo-intel` computes facts before the model reasons |
 | Audit | Git-backed append-only ledger ("beads") | OCSF events plus the dashboard action log |
 | Scope | Multi-repo, multi-forge (GitHub, GitLab, Gitea), many agent CLIs, fleet dashboard, contributor relay | One project, Hermes only |
 | Contributors | Relay lets contributors lend compute; trust tiers | Coach bot helps contributors get their own PRs merged |

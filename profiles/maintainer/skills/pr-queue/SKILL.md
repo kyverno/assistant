@@ -25,14 +25,14 @@ milestone/fixed facts — assumed loaded, not re-derived here.
 ## Prerequisites
 
 - `kyverno-context` loaded this session.
-- `fetch_pr_candidates` (plugin tool, `plugins/kyverno-fetch/`) — one call fetches
+- `fetch_pr_candidates` (plugin tool, `plugins/repo-intel/`) — one call fetches
   every candidate's full metadata. `detail="digest"` (capped at 60) drops body/
   review text for ranking a whole set by something search can't filter on
   directly ("most urgent") — pair it with `fetch_pr_details` for just the
   chosen numbers' full data.
-- `sequence_prs` (plugin tool, `plugins/kyverno-sequencer/`) — builds the hard-
+- `sequence_prs` (plugin tool, `plugins/repo-intel/`) — builds the hard-
   dependency graph and layers it into tiers.
-- `fetch_file_diff_overlap` (plugin tool, `plugins/kyverno-fetch/`) — fetches
+- `fetch_file_diff_overlap` (plugin tool, `plugins/repo-intel/`) — fetches
   the real diff hunks for a `file_overlaps` entry's shared file, to read.
 - `mcp-github`: `search_pull_requests`, `search_issues`, `list_issues`, `issue_read`, `search_code`, `list_releases`,
   `get_latest_release`, `list_code_scanning_alerts`, `get_code_scanning_alert`,

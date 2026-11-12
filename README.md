@@ -474,8 +474,9 @@ container/               the sandbox: Dockerfile, launcher, policy, provider pro
 .github/workflows/       builds and publishes the sandbox image
 profiles/maintainer/     the maintainer profile: distribution.yaml, SOUL.md, config.yaml, hooks/,
                          plugins/, skills/, cron/, sandbox/ (the host install's terminal image and policy)
-profiles/contributor/    the contributor profile: same shape, plus org/org.yaml (everything specific to
-                         the organisation), one plugin, scripts/kyverno-watch.py
+profiles/contributor/    the contributor profile: same shape, plus one plugin and scripts/kyverno-watch.py
+container/org/           the organisation pack (org.yaml: everything specific to the organisation), installed
+                         into both profiles as org/
 scripts/install.sh       the host install: idempotent installer, --profile maintainer|contributor [NAME]
 scripts/update.sh        the host install: git pull, then re-run the installer
 scripts/openshell.sh     the host install's sandboxed terminal: setup, policy, access requests, audit
@@ -524,10 +525,9 @@ The files below are the maintainer profile's, under `profiles/maintainer/`.
 
 **Plugins**
 
-- `profiles/maintainer/plugins/kyverno-fetch/`: `fetch_pr_candidates` and `fetch_file_diff_overlap`, one batched call
-  over GitHub's GraphQL and REST APIs.
-- `profiles/maintainer/plugins/kyverno-sequencer/`: `sequence_prs`, a hard-dependency graph with cycle detection and
-  topological layering into tiers.
+- `profiles/maintainer/plugins/repo-intel/`: the fetch tools (`fetch_pr_candidates`, `fetch_file_diff_overlap` and the
+  issue equivalents, one batched call over GitHub's GraphQL and REST APIs) and `sequence_prs`, a hard-dependency graph
+  with cycle detection and topological layering into tiers.
 - `profiles/maintainer/plugins/kyverno-dashboard/`: the `update_dashboard` tool and the Kyverno tab in
   `hermes dashboard`.
 

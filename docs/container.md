@@ -65,7 +65,7 @@ Verified means it was run in a real sandbox, on the image as built from this che
 | REST and GraphQL reads with the real token | Verified | Merge, delete and GraphQL mutations refused by the proxy |
 | Safety hooks (merge blocker, mnemosyne triples, terminal guard) | Verified | Approved at build time, listed as allowed |
 | Memory plugin (mnemosyne) | Verified | Starts, searches, consolidates, with the network off. Embedding model is in the image |
-| Skills, plugins (`kyverno-fetch`, `kyverno-sequencer`) | Verified loaded | 63 GitHub tools, 29 skills in the banner |
+| Skills, plugins (`repo-intel`) | Verified loaded | 63 GitHub tools, 29 skills in the banner |
 | GitHub Copilot sign-in and a model reply | Verified | Device-code login works inside the sandbox. Which models answer depends on your plan: see below |
 | Anthropic / NVIDIA / OpenAI keys | Partly | The request reaches the provider with the key swapped in. A real reply is untested |
 | Agent terminal and file tools | Enabled, not exercised | They run locally in the sandbox; the hook allows them only inside OpenShell |

@@ -80,7 +80,7 @@ What is Kyverno-specific today, and where it goes:
 | --- | --- |
 | `KYVERNO_REPO` env var | `ASSISTANT_REPOS` (comma list of `owner/repo`); `KYVERNO_REPO` kept as an alias for one release |
 | `skills/kyverno-context` (labels, codegen facts, `Kyverno Release X.Y.Z`) | a generic `repo-context` skill that does the live lookups, plus a **context pack** per org supplying the fixed facts |
-| `plugins/kyverno-fetch`, `plugins/kyverno-sequencer` | renamed `repo-fetch`, `repo-sequencer`; file classes (`GENERATED`, `API_SURFACE`, `ADMISSION_CRITICAL`) and the "e2e gate" check name move from code to the context pack |
+| `plugins/kyverno-fetch`, `plugins/kyverno-sequencer` | merged into one plugin, `plugins/repo-intel`; file classes (`GENERATED`, `API_SURFACE`, `ADMISSION_CRITICAL`) and the "e2e gate" check name move from code to the context pack |
 | `SOUL.md`, README, image and launcher names (`kyverno`, `kyverno-assistant`) | neutral names; Kyverno becomes the first context pack |
 | hard-coded Kyverno hosts and paths in the sandbox policy | derived from `ASSISTANT_REPOS`; extra hosts listed in the pack |
 

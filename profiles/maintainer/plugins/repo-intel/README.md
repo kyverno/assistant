@@ -1,6 +1,8 @@
-# kyverno-fetch
+# repo-intel
 
-A bundled Hermes plugin, not a skill. Registers five tools:
+A bundled Hermes plugin, not a skill. Registers six tools: five fetch tools (`fetch.py`, `fetch_tools.py`) and the sequencer (`sequencer.py`, `sequence_tools.py`).
+
+## Fetch
 
 - `fetch_pr_candidates` — what `pr-queue` calls instead of `search_pull_requests` plus one
   `pull_request_read` per candidate — the actual fix for a real session that took 15 of 107
@@ -34,6 +36,18 @@ filters are the real cases.
 All five use the profile's own `REPO_GITHUB_TOKEN` — the same scopes already granted to the
 `github` MCP server, no new credential, no MCP server involved for any call.
 
-Ships automatically on `hermes profile install .`, same as `kyverno-sequencer` (see
-`docs/architecture.md`). Pure stdlib (`urllib.request`, `concurrent.futures`) — no
+Ships automatically on `hermes profile install .` (see `docs/architecture.md`). Pure stdlib (`urllib.request`, `concurrent.futures`) — no
 external dependency to install.
+
+## Sequence
+
+`sequence_prs` is what `pr-queue`
+calls with already-fetched PR metadata (from the fetch tools) and gets back a hard-
+dependency graph layered into tiers — a graph builder, not a decision maker. Four hard-edge
+types, all derived mechanically from the input (stacked branches, generated-file input-before-
+output, an explicit "Depends on #N"-style body reference, a closing-issue conflict), cycle
+detection, and a topological layering into tiers: within a tier, no hard dependency exists
+between any two PRs, and ordering them is the agent's call — Slack context, mnemosyne
+history, whatever the maintainer said they care about this session — not this tool's.
+
+It has no GitHub or Slack access of its own: a pure function over its input, called once per queue-build.

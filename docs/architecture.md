@@ -63,16 +63,16 @@ ever wanted:
   this PR in Slack" is a bounded-window scan with client-side text matching, never a real
   search (Slack's own `search.messages` API doesn't work with a bot token anyway).
 
-## Why two bundled plugins instead of MCP servers
+## Why a bundled plugin instead of MCP servers
 
-`profiles/maintainer/plugins/kyverno-fetch/` and `profiles/maintainer/plugins/kyverno-sequencer/` are bundled Hermes plugins (plain
+`profiles/maintainer/plugins/repo-intel/` is a bundled Hermes plugin (plain
 Python, not MCP servers) — `__init__.py` exposes `register(ctx)`, which registers each
-tool's schema (from `tools.py`) with Hermes; still needs an explicit `config.yaml` toolset
+tool's schema (from `fetch_tools.py` and `sequence_tools.py`) with Hermes; still needs an explicit `config.yaml` toolset
 grant and a `plugins.enabled:` entry like any other tool — bundled isn't auto-trusted. They
 ship with the repo (no separate packaging step, no extra install) and are discovered
 per-profile under `~/.hermes/profiles/<profile>/plugins/<name>/`.
 
-- **`kyverno-fetch`** — `fetch_pr_candidates(repo, search_query, limit)` replaces what would
+- **fetch** (`repo-intel`) — `fetch_pr_candidates(repo, search_query, limit)` replaces what would
   otherwise be a `search_pull_requests` call plus one sequential `pull_request_read` per PR
   (real cost against a live queue: dozens of PRs, one round trip each). It talks to GitHub's
   GraphQL/REST APIs directly over `urllib` using the profile's own `REPO_GITHUB_TOKEN` — same
@@ -96,7 +96,7 @@ per-profile under `~/.hermes/profiles/<profile>/plugins/<name>/`.
   `timelineItems`). Verified live against `kyverno/kyverno` (2026-10-05): both
   `closedByPullRequestsReferences` and `ClosedEvent.closer`'s `PullRequest`/`Commit`
   union resolve correctly end to end, not just by schema introspection.
-- **`kyverno-sequencer`** — `sequence_prs` takes that richer metadata and builds a hard
+- **sequencer** (`repo-intel`) — `sequence_prs` takes that richer metadata and builds a hard
   dependency graph, no scoring: 4 edge types (stacked branches — one PR's base branch is
   another's head; generated-file input-before-output; an explicit body reference to another
   candidate; two candidates closing the same issue, which goes to `unresolved` instead of an
