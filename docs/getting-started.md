@@ -36,7 +36,7 @@ If you run the launcher without `--profile` it picks for you: the one you alread
 asks (1 maintainer, 2 contributor). Both can coexist; add `--profile` to choose.
 
 Both assistants can also clone a repository, build and test it in the sandbox and hand you the result (see
-[Coding in the sandbox](../README.md#coding-in-the-sandbox)).
+[Coding in the sandbox](usage.md#coding-in-the-sandbox)).
 
 ## Case 1: a Mac with Apple Silicon (recommended)
 
@@ -129,7 +129,7 @@ sandbox only holds a placeholder.
 **Maintainer token** (fine-grained, scoped to the repo): Contents Read; Pull requests Read & Write; Issues Read &
 Write; Checks Read; Code scanning alerts Read; Dependabot alerts Read; Secret scanning alerts Read; Organization
 members Read. **Do not grant Contents Write or any merge or admin scope.** Optional extras and the reasoning:
-[README step 1](../README.md#1-create-a-github-token).
+[README step 1](setup.md#1-create-a-github-token).
 
 **Contributor token:** a fine-grained token of your own account; "Public repositories (read-only)" is enough to read
 everything. To comment on an issue, or to open a pull request from your fork, the token must be able to write there
@@ -207,7 +207,7 @@ With `--no-openshell`, the clones and toolchains live in a Docker volume that ou
 | `sandbox … did not become Ready` | The launcher prints its state and log. Delete the sandbox and run the launcher again |
 | `could not register the provider profile` | OpenShell holds an older copy. Delete the sandbox, the provider and `openshell profile delete kyverno-repo-github` (or `-contributor-github`), then run again |
 
-More: the [README troubleshooting table](../README.md#troubleshooting) and [docs/container.md](container.md).
+More: the [README troubleshooting table](usage.md#troubleshooting) and [docs/container.md](container.md).
 
 ## Checking what you downloaded
 

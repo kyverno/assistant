@@ -158,7 +158,7 @@ sandboxed terminal are kept.
 ## The dashboard
 
 A browser board that shows what the agent just told you, linked, grouped and sortable, so you don't
-scroll the chat or copy links by hand. (The sandbox runs it too; see the [README](../README.md#the-dashboard).)
+scroll the chat or copy links by hand. (The sandbox runs it too; see the [README](usage.md#the-dashboard).)
 
 ```bash
 hermes -p maintainer dashboard
@@ -167,5 +167,5 @@ hermes -p maintainer dashboard
 Pick **Kyverno** in the sidebar under Plugins, or open
 `http://127.0.0.1:9119/maintainer?profile=maintainer`. It refreshes every 15 seconds. Keep it open next to
 the chat: it fills when the agent answers a queue, stale-PR, issue-triage or Discussions request,
-not in the background. The tabs are described in the [README](../README.md#the-dashboard). The Maintainer tab is
+not in the background. The tabs are described in the [README](usage.md#the-dashboard). The Maintainer tab is
 read-only; confirming and acting still happen in the chat.

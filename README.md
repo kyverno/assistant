@@ -1,562 +1,358 @@
-# kyverno-assistant
+# Maintainer Assistant
 
-An on-demand review assistant for a Kyverno maintainer. It orders your PR queue, briefs you on
-individual PRs, triages issues and Discussions, and acts on GitHub with your own credentials. It
-**cannot merge**.
+**An AI assistant that works your pull-request queue and issue backlog the way a careful co-maintainer would: it finds
+what is ready, works out the order, explains every call with a link, and does the paperwork. It cannot merge.**
 
-It runs inside a locked-down [OpenShell](https://github.com/NVIDIA/OpenShell) sandbox on your own
-laptop: one Docker container that holds [Hermes](https://hermes-agent.nousresearch.com), this
-distribution's profile and its memory. Your GitHub token is kept outside the sandbox, and the sandbox can
-only reach the few hosts it needs. You start it with one command and talk to it in the terminal. There is no
-server to run and no webhook receiver.
+It runs on your own machine inside an [OpenShell](https://github.com/NVIDIA/OpenShell) sandbox, so the agent that
+reads strangers' issues never holds your GitHub token and can only reach the few hosts it needs. It is built on
+[Hermes](https://hermes-agent.nousresearch.com) and works with any repository that follows a few conventions, listed
+below. Kyverno is the first organisation to use it.
 
-> **Status:** works today, on Apple Silicon Macs. Not yet validated across multiple maintainers' real
-> workflows (see the validation plan in [`docs/deployment.md`](docs/deployment.md)). Slack and scheduled jobs are
-> not available in the sandbox yet; they work in the [host install](docs/host-install.md).
-
-There are two profiles in `profiles/`: **maintainer** (this document) and **contributor**, a coach
-for people contributing to Kyverno. See [Contributor profile](#contributor-profile).
+> 🧭 **Where this phase is.** Data classification and visibility for maintainers: knowing what is in the queue, how it
+> relates, and what to do first. Acting on GitHub is supported, but only when you ask. See the
+> [roadmap](#roadmap).
 
 ## Contents
 
-- [How it works](#how-it-works)
-- [Quick start](#quick-start)
-- [Setup, step by step](#setup-step-by-step)
-- [Everyday use](#everyday-use)
-- [Where your data lives](#where-your-data-lives)
-- [How it stays safe](#how-it-stays-safe)
-- [Why it is built this way](#why-it-is-built-this-way)
-- [Troubleshooting](#troubleshooting)
-- [Removing everything](#removing-everything)
-- [What it does](#what-it-does)
-- [The dashboard](#the-dashboard)
-- [Slack and scheduled jobs](#slack-and-scheduled-jobs)
-- [Contributor profile](#contributor-profile)
-- [CI automation for your repositories](#ci-automation-for-your-repositories)
-- [Repository layout](#repository-layout)
-- [Further reading](#further-reading)
+[What it does](#what-it-does-for-a-maintainer) · [How it thinks](#how-it-thinks) ·
+[Prepare your repository](#prepare-your-repository) · [Set it up](#set-it-up) · [Using it](#using-it) ·
+[Protected by OpenShell](#protected-by-openshell) · [Key features](#key-features) ·
+[What is verified, and the limits](#what-is-verified-and-the-limits) · [Roadmap](#roadmap) · [Documentation](#documentation)
 
-## How it works
+## What it does for a maintainer
+
+A flood of PRs and issues makes the same few things slow. Here is what the assistant takes off your plate:
+
+| The problem | What it does |
+|---|---|
+| "Which PRs can I merge today?" | Fetches the whole candidate set, drops what is not ready, and gives an order with a reason per PR |
+| Merging one PR forces rebases on others | Flags PRs that touch files another PR changes, so you see the rebase coming before you merge |
+| PRs that depend on each other | Finds stacked branches, "depends on #N" references, and generated-file input/output pairs, and orders them |
+| A red branch gate blocks everything | States it as a fact on every PR it affects, and leaves the bypass decision to you |
+| Dependabot PRs pile up | Gives each one a verdict (merge now, fix first, your review, wait, close) based on who calls the dependency |
+| Issues need triage | Classifies from the real code, finds duplicates and competing PRs, and says how far along each fix is |
+| Stale and abandoned PRs | Recommends close, reassign, or take over the branch, with the reason from the linked issue |
+| GitHub Discussions | Reads the thread and drafts a reply; nothing is posted until you say so |
+| "What did we decide last time?" | Remembers past incidents, rejected PRs and your working style between sessions |
+
+Everything it says is linked to the PR, issue, file or run it comes from. When it looked and found nothing, it says
+"not found there" instead of guessing.
+
+## How it thinks
+
+The idea behind it: **code computes the facts, the model makes the judgment, and you make the decision.** Anything that
+can be computed exactly (a dependency, a file overlap, a gate) is computed by a deterministic tool, so the model does
+not guess it. The model then explains and ranks, citing what the tools returned.
+
+### What the queue is built from
+
+| Signal | Where it comes from | What it tells you |
+|---|---|---|
+| Stacked branches | A PR's base branch is another candidate's head branch | Merge the base first |
+| Generated-file order | One PR changes a generated file's *input*, another changes its *output* | The input has to land first, or the output goes stale |
+| Explicit references | "Depends on #N", "Blocked by #N", "Stacks on #N", "Parent: #N" in the PR body | Order, including references to PRs outside the set (it fetches their state) |
+| Competing PRs | Two PRs close the same issue | Duplicate effort: flagged for you, not ordered |
+| Same-file overlap | Two PRs touch one file | A likely rebase conflict; it can compare the real diff hunks to tell you if the *lines* collide |
+| Same-package overlap | Same directory, different files | Cannot conflict in git, but worth reviewing together |
+| Rebase flag | A PR touches files an earlier-ranked PR changes | It will need updating after that one merges |
+| Branch gate | An open gate-failure issue for the PR's base branch | Merging is blocked on that branch whatever the files; review is not |
+| File class | Your organisation pack: generated, API surface, critical, test-only | How risky the change is after merge |
+| Past incidents | Its memory of which package pairs broke the post-merge suite before | A specific, citable risk |
+
+Cycles are detected and handed to you by number. Within a group of PRs with no hard dependency between them, it ranks
+with a fixed ladder and says which rung decided each position:
+
+1. Related PRs stay together (same file, same package, same issue), explained once.
+2. **Severity of the closing issue**, judged from its content, never guessed: critical (crash, outage, data loss,
+   security), high (regression, user-facing break), medium, low.
+3. Release-urgency labels on the closing issue, then how close the milestone is.
+4. Bot approval and unresolved review threads.
+5. Author's relationship to the project, then size as a pure tiebreak.
+
+Anything you said this session, or the maintainers' channel said, overrides the ladder. **Readiness is a separate axis
+from priority:** a high-severity PR with changes requested or a real CI failure is never listed under "approve now";
+the blocker is named instead.
+
+### What an answer looks like
+
+An illustrative queue answer (numbers invented):
 
 ```
- your laptop
- ┌────────────────────────────────────────────────────────────────────────────┐
- │                                                                            │
- │   you ──► container/assistant ──► OpenShell gateway                          │
- │           (the launcher)         • keeps your GitHub token (and any model  │
- │                                    API key) so the sandbox never holds it  │
- │                                  • a proxy that allows only listed hosts   │
- │                                    and adds the token on the way out       │
- │                                         │                                  │
- │              ┌──────────────────────────▼───────────────────────────────┐  │
- │              │  the sandbox: one Docker container, built from the image │  │
- │              │   Hermes + this profile + memory + the agent's terminal  │  │
- │              │   holds only a placeholder where your token would be     │  │
- │              └───────────────────────────┬──────────────────────────────┘  │
- └──────────────────────────────────────────┼─────────────────────────────────┘
-                                            ▼
-                      GitHub (reads; the GitHub MCP server)    Copilot or another model
+Queue for milestone 1.20: 14 of 31 open PRs, oldest first within each group
+
+Group 1: no hard dependency between these
+  #18102  split admission handlers      closes #17990 (CRITICAL: crash on startup)
+          ✓ checks green · bot-approved · 0 open threads
+          ⚠ #18110 is stacked on this one: merge #18102 first
+  #18077  fix cleanup TTL parsing       closes #17811 (HIGH: regression in 1.19)
+          ✓ ready · touches pkg/cleanup, also changed by #18090 → review together
+Group 2
+  #18110  stacked on #18102             ⏳ waits for #18102
+  #18090  rename policy fields          ⚠ rebase_flag: shares api/v1/policy_types.go with #18102
+          ⚠ both change a generated-file input: no safe order, your call
+Gate: main is red (issue #18121). Every PR above is blocked on merge until it clears.
 ```
 
-Three pieces, and each one has a job:
+### What it will not pretend
 
-- **The image** is a ready-made copy of everything the agent needs: Hermes at a pinned version, this profile,
-  its memory plugin and the models it uses. Nothing is installed on your laptop and nothing is downloaded when
-  you chat. It is built once ([why](#why-it-is-built-this-way)).
-- **The sandbox** is that image running inside OpenShell. The agent works here: it reads GitHub, thinks, remembers,
-  and can run commands, but only inside this container, which has no access to your files.
-- **The OpenShell gateway** sits between the sandbox and the internet. It holds your GitHub token and, when the
-  sandbox calls GitHub, it adds the real token on the way out. If the agent were tricked into printing its
-  credentials, it would print a meaningless placeholder. The gateway also refuses everything not on an allowlist,
-  including merging.
+It is a structural tool. It orders PRs by what it can prove (files, branches, references), not by whether one change
+semantically breaks another. It says so when asked. It does not merge and it does not apply a gate-bypass label. It writes to GitHub only when you ask, and every
+comment, review or reply is drafted and shown to you before it is posted.
 
-The launcher, `container/assistant`, ties them together. Each run it checks Docker, installs OpenShell if needed,
-stores your token, creates or starts the sandbox, and opens the chat.
+## Prepare your repository
 
-## Quick start
+The assistant is only as sharp as what your repository tells it. Three things make it effective; the first one comes
+**before** you install anything.
 
-You need Docker (and, on a Mac, Apple Silicon: see [what you need](#0-what-you-need)). You do not need to clone this
-repository or create a folder: this one command takes the launcher from the image and runs it.
+### 1. Adopt the shared CI and labels first
+
+The queue and the stale-PR skills read labels that a small set of shared GitHub Actions maintains: `ready-for-review`,
+`needs-author-action`, `workflow-approval-required`, `stale`, `merge-conflicts`, and path labels from your
+`.github/labels.yml`. A repository that already runs them hands the assistant its signals for free. Without them it
+still runs, but it has no readiness labels to go on and says so.
+
+One person runs one command; it opens a PR in each repository you name:
+
+```bash
+git clone https://github.com/kyverno/assistant && cd assistant
+gh auth login
+scripts/adopt-ci.sh --reviewers @your-org/maintainers your-org/repo-a your-org/repo-b
+```
+
+| It adds | Purpose |
+|---|---|
+| `.github/workflows/pr-management.yaml`, `pr-labelling.yaml`, `sync-labels.yaml`, `check-pr-management.yaml` | Short callers of the shared workflows: readiness, stale, path labels, label sync, config check |
+| `.github/pr-management.json` | Reviewer team, exempt labels, timings |
+| `.github/pr-readiness-checks.yml` | Which checks block a PR, and which are not the author's to fix (DCO and CI come built in) |
+| `.github/labels.yml` | Your label catalog and path rules |
+
+Everything starts in **preview**: it prints what it would do and changes nothing, until an admin sets the repository
+variable `PR_AUTOMATION_LIVE` to `true`. The actions need no model, no container and no secret of yours. There is also
+an `issue-management` action (possibly-resolved and waiting-on-reporter handling; only the reporter rule closes
+anything). Full steps and permissions: [`docs/adopting-actions.md`](docs/adopting-actions.md).
+
+### 2. Write your organisation pack
+
+Everything specific to your organisation lives in one small directory, never in code: `container/org/<your-org>/`.
+`org.yaml` says which paths are generated, API surface, critical or test-only, whether you have a merge gate, and which
+labels mean "ready". `facts.md` is optional prose in your own words. About ten lines get you started:
+
+```yaml
+name: acme
+readiness:
+  ready_labels: [ready-for-review]
+  attention_labels: [needs-author-action]
+maintainer:
+  file_classes:
+    generated: ["**/zz_generated.*.go", "config/crds/**/*.yaml"]
+    critical:  ["pkg/engine/**", "pkg/webhooks/**"]
+    test_only: ["*_test.go", "test/**"]
+```
+
+Without a pack the assistant still works: it reads every file as ordinary, mentions no gate, and tells you which
+signals it is missing. A mistake in the pack is an error that names the key, never silently ignored.
+Reference and every key: [`docs/organisation-pack.md`](docs/organisation-pack.md). Kyverno's own is in
+[`container/org/kyverno/`](container/org/kyverno/).
+
+### 3. Keep your own knowledge files accurate
+
+It grounds its answers in what your repository says about itself, so the better those files are, the less it guesses:
+
+| File | What the assistant uses it for |
+|---|---|
+| `CODEOWNERS` | Who owns a changed path; who to hand a stale PR to. Read live, last match wins, as GitHub does |
+| `AGENTS.md` (root and per package), `ARCHITECTURE.md` | Grounding an issue or a PR in the real code before classifying it. It finds them with code search when it needs them |
+| `.github/labels.yml` | What each label means (it reads the label *descriptions*, not just the names) |
+| Your milestones | Release proximity in the ranking |
+
+If a package has no doc, it says its knowledge there is only what the code, owners and history show.
+
+### 4. Create a token
+
+A fine-grained personal access token for the **one repository**, from your own account:
+Contents **Read**, Pull requests **Read and write**, Issues **Read and write**, Checks **Read**, and Code scanning,
+Dependabot and Secret scanning alerts **Read**; organisation Members **Read** if CODEOWNERS uses teams. No Contents
+write, no Administration: GitHub itself then refuses to merge. Or let the launcher use your `gh` sign-in. The token is
+handed to OpenShell and never enters the sandbox ([why that matters](#protected-by-openshell)).
+Step by step: [`docs/setup.md`](docs/setup.md#1-create-a-github-token).
+
+## Set it up
+
+You need **Docker**. Verified on Apple Silicon Macs, and on Linux amd64 on a CI runner; other combinations are untested
+([details](docs/getting-started.md)). One command, no clone, no folder to create:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/kyverno/assistant/main/install.sh | sh
 ```
 
-To upgrade later, run the same command with `-s -- --upgrade` after `sh`. Prefer a clone, or want to build the image yourself? Then:
+It checks Docker, installs OpenShell if needed, and asks once: which assistant (choose **maintainer**), the repository
+(`owner/repo`, there is no default), how to authorize GitHub (your `gh` sign-in, or paste the token), and how to sign in
+to a model (a GitHub Copilot device-code login, or `--provider anthropic|openai|nvidia`). Then it opens the chat. Later,
+`container/assistant` alone brings you back.
+
+**Using your own organisation pack:** clone this repository, add `container/org/<your-org>/`, and build your image:
 
 ```bash
-git clone https://github.com/kyverno/assistant.git
-cd assistant
-container/assistant --build      # first time: builds the image (15 to 30 minutes), then starts it
+container/assistant --build --org your-org
 ```
 
-For development, `make run` builds the image from your checkout and starts it (see [Development automation](#development-automation)).
-
-Step-by-step instructions for every case (Apple Silicon, Linux, Intel or Docker only, building from a clone, tokens, models,
-pushing, upgrading, troubleshooting) are in [`docs/getting-started.md`](docs/getting-started.md).
-
-If you do not say `--profile`, it first asks whether you want the maintainer or the contributor assistant. It asks you to authorize GitHub once (a browser sign-in with `gh`, or a pasted token), then shows a GitHub page
-and a code to approve for the model sign-in. After that, `container/assistant` alone gets you back in. Everything it asks is explained in
-[Setup, step by step](#setup-step-by-step).
-
-## Setup, step by step
-
-### 0. What you need
-
-| Need | Details |
-|---|---|
-| **A Mac with Apple Silicon**, or Linux | Tested on Apple Silicon only. See [what runs on which machine](#what-runs-on-which-machine). |
-| **[Docker Desktop](https://docs.docker.com/get-docker/) 4.60 or newer** | Must be running. Give Docker at least 4 GB of memory (Docker Desktop → Settings → Resources); an 8 GB Mac is enough. |
-| **About 20 GB of free disk** | The image is about 4.2 GB. |
-| **GitHub access** | The GitHub CLI (`gh`) signed in, or a token: [Step 1](#1-create-a-github-token). |
-| **A model** | A GitHub Copilot account (the free plan works with a few models), or an Anthropic, OpenAI or NVIDIA API key. See [step 4](#4-pick-a-model-that-works). |
-
-You do not install Hermes, Python or OpenShell yourself. If OpenShell is missing, the launcher installs it using
-OpenShell's own installer.
-
-### What runs on which machine
-
-The image is built for both chip families (Apple Silicon / arm64, and Intel / AMD, called amd64) and passes its
-build-time checks on both. What decides whether the whole thing runs is Docker, OpenShell and the launcher around it.
-
-| Your machine | Status |
-|---|---|
-| **Mac with Apple Silicon** | Tested: this is where everything was developed and checked, including real chats |
-| **Linux, x86_64** | Checked end to end on a GitHub Linux runner (Ubuntu 24.04, kernel 6.17, Docker Engine 28): OpenShell installed, the sandbox started, the token stayed a placeholder, merges were refused by the proxy, the hooks were read-only and the dashboard answered. Not tried on a real Linux laptop. The kernel needs Landlock (Linux 5.13 or newer) |
-| **Linux, arm64** | The image is built for it; the launcher has not been tried there |
-| **Intel Mac** | Not supported with OpenShell (it supports macOS on Apple Silicon only). `container/assistant --no-openshell` needs only Docker, with less protection (not tried on Intel): see [docs/container.md](docs/container.md#running-without-openshell) |
-| **Windows** | OpenShell supports it through WSL2 (experimental); run the launcher inside WSL2. Untested |
-
-The launcher checks your machine first and says so plainly if it is one it cannot support.
-
-### 1. Create a GitHub token
-
-> **Have the GitHub CLI (`gh`)?** You can skip this step. The launcher asks how to authorize GitHub. Choose **1**
-> and it uses your `gh` sign-in, or opens the browser sign-in (`gh auth login`) if you are not signed in yet. Choose
-> **2** to paste the fine-grained token below instead. `gh` always asks for the `repo`, `read:org` and `gist`
-> scopes, so its token can act on every repository you have access to, private ones included, while the
-> fine-grained one is limited to the repo you scope it to. `gh` may also offer to set up git
-> credentials on your machine; you can answer No. The token is stored in OpenShell like any other, and the
-> assistant still cannot merge.
-
-Create a fine-grained personal access token scoped to the repo you will point the assistant at
-(for example `kyverno/kyverno`):
-
-| Permission | Access |
-|---|---|
-| Contents | Read |
-| Pull requests | Read & Write |
-| Issues | Read & Write |
-| Checks | Read |
-| Code scanning alerts | Read |
-| Dependabot alerts | Read |
-| Secret scanning alerts | Read |
-| Organization members | Read |
-
-Optional, for the extra tools: Organization projects (Read & Write) for project boards,
-Administration (Read) for repository rulesets, Organization custom properties (Read). Tools whose
-permission is missing return an error and the rest keep working.
-
-**Do not grant Contents Write, merge, or admin scopes.** Without Contents Write, GitHub itself will not let this
-token merge a pull request, which is one of the [layers that stop the assistant merging](#how-it-stays-safe).
-See [`docs/architecture.md`](docs/architecture.md) for the reasoning. Keep the token handy; you paste it in step 3.
-
-### 2. Get the image
-
-Pick one:
-
-| Option | Command | Time | Notes |
-|---|---|---|---|
-| **Build it yourself** | `container/assistant --build` | 15 to 30 minutes, once | Works today on any supported machine. Downloads about 5 GB while building. |
-| **Download the published image** | `container/assistant` | A few minutes (about 1.2 GB) | The default. It pulls `ghcr.io/kyverno/assistant:latest` (see [why](#why-it-is-built-this-way)); pin a version with `--image ghcr.io/kyverno/assistant:v0.1.0`. |
-
-### 3. Start it
-
-```bash
-container/assistant --build        # or just: container/assistant
-```
-
-It prints five numbered steps. This is what each one does and what you answer:
-
-| Step | What happens | You do |
-|---|---|---|
-| **1. Docker and OpenShell** | Checks Docker is running; installs OpenShell if missing | Nothing, unless Docker is not running |
-| **2. Image** | Builds or pulls the image | Wait |
-| **3. GitHub token** | Asks which repo to manage, then how to authorize: sign in with `gh` (browser), or paste a token (hidden). It checks the token against that repo before keeping it, and stores it in OpenShell | Type the repo (`owner/repo`), then sign in or paste the token |
-| **4. Sandbox** | Creates the sandbox and applies its network policy (a minute or two the first time) | Wait |
-| **5. Assistant** | Takes your GitHub username from the token (it asks only if it cannot read it). Then GitHub Copilot sign-in: it prints a page and a code | Open https://github.com/login/device in your browser, enter the code, approve. Then pick **GitHub Copilot** and a model in the picker |
-
-The chat then opens. The screen takes about 30 seconds to appear, because the memory plugin loads its search
-engine; you may see some `cpuinfo` and `onnxruntime` lines first, which are harmless. The first run is the only
-one that asks questions.
-
-### 4. Pick a model that works
-
-The assistant needs a model. Copilot is the default because the sign-in is one click.
-
-- **GitHub Copilot.** Which models answer depends on your plan. A free account may reject the model the picker
-  pre-selects with `The requested model is not supported`, even when Copilot's own list marks it enabled. If that
-  happens, switch inside the chat:
-  ```
-  /model gpt-4.1 --global
-  ```
-  `gpt-4.1` and `gpt-4o-mini` answered on a free account. `--global` keeps the choice for next time.
-- **Another provider.** Its API key is stored in OpenShell like the GitHub token, so the sandbox never sees it:
-  ```bash
-  container/assistant --provider anthropic      # or openai, or nvidia
-  ```
-  The launcher asks for the key once. Then use `/model` to pick one of its models.
-
-### 5. Talk to it
-
-Just ask. For example (more in [`docs/capabilities.md`](docs/capabilities.md)):
-
-```
-what's my PR queue
-explain PR #4181
-which Dependabot PRs should I review and merge?
-does #4172 need anything from me right now?
-which stale PRs should I close or reassign?
-tell me about issue #4512
-```
-
-It reads GitHub and answers. When you ask it to act (label, comment, approve), it asks you to confirm first.
-Type `/help` for the chat commands.
-
-## Everyday use
+The pack is baked into the image read-only. First builds take 15 to 30 minutes.
 
 | To | Run |
 |---|---|
-| Start, or come back later | `container/assistant` |
-| Open a second chat at the same time | `container/assistant` in another terminal |
-| Open the dashboard | http://127.0.0.1:9219/maintainer?profile=maintainer (the launcher prints it; see [the dashboard](#the-dashboard)) |
-| Leave | Close the chat. The sandbox keeps running, idle |
-| Stop the sandbox | `openshell sandbox stop assistant-maint` (`container/assistant` starts it again) |
-| See whether it is running | `openshell sandbox list` |
-| See what it contacted, and what was blocked | `openshell logs assistant-maint` |
-| Update to a new version | `git pull`, then `container/assistant --build --upgrade` (or `container/assistant --upgrade` once images are published). Keeps your memory, history, sign-in and model |
-| Replace your GitHub token | `bash -c 'read -rs -p "New GitHub token: " REPO_GITHUB_TOKEN; echo; export REPO_GITHUB_TOKEN; openshell provider update kyverno-repo-github --credential REPO_GITHUB_TOKEN'`, then open a new chat. Chats already open keep the old token |
-| Use another model provider | `container/assistant --provider anthropic` (or `openai`, `nvidia`) |
-| Set up without opening the chat | `container/assistant --no-attach` |
+| Come back, or open a second chat | `container/assistant` |
+| Upgrade, keeping memory, history, sign-in and model | `container/assistant --upgrade` |
+| See everything it contacted, and what was blocked | `openshell logs assistant-maint` |
+| Stop it / delete it and its state | `openshell sandbox stop assistant-maint` / `openshell sandbox delete assistant-maint` |
+| Run without OpenShell (less protection) | `container/assistant --no-openshell` |
 
-## Where your data lives
+> Sandboxes made before the rename (`kyverno-assistant`) keep working under their old name. Everyday use, data and
+> troubleshooting: [`docs/usage.md`](docs/usage.md).
 
-Your memory, chat history, notes, settings and the model sign-in live **inside the sandbox**, in the profile
-folder `/opt/hermes-home/.hermes/profiles/maintainer`. They survive stopping and starting it, and
-`container/assistant --upgrade` carries them to a new image. Deleting the sandbox deletes them.
+## Using it
 
-Your GitHub token is not in the sandbox: it lives in OpenShell, on your laptop. The Copilot sign-in token is in
-the sandbox (it only grants access to Copilot's models).
+Talk to it in the terminal. It is a conversation, so ask the way you would ask a colleague:
 
-What the sandbox can reach on the internet, and nothing else:
-
-| Destination | Why |
+| Ask | You get |
 |---|---|
-| `api.github.com` (reads only) | The PR and issue data |
-| The GitHub MCP server (`api.githubcopilot.com/mcp/`) | The tools the agent uses to look things up and to act, with your token added on the way out. The gateway lets through only the tools on the allowlist in `config.yaml` |
-| GitHub Copilot's model service | The model, when you use Copilot. Only its inference paths, not `/mcp/` |
-| `github.com` sign-in pages | Only the two device-code endpoints, for the Copilot sign-in |
-| `github.com`, `codeload.github.com`, `raw.githubusercontent.com` (read-only) | Lets the agent's terminal read public code |
-| `models.dev` (read-only) | The list of models for `/model` |
-| A model provider you added | Only providers whose key you stored with `--provider` |
+| "What's my review queue for 1.20?" | Asks for a focus if you did not give one (a milestone, an author, an area), then the grouped, ordered queue |
+| "Brief me on #1234" | Short by default: what it changes, why, review state. Deeper on request: threads, risk, suggested action |
+| "Which Dependabot PRs can I merge today?" | A verdict per PR with the call sites, release notes and review findings behind it |
+| "Triage the 10 oldest issues with no PR" | Class, severity, duplicates, competing PRs and progress, grounded in the code |
+| "Which stale PRs should I close?" | Close, reassign or take over the branch, each with the issue state behind it |
+| "Draft a reply to the discussion about X" | The draft, shown to you first |
+| "Label #1234 area/cli and ask the author to fix DCO" | Applies the label you asked for, and shows you the comment draft before posting it |
 
-## How it stays safe
+Results also land on a read-only **Maintainer tab** at `http://127.0.0.1:9219/maintainer?profile=maintainer` (the
+launcher prints the address), so you read the queue there instead of scrolling the chat. It also remembers your focus
+and working style between sessions, plus past incidents and rejected PRs. What you ask for explicitly (a label, an
+approval) it does and reports; anything with words in it (a comment, a review, a nudge, a Discussion reply) it drafts
+and shows you first. Branch updates are GitHub's merge-update, not a git rebase, and it says so.
 
-The agent cannot merge, and no single mechanism is trusted on its own. Five layers, and the ones that matter most
-are enforced by OpenShell outside the sandbox, where the agent cannot edit them:
+## Protected by OpenShell
 
-1. **The token has no merge permission** (Pull requests: write, but not Contents: write). GitHub itself refuses.
-2. **The gateway checks every GitHub call.** On `api.github.com` it allows reads only and refuses merges, repository
-   deletion and GraphQL mutations. On the GitHub MCP server it checks each tool call against the allowlist and
-   refuses everything else, plus anything named like merge, delete or force-push, even inside a batched request.
-3. **The tool allowlist in `config.yaml`**: the GitHub tool list has no merge tool.
-4. **A hook** blocks any tool whose name looks like merge, delete or force-push.
-5. **The network allowlist** denies everything not listed above.
-
-Layers 1, 2 and 5 do not depend on any file inside the sandbox. Layers 3 and 4 do: the agent has a terminal and file
-tools, so a manipulated agent could edit its own `config.yaml` (the hook scripts are read-only to it). Layers 1, 2 and
-5 are what you rely on then.
-Your token never enters the sandbox, so a prompt-injected agent cannot leak it. The details, including exactly what
-was tested, are in [`docs/container.md`](docs/container.md).
-
-## Why it is built this way
-
-**Why a sandbox at all?** An assistant that reads issues and PR comments reads text written by strangers. A
-sandbox means that even a successfully manipulated agent can only do what the sandbox allows: no access to your
-files, no token to steal, only the listed hosts.
-
-**Why one prebuilt image?** The agent is built from many moving parts (Hermes, Python packages, a memory plugin,
-a search model). In a sandbox with no open internet, anything the agent tries to download or install the first
-time it runs would fail, and some of those steps pop up a question the chat screen hides. So everything is installed
-and checked when the image is built, including a full memory cycle run with the network switched off. A new
-user's first run takes about a second of setup, and every machine runs identical bits.
-
-**Why publish the image to ghcr.io?** `ghcr.io` is GitHub's container registry. Building the image on your own
-laptop takes 15 to 30 minutes, downloads about 5 GB, and can break if a package was released since the last
-person built it. Publishing it once from CI, from a tagged release, means a new maintainer just downloads it,
-and an upgrade is a new tag. The workflow is `.github/workflows/container-image.yml`; it builds for Apple Silicon
-and Intel and publishes one image. Until a release is published, use `--build`.
-
-**Why does the first build take so long?** It downloads Hermes and its tools, the memory plugin, and a 64 MB
-search model, then runs the proofs above. Later builds reuse Docker's cache and take seconds.
-
-**Why no Slack or scheduled jobs yet?** Slack's tool runs under Docker, which a sandbox does not have, and the
-scheduled jobs run inside Hermes' gateway, which is not started. They work in the
-[host install](docs/host-install.md).
-
-## Troubleshooting
-
-| Symptom | Cause and fix |
-|---|---|
-| `The requested model is not supported` | The model is not available on your Copilot plan. `/model gpt-4.1 --global` |
-| `No LLM provider configured ... openrouter` | You picked a mixture-of-agents option that needs an OpenRouter key. Pick a normal model with `/model` |
-| The chat looks frozen right after start | Give it 30 seconds. If it stays blank, press Enter once. If it still does nothing, run `container/assistant --build --upgrade` |
-| `could not pull ...` | No network to the registry, or a version that does not exist. Check the tag, or use `container/assistant --build`. A pull that crawls is usually your route to GitHub's download servers: try another network, the finished layers are kept |
-| The sandbox goes to `Error`, "UID or GID zero" | The image's default user must be 1000, not root. Rebuild with `--build` |
-| `could not register the provider profile` | OpenShell holds an older copy of this project's profile from an earlier run. Start clean (nothing is rebuilt): `openshell sandbox delete assistant-maint`, `openshell provider delete kyverno-repo-github`, `openshell profile delete kyverno-repo-github`, then `container/assistant --image assistant:dev` (or without `--image` once an image is published). The launcher asks for your GitHub token again |
-| `sandbox ... did not become Ready` | The launcher prints the sandbox's state and the last lines of its log. Retry from scratch: `openshell sandbox delete assistant-maint`, then run the launcher again |
-| The build is very slow or runs out of memory | Docker Desktop's VM memory. Raise it in Settings → Resources (at least 4 GB) |
-| `Docker Desktop ... is older than 4.60` | The sandbox needs a newer Docker Desktop. Update it |
-| GitHub says the token is rejected | Wrong, expired or revoked: create a new one. A 404 means the token cannot see that repo (scope it to the repo, or have the org approve it) |
-
-## Removing everything
-
-```bash
-openshell sandbox delete assistant-maint          # the sandbox and everything in it (memory, history, sign-in)
-openshell provider delete kyverno-repo-github       # your stored GitHub token
-openshell provider delete kyverno-anthropic         # model keys you added, if any (also kyverno-openai, kyverno-nvidia)
-docker rmi assistant:dev                    # the image, if you built it yourself
-```
-
-If you used `--push-to-fork`, also `openshell provider delete kyverno-git-push` (or run the launcher with `--no-push`). With `--no-openshell`, the clones and toolchains live in a Docker volume that outlives the container:
-`docker volume rm assistant-maint-docker-workspace` (the name follows the container's).
-
-## What it does
-
-| Area | Capabilities |
-|---|---|
-| **PR queue** | Fetches every open PR matching a focus (milestone, author, area or label) in one batched call, Dependabot PRs included. Builds a dependency graph, layers it into tiers (stacked PRs, generated-file conflicts, body references, closing-issue conflicts), then orders each tier by a precedence ladder and states the reason for every position. |
-| **PR briefs** | Explains any PR: short by default, deeper on request (review threads, risk, suggested action, Slack and Discussions context). Open-ended questions are answered by looking things up. |
-| **Merge gates** | Reports live e2e-gate status per target branch, kept separate from `ready-for-review`. |
-| **Dependabot** | Reviews every open Dependabot PR and says which to merge now, fix first, review yourself, wait on, or close, citing call sites, release notes and Copilot's findings. |
-| **Issues** | Classifies issues, maps issue and PR relationships, summarises progress, surfaces stale items, and runs the decide-table actions (label, close, assign, milestone, nudge, raise). |
-| **Stale and author-blocked PRs** | Recommends close, reassign or needs-help, and checks status before a PR goes stale. |
-| **PR actions** | Labels, comments, requests changes, approves, and brings a PR's branch up to date with its base, all with your own token. The branch update is a GitHub-API merge-update, not a git rebase, even when you ask for a rebase. |
-| **Discussions** | Reads GitHub Discussions and drafts replies. Nothing is posted until you confirm. |
-| **Memory** | Remembers your current focus and working style across sessions, plus past incidents, rejected PRs and contributor patterns, retrieved where relevant. |
-
-**It cannot merge.** There is no merge tool in its toolset, and this is enforced in
-[independent layers](#how-it-stays-safe). See [`docs/architecture.md`](docs/architecture.md).
-
-## The dashboard
-
-A browser board that shows what the agent just told you, linked, grouped and sortable, so you don't scroll the
-chat or copy links by hand. It runs inside the sandbox, and the launcher forwards a port on your laptop to it and
-prints the address:
+An assistant that reads strangers' issues and PRs will, sooner or later, read text written to manipulate it. The design
+answer is that **a tricked agent must still be unable to do harm.** [OpenShell](https://github.com/NVIDIA/OpenShell) is
+the reason that holds: the strongest limits sit **outside the sandbox, where the agent cannot edit them.**
 
 ```
-http://127.0.0.1:9219/maintainer?profile=maintainer
+ your machine
+ ┌─────────────────────────────────────────────────────────────────────────┐
+ │  you ──► container/assistant ──► OpenShell gateway (outside the sandbox)│
+ │                                   · holds your GitHub token             │
+ │                                   · allowlist proxy: host, path, method,│
+ │                                     and which program may call          │
+ │                                   · swaps the real token in on the way  │
+ │                                              │                          │
+ │        ┌─────────────────────────────────────▼────────────────────┐     │
+ │        │ SANDBOX: Hermes + the assistant + a terminal             │     │
+ │        │  · holds only a placeholder where the token would be     │     │
+ │        │  · code and safety hooks are read-only (Landlock)        │     │
+ │        └──────────────────────────────────────────────────────────┘     │
+ └─────────────────────────────────────────────────────────────────────────┘
+                                   ▼
+              GitHub (read APIs, the GitHub MCP server) · your model
 ```
 
-Pick **Kyverno** in the sidebar under Plugins. It refreshes every 15 seconds. Keep it open next to the chat: it fills
-when the agent answers a queue, stale-PR, issue-triage or Discussions request, not in the background.
+### What the sandbox gives you
 
-| Tab | Shows |
+| Protection | How it works |
 |---|---|
-| **Overview** | What is waiting on you, grouped by verdict (rescue, decide, review, close, triage…), the milestone and due date, gate status, recent actions. |
-| **PRs / Issues / Discussions** | One row per item with a GitHub link, state (CI, merge state, size, labels) and the agent's verdict and reason. Switch views, filter by verdict, search, sort. |
-| **Detail panel** | Summary, unresolved threads, a graph of related PRs and issues, and any drafted comment awaiting your confirmation, with a copy button. |
-| **Activity** | Every action you confirmed (approvals, comments, nudges, closes, deferrals) with a timestamp and a link. |
+| **Your token never enters the sandbox** | The agent sees a meaningless placeholder. The gateway's proxy swaps in the real token only on requests to the listed GitHub endpoints, and only from the listed programs. A prompt-injected agent that is told to print its credentials prints the placeholder |
+| **GitHub is read-only at the proxy** | On `api.github.com` REST is read-only and GraphQL mutations (including `mergePullRequest`) are refused by the proxy, not by a rule the agent could edit |
+| **Every GitHub tool call is checked by name** | On the GitHub MCP server the proxy allows only the tools on the allowlist and refuses everything else, plus anything named like merge, delete or force-push, even when hidden in a batched request |
+| **Deny by default network** | Anything not listed is blocked, per host, path and method, and per program: `git` and `curl` get read-only GitHub, the toolchain hosts are GET-only for the installers, and only Hermes' own Python may use the Copilot login |
+| **Read-only code and hooks** | Landlock (a hard requirement) makes the system, Hermes' code and the baked safety hooks read-only. The agent can write only `/sandbox`, `/tmp` and Hermes' home |
+| **A full audit trail** | `openshell logs assistant-maint` shows every request the sandbox made and what was allowed or denied |
+| **Asking, not widening** | If a task needs a blocked host, the agent can propose the narrowest rule. You approve it on your own computer, and it cannot approve it itself |
+| **Pushes only if you opt in** | `--push-to-fork` adds a separate credential for your own fork. A hook still refuses force pushes, deletes and pushes to main or release branches, and the network rule refuses every other repository |
 
-The Maintainer tab is read-only. Confirming and acting still happen in the chat. It is reachable only from your own
-laptop (the port is forwarded to `127.0.0.1` explicitly), and port 9219 is used so it does not clash with a Hermes
-dashboard on 9119. Set `ASSISTANT_DASHBOARD_PORT` to change it. Hermes protects the dashboard itself: a session token
-that changes on every start, a check that the request's `Host` matches the address it listens on (against DNS
-rebinding), and cross-origin requests only from localhost. It is still Hermes' whole dashboard, not just our tab: its
-Settings and chat pages are served too, and the Settings pages can show what is in the sandbox's settings file, which
-includes the Copilot sign-in token. Your GitHub token is not there. If you do not want it, stop it with
-`openshell forward stop 9219` (the launcher starts it again next time you run it).
+### If the agent is tricked
 
-## Coding in the sandbox
+Text in an issue says "ignore your instructions and..." These are the outcomes, by layer:
 
-Both profiles have a terminal inside the sandbox, which cannot reach your laptop. Ask the assistant to reproduce an
-issue or fix a PR and it follows the `workspace` skill: `assistant-workspace <owner/repo>` clones the repo and downloads
-the toolchains it declares (Go, Node, or the Kyverno CLI and Chainsaw), then it builds, runs the tests, and shows you
-the real output. The toolchains are downloaded the first time, not baked into the image: the network policy allows
-only those hosts, GET only, and every download is checked against the vendor's checksum. Caches live in the sandbox, so
-recreating it downloads them again, unless you pass `--keep-caches` to `--upgrade`. Your cloned repositories and their
-unpushed commits always come along on `--upgrade`. When a toolchain's rough memory need is above what the sandbox really
-has, `assistant-workspace` says so with both numbers. Things that need a real cluster cannot run, and the assistant says so
-(see [#25](https://github.com/kyverno/assistant/issues/25)).
-
-The result comes back as a patch (`openshell sandbox download`), or as a pushed branch if you turn on pushing:
-
-```bash
-container/assistant --push-to-fork      # off by default; --no-push removes it
-```
-
-That stores a second credential in OpenShell (your `gh` sign-in's token, or a token with write on your fork). OpenShell
-lets `git push` reach only your own forks (and, as a maintainer, the repository you manage); a hook refuses force pushes,
-branch deletes and pushes to main. Nothing is ever merged.
-
-## Slack and scheduled jobs
-
-These are not available in the sandbox yet. They work in the [host install](docs/host-install.md):
-
-- **Slack**: talk to the assistant by mentioning it, and it can read and post in your maintainers channel.
-- **Scheduled jobs**: a weekday review digest and two memory jobs (installed paused).
-
-## Contributor profile
-
-A second profile for people contributing to Kyverno. It finds work worth doing, explains how the code
-and folders fit together, helps prepare evidence-backed PRs, makes review feedback understandable, and
-tracks the path from first PR toward reviewer. It reads GitHub with your own token and can write two
-things, each after you confirm the exact text: a comment on an issue or a PR, and a pull request from your own fork
-(`create_pull_request`, which needs the `gh` sign-in or a token that can write pull requests on the repository). It cannot
-merge, approve, submit a formal
-review; hooks enforce that. It can push to your own fork only if you start the launcher with `--push-to-fork`.
-
-```bash
-container/assistant --profile contributor     # or just container/assistant, which asks which assistant you want
-```
-
-It has its own sandbox (`assistant-contrib`) and its own GitHub token, apart from the maintainer's. It needs a GitHub
-token of your own account (a fine-grained PAT; "Public repositories (read-only)" is enough to read everything, or sign in
-with `gh`), your GitHub username (read from the token), and the repo (default `kyverno/kyverno`). The coding environment
-below lets it clone the repo, build and test in the sandbox, which holds no real tokens. It runs only in the
-sandbox: the host install (`scripts/install.sh`) sets up the maintainer profile only. Background updates (new reviews,
-failing checks, merged PRs) need the messaging gateway, so they are not available in the sandbox yet.
-
-| Tool (plugin `profiles/contributor/plugins/contributor/`) | Answers |
+| It is told to | What stops it |
 |---|---|
-| `knowledge_for` | What the repo's AGENTS.md chain, instructions, labels and CODEOWNERS say about a path |
-| `explain_path` | How a file or folder fits in: contents, Go imports and exports, who imports it, tests, history |
-| `related_prs` | How the same area was changed before: merged precedents, open work, rejected attempts |
-| `find_issues`, `issue_history` | What to work on, and what happened to each issue before |
-| `my_pr_state` | Review threads (maintainers, humans, bots), failing checks, blockers on your PR |
-| `journey_summary`, `journey_note`, `journey_self_report` | What you have done, areas, ladder progress, private notes |
-| `inbox_read` | What the background watch found |
+| Print or leak your token | It only ever holds a placeholder |
+| Merge the PR | There is no merge tool; the proxy refuses merge tool names and GraphQL mutations; the token has no merge permission, so GitHub refuses |
+| Send data to a host it picked | Network deny by default: the request is blocked and logged |
+| Reach GitHub with the token through another program | The token is only swapped in for the listed programs |
+| Rewrite its own safety hooks | `/opt/kyverno` is read-only to it |
+| Delete the repo or force-push | Reads only at the proxy; pushes are opt-in and force pushes are refused |
 
-Skills: `find-work`, `understand-code`, `make-the-change`, `review-loop`, `grow`. The coding environment is shared with the maintainer profile (see above).
+### Honest limits
 
-## CI automation for your repositories
+Layers that live inside the sandbox (the tool list in `config.yaml`, the hook that blocks merge-like tool names) can be
+edited by a manipulated agent, because it has a terminal and file tools. The ones that matter, the token, the proxy and
+the network allowlist, do not depend on any file inside it. A manipulated agent can still *say* something misleading, so
+check the links it cites before you act on a recommendation. What was tested, and how:
+[`docs/container.md`](docs/container.md). The full design: [`docs/openshell-architecture.md`](docs/openshell-architecture.md).
 
-Separate from the agent, and optional: shared GitHub Actions that label PRs from the paths they change, mark a PR
-`ready-for-review` or `needs-author-action` from its checks and review threads, and warn and then close PRs an author
-has left quiet. They need no model, container or token of yours; they run on GitHub with the workflow's own token.
+## Key features
 
-Adopt them **before** relying on the agent if you can. Its queue and follow-up skills (`pr-queue`, `author-followup`)
-read those labels, so a repository that already runs the automation gives the agent the signals it expects. Without
-them the agent still runs, but it has no `needs-author-action` or `ready-for-review` labels to go on.
-
-One person runs one command with their own `gh` login, and it opens a PR in each repository you name:
-
-```bash
-scripts/adopt-ci.sh --reviewers @your-org/maintainers your-org/repo-a your-org/repo-b
-```
-
-The PR adds workflows and config that run in **preview** (they print what they would do and change nothing). To turn
-the automation on, once the previews look right:
-
-1. Run **Sync labels** from the repository's Actions tab with dry run off, so the lifecycle labels exist.
-2. Read a few preview runs, and edit `.github/pr-management.json` and `.github/pr-readiness-checks.yml` if needed.
-3. A repository admin sets the repository variable `PR_AUTOMATION_LIVE` to `true`
-   (`gh variable set PR_AUTOMATION_LIVE --body true --repo owner/repo`). No PR is needed, and `false` pauses it.
-
-The full steps, what is added to each repository, the permissions, and why it works this way are in
-[`docs/adopting-actions.md`](docs/adopting-actions.md). The actions themselves are in [`.github/actions/`](.github/actions/README.md).
-
-## Repository layout
-
-```
-Makefile                 common lint, image build, scan and run targets (make help)
-container/               the sandbox: Dockerfile, launcher, policy, provider profiles (see container/README.md)
-.github/workflows/       builds and publishes the sandbox image
-profiles/maintainer/     the maintainer profile: distribution.yaml, SOUL.md, config.yaml, hooks/,
-                         plugins/, skills/, cron/, sandbox/ (the host install's terminal image and policy)
-profiles/contributor/    the contributor profile: same shape, plus one plugin and scripts/contributor-watch.py
-container/org/           the organisation pack (org.yaml: everything specific to the organisation), installed
-                         into both profiles as org/
-scripts/install.sh       the host install: idempotent installer, --profile maintainer|contributor [NAME]
-scripts/update.sh        the host install: git pull, then re-run the installer
-scripts/openshell.sh     the host install's sandboxed terminal: setup, policy, access requests, audit
-scripts/adopt-ci.sh      opens a PR that adds the shared CI actions to other repositories (see above)
-.github/actions/         shared CI actions (PR labelling, readiness, stale), usable without the agent
-adopt-ci-templates/      workflows and config that adopt-ci.sh copies into each repository
-docs/                    design, deployment and usage docs
-```
-
-## Development automation
-
-Run `make help` to see the available commands. The most useful targets are:
-
-| Command | Purpose |
+| Feature | Status |
 |---|---|
-| `make lint` | Run ShellCheck and Hadolint using the same pinned images as CI |
-| `make image` | Build `assistant:dev` locally |
-| `make test` | Build the image and run its offline startup, plugin and memory checks |
-| `make scan` | Scan the local image for fixable critical vulnerabilities |
-| `make check` | Run lint and image-build checks |
-| `make run ARGS="--provider anthropic"` | Launch the sandbox using the locally built image |
+| Ordered merge queue with reasons, tiers, rebase flags, overlaps and gate status | ✅ Works |
+| PR briefs, short or deep, with review threads and risk | ✅ Works |
+| Dependabot verdicts with call-site analysis | ✅ Works |
+| Issue triage grounded in code; duplicates, competing PRs, progress | ✅ Works |
+| Stale and author-blocked PR decisions | ✅ Works |
+| Labels, comments, change requests, approvals, branch updates (only on your request; drafted text shown first) | ✅ Works |
+| GitHub Discussions: read and draft | ✅ Works |
+| Long-term memory of incidents, decisions and preferences | ✅ Works |
+| Maintainer dashboard tab | ✅ Works |
+| Coding in the sandbox: clone, toolchains, reproduce, change, test (patch or push to your fork) | ✅ Works |
+| Organisation pack: any repository, one directory of config | ✅ Works |
+| Slack and scheduled digests | 🚧 Host install only, not in the sandbox |
+| Merging | ⛔ Never, by design |
 
-Override `IMAGE` or `TAG` for a different local image name, for example `make image TAG=debug`.
+## What is verified, and the limits
 
-The files below are the maintainer profile's, under `profiles/maintainer/`.
+**Verified in a real sandbox** (on the image as built): GitHub MCP with a real token (merge tools absent, a merge
+refused by the proxy with `policy_denied`); REST and GraphQL mutations refused; the safety hooks; the memory plugin with
+the network off; the dashboard; GitHub Copilot sign-in and a model reply; state kept across `--upgrade`. The
+deterministic tools were also run against several repositories that are not Kyverno's, with only a pack.
 
-<details>
-<summary><b>Details</b></summary>
+**Not verified yet:** a full conversation on a non-Kyverno repository; a real reply from Anthropic, OpenAI or NVIDIA
+keys (the request reaches them with the key swapped in); Slack and cron inside the sandbox.
 
-**Core files**
+**Limits to know about:**
 
-- `config.yaml`: the model default, the GitHub and Slack MCP server declarations (`mcp_servers:`),
-  and the hand-picked tool allowlist. Security-critical, so edit by hand only.
-- `container/Dockerfile` and `container/setup-profile.sh`: build the sandbox image and do the one-time profile setup
-  at build time.
-- `scripts/install.sh`: the host install: profile install, credential check, gateway install, AGENTS.md cache
-  seeding, toolset sanity checks.
-- `cron/jobs.json`: a weekday review digest posted to Slack and two silent memory jobs
-  (`memory-sweep`, `memory-consolidate`). All install paused.
+- **Structure, not semantics.** It orders by files, branches and references. Two PRs on different files that depend on
+  each other in code are not caught.
+- **Review state is partial today.** It reads unresolved threads, bot approvals and checks, not human approvals or
+  requested reviewers as structured data. Approval-aware ordering is on the roadmap.
+- **One repository at a time.** Replies take on the order of half a minute; a ten-PR fetch takes a few seconds.
+- **Your repository's conventions matter.** Without the shared CI labels or a pack it still runs, and tells you what
+  it is missing.
 
-**Hooks**
+## Roadmap
 
-- `profiles/maintainer/hooks/block-dangerous-tools.sh`: rejects any merge, delete-repo or force-push-shaped tool call.
-- `profiles/maintainer/hooks/block-mnemosyne-triples.sh`: restricts the memory plugin's `triple_add` to the exact facts
-  this distribution writes.
+This phase is **data classification and visibility for maintainers.** What is built is above. What is planned, in order,
+is not built yet:
 
-**Plugins**
-
-- `profiles/maintainer/plugins/repo-intel/`: the fetch tools (`fetch_pr_candidates`, `fetch_file_diff_overlap` and the
-  issue equivalents, one batched call over GitHub's GraphQL and REST APIs) `sequence_prs` (a hard-dependency graph
-  with cycle detection and topological layering into tiers), and `repo_pack` (the organisation pack's rules and facts).
-- `profiles/maintainer/plugins/maintainer-dashboard/`: the `update_dashboard` tool and the Maintainer tab in
-  `hermes dashboard`.
-
-**Skills**
-
-| Skill | Purpose |
+| Next | Why |
 |---|---|
-| `repo-context` | Live labels, CODEOWNERS and milestone lookup, plus the organisation pack's gates, file classes and facts (Kyverno's are in `container/org/kyverno/`) |
-| `pr-queue` | Merge-sequence recommendations and per-PR review briefs |
-| `pr-actions` | Labels, comments, reviews and branch updates via your token |
-| `dependabot-queue` | Dependabot PR verdicts |
-| `issue-triage` | Issue classification, issue and PR relationships, progress, staleness |
-| `issue-actions` | Issue label, close, assign, milestone, nudge and raise |
-| `author-followup` | Stale and author-blocked PR decisions |
-| `discussions` | Reads and answers GitHub Discussions, with confirmation before posting |
-| `dashboard-sync` | Pushes presented results and confirmed actions to the dashboard |
+| Approval-aware context: review decision, who approved, requested reviewers, head commit, computed owners | Answer "which merge will wipe approvals on the others?" from data |
+| A fetch layer that retries and updates incrementally, plus a local git mirror for history, owners and conflicts | Faster and cheaper answers; code relations in milliseconds |
+| A merge-order planner that minimises rebases and re-approvals, tests merges, and orders by risk | Fewer rebases when a batch lands |
+| A snapshot the CI publishes, so every answer starts warm | Same answers in chat, in CI and on the dashboard |
+| Contributor assistant for any organisation | Today it needs more per-organisation setup ([`docs/contributor.md`](docs/contributor.md)) |
+| More shared CI actions | A CI-health report is in review; security triage and vulnerability scanning are sketched |
 
-</details>
+## Documentation
 
-## Further reading
-
-| Doc | Contents |
+| For | Read |
 |---|---|
-| [`docs/getting-started.md`](docs/getting-started.md) | Setup for every case: Apple Silicon, Linux, Intel or Docker only, a clone; tokens, models, pushing to your fork, upgrading, removing, troubleshooting |
-| [`docs/container.md`](docs/container.md) | The sandbox in depth: what runs where, secrets, the network policy, what was verified, upgrades, a security review, how to update dependencies, publishing a release |
-| [`docs/host-install.md`](docs/host-install.md) | Running without the sandbox: install, Slack setup, the review digest |
-| [`docs/capabilities.md`](docs/capabilities.md) | A tour of what it can do, with example prompts |
-| [`docs/deployment.md`](docs/deployment.md) | Install runbook and every environment variable (host install) |
-| [`docs/architecture.md`](docs/architecture.md) | Design and security model |
-| [`docs/adopting-actions.md`](docs/adopting-actions.md) | Adding the shared CI actions to a repository and turning them on |
-| [`docs/generalisation.md`](docs/generalisation.md) | How the CI actions and the assistants become adoptable by any organisation |
-| [`docs/workflow.md`](docs/workflow.md) | The target maintainer workflow and build plan |
+| Writing your pack | [`docs/organisation-pack.md`](docs/organisation-pack.md) |
+| Adopting the CI actions | [`docs/adopting-actions.md`](docs/adopting-actions.md), [`.github/actions/`](.github/actions/README.md) |
+| Setup in detail, other platforms | [`docs/setup.md`](docs/setup.md), [`docs/getting-started.md`](docs/getting-started.md) |
+| Daily use, data, dashboard, troubleshooting, removal | [`docs/usage.md`](docs/usage.md) |
+| Security: what was tested, and the design | [`docs/container.md`](docs/container.md), [`docs/openshell-architecture.md`](docs/openshell-architecture.md), [`SECURITY.md`](SECURITY.md) |
+| How it works and why | [`docs/how-it-works.md`](docs/how-it-works.md), [`docs/architecture.md`](docs/architecture.md) |
+| Everything it can do | [`docs/capabilities.md`](docs/capabilities.md) |
+| Running it on your host, not in a sandbox | [`docs/host-install.md`](docs/host-install.md) |
+| The contributor assistant | [`docs/contributor.md`](docs/contributor.md) |
+| Working on this repository | [`docs/development.md`](docs/development.md) |
+
+Licensed under Apache-2.0. Not affiliated with GitHub or NVIDIA.
