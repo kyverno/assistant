@@ -515,7 +515,7 @@ The files below are the maintainer profile's, under `profiles/maintainer/`.
 - `scripts/install.sh`: the host install: profile install, credential check, gateway install, AGENTS.md cache
   seeding, toolset sanity checks.
 - `cron/jobs.json`: a weekday review digest posted to Slack and two silent memory jobs
-  (`kyverno-memory-sweep`, `kyverno-memory-consolidate`). All install paused.
+  (`memory-sweep`, `memory-consolidate`). All install paused.
 
 **Hooks**
 
@@ -526,8 +526,8 @@ The files below are the maintainer profile's, under `profiles/maintainer/`.
 **Plugins**
 
 - `profiles/maintainer/plugins/repo-intel/`: the fetch tools (`fetch_pr_candidates`, `fetch_file_diff_overlap` and the
-  issue equivalents, one batched call over GitHub's GraphQL and REST APIs) and `sequence_prs`, a hard-dependency graph
-  with cycle detection and topological layering into tiers.
+  issue equivalents, one batched call over GitHub's GraphQL and REST APIs) `sequence_prs` (a hard-dependency graph
+  with cycle detection and topological layering into tiers), and `repo_pack` (the organisation pack's rules and facts).
 - `profiles/maintainer/plugins/kyverno-dashboard/`: the `update_dashboard` tool and the Kyverno tab in
   `hermes dashboard`.
 
@@ -535,7 +535,7 @@ The files below are the maintainer profile's, under `profiles/maintainer/`.
 
 | Skill | Purpose |
 |---|---|
-| `kyverno-context` | Live labels, CODEOWNERS and milestone lookup, plus Kyverno's codegen, CI split and e2e-gate facts |
+| `repo-context` | Live labels, CODEOWNERS and milestone lookup, plus the organisation pack's gates, file classes and facts (Kyverno's are in `container/org/kyverno/`) |
 | `pr-queue` | Merge-sequence recommendations and per-PR review briefs |
 | `pr-actions` | Labels, comments, reviews and branch updates via your token |
 | `dependabot-queue` | Dependabot PR verdicts |

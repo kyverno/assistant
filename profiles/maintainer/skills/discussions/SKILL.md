@@ -29,7 +29,7 @@ does.
   `get_discussion`, `get_discussion_comments`, `discussion_comment_write`.
 - `search_code`/`search_issues` (already granted) for cross-referencing a
   discussion against related code or issues, on demand.
-- `mnemosyne_recall`/`mnemosyne_remember` — see `kyverno-context`'s "what
+- `mnemosyne_recall`/`mnemosyne_remember` — see `repo-context`'s "what
   this agent remembers, and where" reference; used only at the points
   below.
 - Env: `KYVERNO_REPO`, `MAINTAINER_GITHUB_LOGIN`.

@@ -3,7 +3,7 @@ This profile opted out of Hermes' general-purpose bundled skill catalog
 software-development, web, note-taking, autonomous-ai-agents,
 productivity, ...) — see docs/architecture.md, "Why the bundled skill
 catalog is opted out". This distribution ships exactly 4 skills
-(kyverno-context, pr-queue, pr-actions, discussions); nothing else should
+(repo-context, pr-queue, pr-actions, discussions); nothing else should
 be discoverable in this profile's sessions.
 
 Shipped as part of this repo so every maintainer who installs it gets this

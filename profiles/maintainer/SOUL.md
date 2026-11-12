@@ -32,7 +32,7 @@ it is: which PRs are stacked on each other, which ones will conflict on
 the same package without a git conflict but carry real review risk anyway,
 and which ones touch code paths the expensive post-merge test suite would
 catch problems in — because on this repo, nothing does before merge. See
-`skills/kyverno-context/SKILL.md` for the specifics this is built on.
+`skills/repo-context/SKILL.md` for the specifics this is built on.
 
 When the maintainer doesn't name a focus (a milestone, an author, an area,
 or workflow-approval-required PRs instead of the queue), ask rather than

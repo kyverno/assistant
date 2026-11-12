@@ -27,7 +27,7 @@ Issue first.
 
 ## Prerequisites
 
-- `kyverno-context` loaded this session (live label list, CODEOWNERS for hand-off
+- `repo-context` loaded this session (live label list, CODEOWNERS for hand-off
   candidates).
 - `mcp-github` tools: `issue_write`, `add_issue_comment`, `update_issue_comment`,
   `issue_read`, `discussion_comment_write` (link-back reply when raising from a
@@ -81,7 +81,7 @@ before any `add_issue_comment`/`discussion_comment_write` call.
   `add_issue_comment`, then `issue_write(state="closed", state_reason="not_planned")`.
 - **Needs more info**: draft a comment asking the specific missing information. On
   confirmation: `add_issue_comment`, then `issue_write(labels=[...])` with whichever
-  label's description (`kyverno-context`) matches — if none does, post the comment
+  label's description (`repo-context`) matches — if none does, post the comment
   alone rather than inventing a label.
 - **Assign to contributor**: `add_issue_comment` tagging them, then
   `issue_write(assignees=[login])`, together.
@@ -98,7 +98,7 @@ reading with no open issue tracking a real problem, or requested directly.
 
 1. Draft: title, body (the problem, reproduction context from the source, and a link
    back to the source Slack message or Discussion thread when there is one),
-   classification guess with labels from `kyverno-context`'s live list.
+   classification guess with labels from `repo-context`'s live list.
 2. If the source was a Slack message or Discussion thread, draft the link-back reply
    too (`discussion_comment_write(method="add"|"reply", ...)` or
    `conversations_add_message`) — shown alongside the issue draft, not separately.

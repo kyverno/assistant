@@ -376,7 +376,7 @@ step "4. AGENTS.md cache"
 # Discovers every AGENTS.md/ARCHITECTURE.md in the repo (not just api/AGENTS.md — kyverno/kyverno
 # has one per major package: pkg/engine, pkg/cel, pkg/webhooks, etc., plus root AGENTS.md and
 # ARCHITECTURE.md) via one git-tree call, then caches each as its own mnemosyne entry so
-# kyverno-context can recall the one relevant to whatever package is in play instead of a fresh
+# repo-context can recall the one relevant to whatever package is in play instead of a fresh
 # search_code every session.
 AGENTS_SEED_FILE="$(mktemp)"
 python3 -c "
@@ -437,7 +437,7 @@ for path in doc_paths:
         failed.append(path)
         continue
     entries.append({
-        'id': f'kyverno-doc:{path}',
+        'id': f'repo-doc:{path}',
         'content': f'--- {path} ---\n{content}',
         'source': 'install-seed',
         'timestamp': '2026-01-01T00:00:00',
@@ -459,12 +459,12 @@ print(f'OK: {len(entries)} cached' + (f', {len(failed)} failed: {failed}' if fai
 
 if grep -q "^OK:" "$AGENTS_SEED_FILE.status"; then
   if hermes -p "$PROFILE" mnemosyne import -i "$AGENTS_SEED_FILE" --force >/dev/null 2>&1; then
-    pass "$(sed 's/^OK: //' "$AGENTS_SEED_FILE.status") (recall by 'kyverno-doc:<path>' any session)"
+    pass "$(sed 's/^OK: //' "$AGENTS_SEED_FILE.status") (recall by 'repo-doc:<path>' any session)"
   else
     info "docs fetched but mnemosyne import failed — run: hermes -p $PROFILE mnemosyne import -i $AGENTS_SEED_FILE --force"
   fi
 else
-  info "$(cat "$AGENTS_SEED_FILE.status") — skipping cache, kyverno-context will fall back to search_code"
+  info "$(cat "$AGENTS_SEED_FILE.status") — skipping cache, repo-context will fall back to search_code"
 fi
 rm -f "$AGENTS_SEED_FILE" "$AGENTS_SEED_FILE.status"
 

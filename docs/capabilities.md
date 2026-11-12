@@ -199,8 +199,8 @@ A scheduled job ships with the profile (`cron/jobs.json`) — weekday
 mornings, it builds the merge sequence and posts a short digest to your
 Slack channel on its own: what's new since the last digest, and the
 current review order. It arrives paused; `hermes cron resume
-kyverno-review-digest` turns it on, and `hermes cron edit
-kyverno-review-digest --schedule "..."` changes the timing. Each run
+review-digest` turns it on, and `hermes cron edit
+review-digest --schedule "..."` changes the timing. Each run
 remembers its own last output, so the digest says what changed rather than
 repeating the whole list every morning.
 

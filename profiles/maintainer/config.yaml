@@ -55,7 +55,7 @@ mcp_servers:
       # label/state check (e.g. the e2e-gate).
       #
       # Label taxonomy + CODEOWNERS — read live, never hardcoded (see
-      # skills/kyverno-context). get_team_members/get_teams resolve
+      # skills/repo-context). get_team_members/get_teams resolve
       # team-based CODEOWNERS entries against MAINTAINER_GITHUB_LOGIN.
       #
       # Risk enrichment for queue reasoning — read-only.

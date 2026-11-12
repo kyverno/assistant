@@ -10,7 +10,7 @@ platforms: [linux, macos, windows]
 # pr-queue Skill
 
 Builds an ordered merge-sequence recommendation and answers open-ended questions about
-the queue or any individual PR. Relies on `kyverno-context` for labels/CODEOWNERS/
+the queue or any individual PR. Relies on `repo-context` for labels/CODEOWNERS/
 milestone/fixed facts — assumed loaded, not re-derived here.
 
 ## When to Use
@@ -24,7 +24,7 @@ milestone/fixed facts — assumed loaded, not re-derived here.
 
 ## Prerequisites
 
-- `kyverno-context` loaded this session.
+- `repo-context` loaded this session.
 - `fetch_pr_candidates` (plugin tool, `plugins/repo-intel/`) — one call fetches
   every candidate's full metadata. `detail="digest"` (capped at 60) drops body/
   review text for ranking a whole set by something search can't filter on
@@ -44,7 +44,7 @@ milestone/fixed facts — assumed loaded, not re-derived here.
 - `mcp-slack`: `conversations_history`, `conversations_add_message` — only if
   configured.
 - `mnemosyne_recall`/`_triple_query` (read), `mnemosyne_remember`/`_triple_add`
-  (write) — see `kyverno-context`'s memory reference.
+  (write) — see `repo-context`'s memory reference.
 - Env: `KYVERNO_REPO`, `MAINTAINER_GITHUB_LOGIN`, `SLACK_HOME_CHANNEL`.
 
 ## Procedure: build the merge-sequence recommendation
@@ -54,7 +54,7 @@ skip to Step 1. Otherwise offer a handful of starting points — not an exhausti
 list, and the maintainer can name something else instead: a milestone, an author,
 an area (package/folder), `workflow-approval-required` PRs instead of the review
 queue, or the 10 most urgent `ready-for-review` PRs. Never default to
-oldest-first or "all PRs." Exception: `cron/jobs.json`'s `kyverno-review-digest` has
+oldest-first or "all PRs." Exception: `cron/jobs.json`'s `review-digest` has
 no one to ask — use a fixed fallback (highest-urgency closing-issue label, then
 `bot_approved` + zero unresolved threads, then most-recently-updated) and
 label it as the digest default, not the general rule.
@@ -115,7 +115,7 @@ for just those 10. State the slice size against the digest's own `total_count`.
      on par with a real file overlap.
    - **Historical risk**: for any PR (or overlapping pair) classified
      `ADMISSION_CRITICAL`, or named in a `file_overlaps`/`package_overlaps`
-     entry, `mnemosyne_triple_query` for a `caused_e2e_failure` predicate on
+     entry, `mnemosyne_triple_query` for a `caused_gate_failure` predicate on
      that package. A real past incident (PR#, date) is a specific, citable
      post-merge-risk finding — stronger than the generic "core engine
      surface" warning; say plainly when the query returns nothing rather
@@ -140,7 +140,7 @@ for just those 10. State the slice size against the digest's own `total_count`.
            `LOW` (`enhancement`, `kind/tests`, `kind/documentation`, chore).
            `CRITICAL` outranks every `HIGH` regardless of anything below.
         b. `release-critical`/`-high`/`-medium`/`-low` on the closing issue
-           (not the PR's own labels — see `kyverno-context`), then
+           (not the PR's own labels — see `repo-context`), then
            `milestone_due_on` proximity.
         c. `bot_approved` + zero unresolved threads.
         d. `author_association` (`MEMBER` > `COLLABORATOR` > `CONTRIBUTOR` >
@@ -246,7 +246,7 @@ queue's file overlap, naming specific PRs and paths.
   X), what relates to what, and what's likely to break — the synthesis is the
   value, not a restatement of fetched fields.
 - Explain each PR from what it actually does — not a paraphrase of its title.
-  When it touches a package with a cached `kyverno-doc`, recall it and ground
+  When it touches a package with a cached `repo-doc`, recall it and ground
   the explanation in that package's real purpose. When several PRs in the
   same answer serve the same underlying effort (same milestone, same tracking
   issue, same area), say so instead of listing them as unconnected items.
@@ -257,7 +257,7 @@ queue's file overlap, naming specific PRs and paths.
 
 ## Pitfalls
 
-- Don't assume a label exists — `kyverno-context`'s live `list_label` is the source
+- Don't assume a label exists — `repo-context`'s live `list_label` is the source
   of truth.
 - Don't recompute the readiness workflows' own gating — use the label as the filter.
 - Don't poll or loop checking post-merge CI or the gate — one on-demand call, never a
@@ -305,7 +305,7 @@ queue's file overlap, naming specific PRs and paths.
   (ordering or the explanation), without becoming the sole reason to deprioritize
   it.
 - Ask about a PR touching `ADMISSION_CRITICAL` surface: confirm `mnemosyne_triple_query`
-  runs for `caused_e2e_failure` on that package, with the result stated either way
+  runs for `caused_gate_failure` on that package, with the result stated either way
   (a real incident cited, or "nothing found").
 - Pick a PR whose milestone is due soon vs. one with no milestone: confirm
   `milestone_due_on` is cited as the reason the first ranks earlier.

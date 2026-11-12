@@ -34,7 +34,7 @@ skill loads only when actually asked for.
   `get_dependabot_alert`, `list_releases`, `get_latest_release`,
   `pull_request_read`, `list_discussions`.
 - `mcp-slack`: `conversations_history` — only if configured.
-- `mnemosyne_recall`/`_triple_query` — see `kyverno-context`'s memory reference.
+- `mnemosyne_recall`/`_triple_query` — see `repo-context`'s memory reference.
 - Env: `KYVERNO_REPO`, `SLACK_HOME_CHANNEL`.
 
 ## Procedure: Dependabot queue
@@ -75,7 +75,7 @@ Every Dependabot PR appears exactly once.
    - CI not green: `pull_request_read(method="get_check_runs")` for the failing checks'
      names. The same check failing on unrelated Dependabot PRs is a shared cause —
      report it once and say it isn't this bump's doing.
-   - `mnemosyne_triple_query` for `caused_e2e_failure` on the packages the call sites
+   - `mnemosyne_triple_query` for `caused_gate_failure` on the packages the call sites
      fall in; `mnemosyne_recall` for an earlier decision on this dependency (a
      deliberate skip, a known-bad version).
 5. **Reviews**: `copilot_review.verdict`/`summary`/`findings`, and `bot_approved`.
@@ -121,7 +121,7 @@ file), Copilot's verdict, the CI cause, related PRs, and what it blocks or waits
 
 ## Pitfalls
 
-- Don't assume a label exists — `kyverno-context`'s live `list_label` is the
+- Don't assume a label exists — `repo-context`'s live `list_label` is the
   source of truth.
 - Ranking by security/severity is relational — never a flat `limit`-only fetch;
   digest-then-detail every time, same reason `pr-queue`'s "most urgent" default

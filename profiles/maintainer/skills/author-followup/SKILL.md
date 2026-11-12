@@ -23,7 +23,7 @@ labelled `needs-author-action`, and the ones the stale sweep has since marked
 
 ## Prerequisites
 
-- `kyverno-context` loaded (CODEOWNERS, for needs-help hand-off candidates).
+- `repo-context` loaded (CODEOWNERS, for needs-help hand-off candidates).
 - `fetch_pr_candidates(..., include_stale_detail=true)` (plugin tool,
   `plugins/repo-intel/`) — adds `maintainer_can_modify`, `staled_at`,
   `last_commit_at`, `author_comments_since_stale`, and per closing issue its real
@@ -73,7 +73,7 @@ slice. Fetch once they choose.
      both cited.
    - Issue open and wanted (`milestone_open`, a bug/regression-type label, or
      already `help wanted`) → **Reassign**: unassign this PR's author from the
-     issue if assigned, offer it to the path owners (`kyverno-context` CODEOWNERS
+     issue if assigned, offer it to the path owners (`repo-context` CODEOWNERS
      on `changed_files`) or via `help wanted`. If `maintainer_can_modify` and the
      PR itself reads close to done (CI green, few unresolved threads), also offer
      **take over the branch** as an alternative to reassigning fresh.

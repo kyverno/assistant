@@ -329,7 +329,7 @@ def _fetch_one(owner: str, name: str, number: int, rules: Rules) -> dict[str, An
                 "milestone_open": bool(n["milestone"] and n["milestone"]["state"] == "OPEN"),
                 # release-critical/-high/-medium/-low live here, on the issue — never on the
                 # PR itself, and not applied/removed by any workflow (a maintainer judgment
-                # call, not automation) — see kyverno-context's label-taxonomy reference.
+                # call, not automation) — see repo-context's label-taxonomy reference.
                 "labels": [l["name"] for l in n["labels"]["nodes"]],
             }
             for n in pr["closingIssuesReferences"]["nodes"]

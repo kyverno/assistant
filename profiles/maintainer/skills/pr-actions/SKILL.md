@@ -31,7 +31,7 @@ body as a substitute for an actual commit.
 
 ## Prerequisites
 
-- `kyverno-context` loaded this session (codegen map, for the branch-update
+- `repo-context` loaded this session (codegen map, for the branch-update
   warning below).
 - `mcp-github` tools: `issue_write`, `add_issue_comment`,
   `update_issue_comment`, `pull_request_review_write`,
@@ -135,13 +135,13 @@ Never applied by this skill on its own judgment — a deliberate human safety
 call, not a missing tool (`issue_write(labels=[...])` could mechanically
 apply it the same way as any other label). Explain why it's needed (cite
 the real `e2e-failure` issue and why this PR reads as unrelated to it, from
-`kyverno-context`'s e2e-gate facts) and name the exact label,
+`repo-context`'s e2e-gate facts) and name the exact label,
 `e2e-gate-bypass`. The maintainer applies it themselves.
 
 ## Procedure: catch a branch up with base ("rebase" on instruction)
 
 1. Before calling `update_pull_request_branch`, check the PR's changed
-   files (`pull_request_read`, `get_files`) against `kyverno-context`'s
+   files (`pull_request_read`, `get_files`) against `repo-context`'s
    codegen fan-out map. If the PR touches `api/**` or another codegen
    input, warn the maintainer up front: updating the branch will likely
    leave generated files stale, and the PR author will need to run the
@@ -193,7 +193,7 @@ author to resolve, not something to keep retrying.
 ## Verification
 
 - Ask to label a PR with a label that doesn't exist on the repo and
-  confirm `kyverno-context`'s live label list is checked first, rather
+  confirm `repo-context`'s live label list is checked first, rather
   than calling `issue_write` with a made-up name.
 - Ask to "rebase" a PR that touches `api/**` and confirm the codegen
   warning appears before the action runs, not only after.

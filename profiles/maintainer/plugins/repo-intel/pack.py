@@ -110,6 +110,37 @@ class Rules:
     milestone_title_format: Optional[str] = None
     open_milestone_label: Optional[str] = None
     issue_urgency_labels: tuple[str, ...] = ()
+    # Shared with the contributor (top-level keys of the same file); the maintainer only reads them.
+    ready_labels: tuple[str, ...] = ()
+    attention_labels: tuple[str, ...] = ()
+    infra_checks: tuple[str, ...] = ()
+    review_bots: tuple[str, ...] = ()
+    agent_docs: tuple[str, ...] = ()
+    codeowners: Optional[str] = None
+    facts: str = ""
+
+    def summary(self) -> dict:
+        """What the agent is told about the pack: the rules in plain data, never the regexes or object internals."""
+        return {
+            "pack": self.source or "none",
+            "approval_bots": list(self.approval_bots),
+            "branch_gates": [
+                {"name": g.name, "status_context": g.status_context, "failure_issue_label": g.failure_issue_label,
+                 "marks_branch": bool(g.branch_marker), "bypass_label": g.bypass_label}
+                for g in self.gates
+            ],
+            "file_classes": {k: list(getattr(self, k)) for k in _FILE_CLASSES},
+            "generated_inputs": {"paths": list(self.input_paths), "dependency_modules": list(self.input_modules)},
+            "dependency_bots": {"codegen_module_globs": list(self.codegen_module_globs),
+                                "codegen_kind_label": self.codegen_kind_label},
+            "milestones": {"title_format": self.milestone_title_format, "open_milestone_label": self.open_milestone_label,
+                           "issue_urgency_labels": list(self.issue_urgency_labels)},
+            "readiness": {"ready_labels": list(self.ready_labels), "attention_labels": list(self.attention_labels),
+                          "infra_checks": list(self.infra_checks)},
+            "review_bots": list(self.review_bots),
+            "agent_docs": list(self.agent_docs),
+            "codeowners": self.codeowners,
+        }
 
     def classify(self, path: str) -> str:
         """'GENERATED' | 'API_SURFACE' | 'ADMISSION_CRITICAL' | 'TEST_ONLY' | 'STANDARD'."""
@@ -151,13 +182,14 @@ def _check_keys(section: Any, allowed: tuple[str, ...], where: str) -> dict:
     return section
 
 
-def parse(data: dict, source: Optional[str] = None) -> Rules:
+def parse(data: dict, source: Optional[str] = None, facts: str = "") -> Rules:
     m = _check_keys((data or {}).get("maintainer"), tuple(_KNOWN), "maintainer")
     fc = _check_keys(m.get("file_classes"), _FILE_CLASSES, "maintainer.file_classes")
     gi = _check_keys(m.get("generated_inputs"), _KNOWN["generated_inputs"], "maintainer.generated_inputs")
     db = _check_keys(m.get("dependency_bots"), _KNOWN["dependency_bots"], "maintainer.dependency_bots")
     ms = _check_keys(m.get("milestones"), _KNOWN["milestones"], "maintainer.milestones")
 
+    readiness = (data or {}).get("readiness") or {}
     gates = []
     for i, g in enumerate(m.get("branch_gates") or []):
         g = _check_keys(g, _KNOWN["branch_gates"], f"maintainer.branch_gates[{i}]")
@@ -184,10 +216,17 @@ def parse(data: dict, source: Optional[str] = None) -> Rules:
         milestone_title_format=ms.get("title_format"),
         open_milestone_label=ms.get("open_milestone_label"),
         issue_urgency_labels=_strings(ms.get("issue_urgency_labels"), "maintainer.milestones.issue_urgency_labels"),
+        ready_labels=_strings(readiness.get("ready_labels"), "readiness.ready_labels"),
+        attention_labels=_strings(readiness.get("attention_labels"), "readiness.attention_labels"),
+        infra_checks=_strings(readiness.get("infra_checks"), "readiness.infra_checks"),
+        review_bots=_strings((data or {}).get("review_bots"), "review_bots"),
+        agent_docs=_strings((data or {}).get("agent_docs"), "agent_docs"),
+        codeowners=(data or {}).get("codeowners"),
+        facts=facts,
     )
 
 
-_cache: dict[tuple[str, float], Rules] = {}
+_cache: dict[tuple, Rules] = {}
 
 
 def load(path: Optional[str] = None) -> Rules:
@@ -195,14 +234,16 @@ def load(path: Optional[str] = None) -> Rules:
     for p in [Path(path)] if path else candidate_paths():
         if not p.is_file():
             continue
-        key = (str(p), p.stat().st_mtime)
+        key = (str(p), p.stat().st_mtime, (p.parent / "facts.md").stat().st_mtime if (p.parent / "facts.md").is_file() else 0)
         if key not in _cache:
             try:
                 import yaml
             except ImportError as exc:
                 raise PackError("PyYAML is not available to read the organisation pack") from exc
             try:
-                _cache[key] = parse(yaml.safe_load(p.read_text()) or {}, str(p))
+                facts_file = p.parent / "facts.md"
+                facts = facts_file.read_text() if facts_file.is_file() else ""
+                _cache[key] = parse(yaml.safe_load(p.read_text()) or {}, str(p), facts)
             except yaml.YAMLError as exc:
                 raise PackError(f"{p}: {exc}") from exc
             except PackError as exc:

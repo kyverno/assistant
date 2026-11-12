@@ -140,9 +140,9 @@ The profile ships a weekday-morning merge-sequence digest that posts to your Sla
 arrives **paused**, so nothing posts to Slack on a schedule until you resume it:
 
 ```bash
-hermes cron list                          # shows "kyverno-review-digest", paused
-hermes cron resume kyverno-review-digest
-hermes cron edit kyverno-review-digest    # change the time or channel
+hermes cron list                          # shows "review-digest", paused
+hermes cron resume review-digest
+hermes cron edit review-digest    # change the time or channel
 ```
 
 ### 8. Update

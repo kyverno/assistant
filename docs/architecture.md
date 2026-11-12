@@ -127,13 +127,13 @@ From `kyverno/kyverno`'s own `Makefile` and `.github/workflows/`:
   signals; a PR can carry both, and `pr-queue` states them separately rather than conflating
   them.
 
-See `profiles/maintainer/skills/kyverno-context/SKILL.md` for the full codegen/CI reference and
+See `profiles/maintainer/skills/repo-context/SKILL.md` for the full codegen/CI reference and
 `profiles/maintainer/skills/pr-queue/SKILL.md` for how it's used in sequencing.
 
 ## Why labels and CODEOWNERS are never hardcoded
 
 `KYVERNO_REPO` can point at `kyverno/kyverno` or a sandbox repo, each with its own label set
-and CODEOWNERS file. `kyverno-context` resolves both live every session (`list_label`,
+and CODEOWNERS file. `repo-context` resolves both live every session (`list_label`,
 `get_file_contents` on `CODEOWNERS`) rather than assuming it already knows a repo's
 conventions — the same principle extends to `AGENTS.md`/`ARCHITECTURE.md` (cached into
 Mnemosyne by `scripts/install.sh`, recalled instead of re-fetched) and to arbitrary repo

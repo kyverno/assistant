@@ -8,3 +8,4 @@ provides_tools:
   - fetch_issue_details
   - fetch_file_diff_overlap
   - sequence_prs
+  - repo_pack

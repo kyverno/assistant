@@ -15,6 +15,7 @@ from .fetch_tools import (
     handle_fetch_pr_candidates,
     handle_fetch_pr_details,
 )
+from .pack_tools import REPO_PACK_SCHEMA, handle_repo_pack
 from .sequence_tools import SEQUENCE_PRS_SCHEMA, handle_sequence_prs
 
 
@@ -67,4 +68,12 @@ def register(ctx) -> None:
         description="Deterministic candidate merge-sequence: hard-dependency graph, cycle detection, "
         "tiers, file and package overlaps, gate status.",
         emoji="🧮",
+    )
+    ctx.register_tool(
+        name="repo_pack",
+        toolset="repo-intel",
+        schema=REPO_PACK_SCHEMA,
+        handler=handle_repo_pack,
+        description="The organisation pack: gates, file classes, labels and the organisation's own facts.",
+        emoji="📦",
     )

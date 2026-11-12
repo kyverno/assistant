@@ -10,7 +10,7 @@ platforms: [linux, macos, windows]
 # issue-triage Skill
 
 Reads and relates issues on `KYVERNO_REPO` — classification, which PR(s) address one,
-how far along it is, and the wider issue graph. Relies on `kyverno-context` for live
+how far along it is, and the wider issue graph. Relies on `repo-context` for live
 labels/CODEOWNERS — assumed loaded, not re-derived here. Taking an action on an issue
 (label, close, assign, raise a new one) is `issue-actions`' job, not this skill's.
 
@@ -23,7 +23,7 @@ labels/CODEOWNERS — assumed loaded, not re-derived here. Taking an action on a
 
 ## Prerequisites
 
-- `kyverno-context` loaded this session (live labels, and the `kyverno-doc:<path>`
+- `repo-context` loaded this session (live labels, and the `repo-doc:<path>`
   cache step 2's grounding reads from).
 - `fetch_issue_candidates` (plugin tool, `plugins/repo-intel/`) — one call fetches
   every candidate issue's full metadata, including `closing_prs` (every PR that
@@ -38,8 +38,8 @@ labels/CODEOWNERS — assumed loaded, not re-derived here. Taking an action on a
   PR lookup), `search_code` (grounding an issue in the real code — step 2, required,
   not a fallback), `list_discussions`, `get_discussion`.
 - `mcp-slack`: `conversations_history` — only if configured.
-- `mnemosyne_recall` — `kyverno-doc:<path>` package docs for step 2's grounding (same
-  cache `kyverno-context`/`pr-queue` already use), prior triage decisions, duplicate
+- `mnemosyne_recall` — `repo-doc:<path>` package docs for step 2's grounding (same
+  cache `repo-context`/`pr-queue` already use), prior triage decisions, duplicate
   rulings, contributor patterns.
 - Env: `KYVERNO_REPO`, `MAINTAINER_GITHUB_LOGIN`, `SLACK_HOME_CHANNEL`.
 
@@ -53,7 +53,7 @@ the 10 newest triage-queue issues, the 10 oldest still in triage, the 10 oldest
 with no linked PR, or the orphaned milestone issues (in a milestone, no linked
 PR, no assignee). No fetch happens until something is picked.
 
-1. **Fetch.** The label whose live `description` (`kyverno-context`) reads as the
+1. **Fetch.** The label whose live `description` (`repo-context`) reads as the
    "still needs curating" default — usually named `triage` but confirm from its
    description, not the name — is always part of `search_query` (`is:open
    label:<that label>`) unless Step 0 picked the full backlog. Almost nothing is
@@ -76,7 +76,7 @@ PR, no assignee). No fetch happens until something is picked.
    - Identify the likely subsystem/package from labels (`area/*`), file paths, symptoms,
      or error text in the body.
    - Ground it the same way a PR review brief already does: `mnemosyne_recall
-     (kyverno-doc:<path>)` for that package's cached `AGENTS.md`/`ARCHITECTURE.md`, or
+     (repo-doc:<path>)` for that package's cached `AGENTS.md`/`ARCHITECTURE.md`, or
      `search_code` for the specific symbol/error/file the issue names if nothing's
      cached. This is required, not optional — classification from the body's claim
      alone, unchecked against the real code, is a guess.
@@ -84,7 +84,7 @@ PR, no assignee). No fetch happens until something is picked.
      flag whether this reads as security-relevant — all from what the grounding
      actually showed, cited (the doc, or the code found), never a keyword guess. A
      security read gets stated plainly to the maintainer with the real `security`/
-     `kind/security` label (`kyverno-context`'s live list) suggested — no separate
+     `kind/security` label (`repo-context`'s live list) suggested — no separate
      disclosure channel, just tell the maintainer and let them decide.
 3. **Duplicate candidates**: `search_issues` on the issue's distinctive terms. A real
    candidate gets a one-line comparison (what's the same, what differs), not just a
@@ -143,7 +143,7 @@ says on its own.
 
 Fetch with `search_query` widened to recently-active/closed issues as needed:
 
-- Issues carrying whichever label's live description (`kyverno-context`) means "more
+- Issues carrying whichever label's live description (`repo-context`) means "more
   information requested" — not an assumed name — where `recent_comments`' last entry
   is from the original `author`, not a maintainer.
 - Issues open a long time (`createdAt` old) with no `recent_comments` activity.

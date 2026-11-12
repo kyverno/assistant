@@ -73,7 +73,7 @@ Verified means it was run in a real sandbox, on the image as built from this che
 | Linux (amd64) | Verified on a runner | On a GitHub runner (Ubuntu 24.04, kernel 6.17, Docker Engine 28): an amd64 image was built there and the whole stack ran, with the placeholder token, the proxy refusing a merge, read-only hooks and the dashboard answering. Not a real laptop, and not by the publish workflow; arm64 Linux is untried |
 | Dashboard | Verified | Runs in the sandbox; the launcher forwards `127.0.0.1:9219`. A sample item written through the agent's own `update_dashboard` function was served by it, with the Kyverno tab's script and styles loading |
 | Scheduled jobs (cron, the Slack digest) | Not available | They run inside the Hermes gateway, which is not started |
-| `AGENTS.md` cache seeding | Not done | `kyverno-context` falls back to searching GitHub |
+| `AGENTS.md` cache seeding | Not done | `repo-context` falls back to searching GitHub |
 | Keeping state when the image is upgraded | Verified | `--upgrade`: see below |
 
 ## Upgrading and your state
