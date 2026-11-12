@@ -66,10 +66,11 @@ search_query="label:ready-for-review", detail="digest", limit=60)`, rank
 client-side, take the top 10, then `fetch_pr_details(repo, pr_numbers=[...])`
 for just those 10. State the slice size against the digest's own `total_count`.
 
-1. **Fetch**: `fetch_pr_candidates(repo=KYVERNO_REPO, search_query="label:ready-for-review")`
-   plus the same call with `label:needs-review` — or one call with
-   `"label:ready-for-review,needs-review"` if the tool's search syntax supports an
-   OR (check its schema). Add whatever Step 0 established as its own qualifier
+1. **Fetch**: `fetch_pr_candidates(repo=KYVERNO_REPO, search_query="label:<ready label>")`
+   once for each label in the pack's `readiness.ready_labels` (`repo_pack`) — or one call
+   with the labels comma-joined if the tool's search syntax supports an OR (check its
+   schema). No ready labels in the pack means the repository has not adopted the
+   readiness labels: say so, and fetch by the maintainer's own focus instead. Add whatever Step 0 established as its own qualifier
    (`milestone:"..."`, `author:...`) rather than post-filtering. An area/package
    focus is a client-side filter on the returned `changed_files` instead, since
    GitHub search has no path qualifier. State the slice size vs. `total_count`
@@ -86,11 +87,13 @@ for just those 10. State the slice size against the digest's own `total_count`.
    `fetch_pr_candidates` already resolved any body reference pointing outside the
    fetched set (`external_references`: its real kind/state/title) — cite that
    directly per PR, never as a "please go check" item.
-3. **Gate check**: `list_issues(owner=..., repo=..., state="open", labels=["e2e-failure"])`,
-   every time, cited — never assert "no gate open" without this call. `search_issues`
-   is natural-language only and can miss a real open issue; don't use it here. Pass
-   each open issue's branch marker (parsed from its body, or `null` if it has none)
-   as `blocking_issue_branches`.
+3. **Gate check**, only if `repo_pack` lists a branch gate: `list_issues(owner=..., repo=...,
+   state="open", labels=["<the gate's failure_issue_label>"])`, every time, cited — never
+   assert "no gate open" without this call. `search_issues` is natural-language only and
+   can miss a real open issue; don't use it here. Pass each open issue's branch marker
+   (parsed from its body when the gate's `marks_branch` is true, or `null` if it has none)
+   as `blocking_issue_branches`. No gate in the pack: skip this step, pass nothing, and
+   never mention a gate.
 4. **Call `sequence_prs`** with every candidate's `number`/`changed_files`/`labels`/
    `base_branch`/`head_branch`/`body`/`closing_issues` (as fetched)/`dependency_bumps`/`files_truncated`,
    `repo_default_branch`, and `blocking_issue_branches`. It returns `tiers` (each PR
@@ -114,7 +117,7 @@ for just those 10. State the slice size against the digest's own `total_count`.
      conflict): cite the pair and path as a "review together" note, not a warning
      on par with a real file overlap.
    - **Historical risk**: for any PR (or overlapping pair) classified
-     `ADMISSION_CRITICAL`, or named in a `file_overlaps`/`package_overlaps`
+     `ADMISSION_CRITICAL` (the pack's `critical` file class), or named in a `file_overlaps`/`package_overlaps`
      entry, `mnemosyne_triple_query` for a `caused_gate_failure` predicate on
      that package. A real past incident (PR#, date) is a specific, citable
      post-merge-risk finding — stronger than the generic "core engine
@@ -148,9 +151,9 @@ for just those 10. State the slice size against the digest's own `total_count`.
         e. `size` — smaller first, a pure tiebreak, never a priority driver.
      Slack context (step 6) and anything the maintainer said this session
      override every level. State the reason as the judgment it produced
-     ("CRITICAL — admission controller crash"), not the raw field.
+     ("CRITICAL — crash on startup"), not the raw field.
    - **Readiness is a separate axis from priority — never conflate them.**
-     A PR with CodeRabbit `CHANGES_REQUESTED`, a real CI failure, or no
+     A PR with `CHANGES_REQUESTED` from a bot in the pack's `review_bots`, a real CI failure, or no
      review yet can still rank high by severity, but never goes in an
      "approve now"-style grouping — name the blocker plainly there instead.
      `size` also calibrates review effort independently of rank — call out
@@ -158,16 +161,17 @@ for just those 10. State the slice size against the digest's own `total_count`.
    - `gate_blocked`: state plainly wherever true — merging is blocked branch-wide
      regardless of files touched; review work isn't. If the failure issue's content
      (job/test names) suggests this PR is unrelated, say so as your own read and
-     suggest `e2e-gate-bypass` to the maintainer — never imply it's already safe,
+     suggest the gate's `bypass_label` to the maintainer — never imply it's already safe,
      never apply it yourself.
-5. **Diagnose every `needs-review` entry** — `pull_request_read(method="get_reviews")`
+5. **Diagnose every entry whose label means "a bot's PR needs a human look"** (the pack's
+   `facts` name it; Kyverno's is `needs-review`) — `pull_request_read(method="get_reviews")`
    for Copilot's verdict, `get_check_runs`/`get_status`/`get`'s mergeable-state for a
    conflict. Name the actual cause ("Copilot flagged the changelog note as missing,"
-   not "not approved yet"). For `major-bump`, pull the module's own `list_releases`
+   not "not approved yet"). For a major bump (Kyverno: `major-bump`), pull the module's own `list_releases`
    and `search_code` its real call sites in `KYVERNO_REPO` — the actual blast radius.
-   A `github.com/kyverno/api` bump additionally needs: (a) `search_code` for
-   `policies.kyverno.io` type/alias usage in hand-written `pkg/**` code; (b) whether
-   this PR's own diff already includes the matching regenerated outputs — a
+   A bump of a module in the pack's `generated_inputs.dependency_modules` additionally
+   needs: (a) `search_code` for usage of its generated types or aliases in hand-written
+   code; (b) whether this PR's own diff already includes the matching regenerated outputs — a
    `go.mod`/`go.sum`-only diff means they're now stale, a citable finding.
 6. **Check for outside context** — `SLACK_HOME_CHANNEL` if configured, and
    `list_discussions` always (client-side matched, no search exists) — for a
@@ -197,8 +201,8 @@ order from the stated reasons alone.
 Resolves live every time — no cache across a conversation. Short form (default):
 what it changes (from the fetched `body`/`changed_files`, or `pull_request_read
 (method="get_diff")` if asked for the actual diff), why (its `closing_issues`, their
-milestone/labels), and existing review output (CodeRabbit for security/lint/tests/
-codegen, Copilot for logic/cross-file impact — say plainly if neither has reviewed it
+milestone/labels), and existing review output (a review bot from the pack's `review_bots` for security/lint/tests/
+codegen, a review bot such as Copilot for logic/cross-file impact — say plainly if neither has reviewed it
 yet).
 
 Long form (asked for, or a signal below is concerning) adds:
@@ -227,7 +231,7 @@ regardless of fit.
 ## Answering open-ended questions
 
 Look with the tools above, cite what was found — never a general prior about a
-"typical" Kyverno PR. **"Is anything else related to this?"** — `search_issues` for
+"typical" PR here. **"Is anything else related to this?"** — `search_issues` for
 currently-open mentions, `list_discussions` for a related thread, plus
 `mnemosyne_recall` for closed/rejected history with a reason. **"CI broke on
 `main`"** — real input, not polled for; `actions_list`/
@@ -270,11 +274,12 @@ queue's file overlap, naming specific PRs and paths.
 
 - Ask "what's my PR queue" with no other context: confirm Step 0 fires before any
   fetch. Ask again naming a milestone: confirm it fetches directly, no question.
-- Build a queue with both human and Dependabot `needs-review` entries: confirm
+- Build a queue with both human and bot-PR "needs a human look" entries: confirm
   identical formatting.
-- With an open `e2e-failure` issue: confirm `gate_blocked` is stated for every
+- With an open gate-failure issue: confirm `gate_blocked` is stated for every
   non-bypass PR on that branch, and any bypass read is the agent's own, not
-  mechanical.
+  mechanical. With a pack that lists no gate: confirm no gate is mentioned.
+- With no pack: confirm the answer says it has no file classes, gate or ready labels.
 - Confirm two candidates in the same tier, differing only in `bot_approved`,
   get that stated as the tiebreak.
 - Ask about a PR with a related GitHub Discussion: confirm `list_discussions` is
@@ -285,7 +290,7 @@ queue's file overlap, naming specific PRs and paths.
 - Pick a real `file_overlaps`/`package_overlaps` pair: confirm they're presented
   adjacent as one group, not scattered to separate positions with the connection
   re-explained.
-- Pick a PR with CodeRabbit `CHANGES_REQUESTED`: confirm it never lands in an
+- Pick a PR with `CHANGES_REQUESTED` from a pack review bot: confirm it never lands in an
   "approve now"-style grouping even if its severity ranks it high.
 - Confirm a closing issue's `release-critical` label is cited when present, and that
   the PR's own labels are never checked for it.
@@ -294,7 +299,7 @@ queue's file overlap, naming specific PRs and paths.
   each with its real approval-page link from `actions_list`, and that posting the
   approval itself is still named as the maintainer's own, in-browser action.
 - Re-run the same queue twice with no repo-state change: confirm stable output.
-- Pick two PRs touching the same `api/**` path: confirm the generated-file conflict
+- Pick two PRs touching the same generated-file input path: confirm the generated-file conflict
   is called out explicitly.
 - Pick a real `file_overlaps` pair: confirm `fetch_file_diff_overlap` runs before
   presenting, and the answer reads the actual patches to describe what's
@@ -304,7 +309,7 @@ queue's file overlap, naming specific PRs and paths.
 - Confirm a `FIRST_TIME_CONTRIBUTOR` PR gets cited as such somewhere it matters
   (ordering or the explanation), without becoming the sole reason to deprioritize
   it.
-- Ask about a PR touching `ADMISSION_CRITICAL` surface: confirm `mnemosyne_triple_query`
+- Ask about a PR touching the pack's `critical` surface: confirm `mnemosyne_triple_query`
   runs for `caused_gate_failure` on that package, with the result stated either way
   (a real incident cited, or "nothing found").
 - Pick a PR whose milestone is due soon vs. one with no milestone: confirm

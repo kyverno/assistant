@@ -50,7 +50,7 @@ Every Dependabot PR appears exactly once.
    `copilot_review`/`ci_state`. State the slice size against the digest's own
    `total_count` — there may be more than 10 real Dependabot PRs open; say so
    rather than implying this is the whole set. The labels (`ready-for-review`,
-   `needs-review`, `major-bump`) are the triage sweep's read of the same facts —
+   `needs-review`, `major-bump`; the pack's `facts` say what each means) are the triage sweep's read of the same facts —
    cite them when they agree, and say so when a label is missing or contradicts
    the fetched level.
 2. **Group the set**: the same dependency in several PRs (e.g. one action bumped in two
@@ -63,11 +63,11 @@ Every Dependabot PR appears exactly once.
    and rely on the PR body.
 4. **Risk, per PR**, each claim cited:
    - Go module: `search_code` the import path in `KYVERNO_REPO`, group call sites by
-     package; hits under `pkg/engine`/`pkg/cel`/`pkg/webhooks`/`pkg/validation`/
-     `pkg/image` are elevated risk. For a major or minor bump, read the release notes
+     package; hits in files the pack classes as `critical` (`repo_pack`'s `file_classes`)
+     are elevated risk. For a major or minor bump, read the release notes
      the PR body embeds and name any breaking change or deprecation that touches those
-     call sites. `k8s.io/*`, `sigs.k8s.io/*` and `github.com/kyverno/api` bumps
-     (`kind/codegen`) also need the regenerated outputs in the PR's `changed_files` — a
+     call sites. A bump matching the pack's `dependency_bots.codegen_module_globs`
+     (labelled `codegen_kind_label`) also needs the regenerated outputs in the PR's `changed_files` — a
      `go.mod`/`go.sum`-only diff means they're stale.
    - Workflow action: `search_code` for `uses: <action>` to name the workflows that run
      it; one with write permissions, secrets, or a release/publish step is elevated.
@@ -91,7 +91,7 @@ Every Dependabot PR appears exactly once.
    - Blocks / blocked by: call `sequence_prs` with the Dependabot PRs plus any
      related open PRs. Dependabot PRs overlap on `go.mod`/`go.sum` by nature — report
      that as one note (merge one at a time; Dependabot rebases the rest), not as a
-     conflict per pair. A `github.com/kyverno/api` bump orders ahead of PRs touching
+     conflict per pair. A bump of a module in the pack's `generated_inputs.dependency_modules` orders ahead of PRs touching
      generated outputs; state `gate_blocked` wherever true.
    - Outside context: `SLACK_HOME_CHANNEL` if configured, and `list_discussions`
      (client-side matched, no search exists) for a thread naming the bot, a

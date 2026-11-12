@@ -31,7 +31,7 @@ body as a substitute for an actual commit.
 
 ## Prerequisites
 
-- `repo-context` loaded this session (codegen map, for the branch-update
+- `repo-context` loaded this session (the pack's generated-file inputs, for the branch-update
   warning below).
 - `mcp-github` tools: `issue_write`, `add_issue_comment`,
   `update_issue_comment`, `pull_request_review_write`,
@@ -129,23 +129,24 @@ directly.
 4. Post: `discussion_comment_write(method="reply", ...)` for the Discussion
    route, `add_issue_comment` for the PR/issue route.
 
-## Procedure: apply e2e-gate-bypass
+## Procedure: apply the branch gate's bypass label
 
 Never applied by this skill on its own judgment — a deliberate human safety
 call, not a missing tool (`issue_write(labels=[...])` could mechanically
 apply it the same way as any other label). Explain why it's needed (cite
-the real `e2e-failure` issue and why this PR reads as unrelated to it, from
-`repo-context`'s e2e-gate facts) and name the exact label,
-`e2e-gate-bypass`. The maintainer applies it themselves.
+the real gate-failure issue and why this PR reads as unrelated to it, from
+the pack's `facts` via `repo-context`) and name the exact `bypass_label` that
+`repo_pack` gives for the gate. The maintainer applies it themselves. If the pack
+lists no gate, there is nothing to bypass: say so.
 
 ## Procedure: catch a branch up with base ("rebase" on instruction)
 
 1. Before calling `update_pull_request_branch`, check the PR's changed
    files (`pull_request_read`, `get_files`) against `repo-context`'s
-   codegen fan-out map. If the PR touches `api/**` or another codegen
-   input, warn the maintainer up front: updating the branch will likely
+   pack's `generated_inputs` and `file_classes.generated` (`repo_pack`). If the PR touches
+   a generated-file input, warn the maintainer up front: updating the branch will likely
    leave generated files stale, and the PR author will need to run the
-   relevant `make codegen-*` target themselves afterward — this tool only
+   project's code-generation command (see the pack's `facts`) themselves afterward — this tool only
    updates the branch, it doesn't regenerate anything.
 2. Call `update_pull_request_branch(pullNumber=N)`.
 3. On success: report the update landed. If step 1 flagged a codegen
@@ -186,7 +187,7 @@ author to resolve, not something to keep retrying.
   `needs-review` PR): no file-write tool is granted, so say so and stop —
   same handling as the merge case above, not a reason to post the fix as
   a comment instead and call it done.
-- `e2e-gate-bypass` is the one label this skill never applies itself, even
+- The gate's bypass label is the one label this skill never applies itself, even
   though `issue_write` could mechanically do it — always explain and name
   it, never call the tool.
 
@@ -195,7 +196,7 @@ author to resolve, not something to keep retrying.
 - Ask to label a PR with a label that doesn't exist on the repo and
   confirm `repo-context`'s live label list is checked first, rather
   than calling `issue_write` with a made-up name.
-- Ask to "rebase" a PR that touches `api/**` and confirm the codegen
+- Ask to "rebase" a PR that touches a generated-file input and confirm the codegen
   warning appears before the action runs, not only after.
 - Ask this skill to merge a PR and confirm it declines and names the
   reason (no tool for it) rather than attempting a workaround.
@@ -206,5 +207,5 @@ author to resolve, not something to keep retrying.
   `issue_write` call follows it.
 - Nudge an author on a PR with a related open Discussion: confirm it
   replies there rather than defaulting to a PR comment.
-- Ask to apply `e2e-gate-bypass`: confirm it explains and names the label
+- Ask to apply the gate's bypass label: confirm it explains and names the label
   without calling `issue_write`.
