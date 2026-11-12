@@ -71,3 +71,54 @@ ladder:
 
 # Paths that say nothing about what someone knows (generated or bookkeeping); substring match.
 noise_paths: [go.mod, go.sum, zz_generated, /crds/, CHANGELOG, docs/user/crd, charts/, vendor/]
+
+# ---- Read by the maintainer assistant (plugins and skills); the contributor ignores these keys ----
+maintainer:
+  # Bots whose approval counts as one review signal in the queue order (not a substitute for a human).
+  approval_bots: [coderabbitai]
+
+  # Branch-wide merge gates: while one is open, every PR targeting the branch is blocked, whatever it touches.
+  # Leave the list empty if the repository has no such gate; the gate logic is then off.
+  branch_gates:
+    - name: e2e-gate
+      status_context: "E2E Gate"          # the commit status; kept out of a PR's own CI state
+      failure_issue_label: e2e-failure    # an open issue with this label means the gate is red
+      branch_marker: '<!-- workflow-failure:[^:]*:refs/heads/(?P<branch>[^\s]+) -->'   # in the issue body; none = every branch
+      bypass_label: e2e-gate-bypass       # the maintainer's own decision; the assistant never applies it
+
+  # How a changed file is classified, highest tier first. Globs match the repository path; a pattern with
+  # no "/" matches the file name at any depth.
+  file_classes:
+    generated:
+      - zz_generated.deepcopy.go
+      - zz_generated.register.go
+      - "pkg/client/**"
+      - "pkg/clients/**/*.generated.go"
+      - "config/crds/*.yaml"
+      - "cmd/cli/kubectl-kyverno/config/crds/**"
+      - "cmd/cli/kubectl-kyverno/data/crds/**"
+      - "charts/kyverno/charts/crds/templates/**"
+      - "charts/*/README.md"
+      - "docs/user/crd/**"
+      - pkg/config/mocks/mock_config.go
+      - config/install-latest-testing.yaml
+    generated_exceptions: [pkg/clients/dclient/client.go]   # hand-written files inside a generated directory
+    api_surface: ["api/kyverno/**", "api/policyreport/**", "api/reports/**"]
+    critical: ["pkg/engine/**", "pkg/webhooks/**", "pkg/cel/**"]   # elevated risk after merge
+    test_only: ["*_test.go", "test/**", "**/testdata/**", "**/_testdata/**"]
+
+  # What feeds the generated files: a PR touching an input must merge before one touching the output.
+  generated_inputs:
+    paths: ["api/*_types.go"]
+    dependency_modules: [github.com/kyverno/api]   # a go.mod bump of one of these is also an input change
+
+  # Dependency bumps that need regenerated output in the same PR.
+  dependency_bots:
+    codegen_module_globs: ["k8s.io/*", "sigs.k8s.io/*", "github.com/kyverno/api"]
+    codegen_kind_label: kind/codegen
+
+  milestones:
+    title_format: "Kyverno Release X.Y.Z"
+    open_milestone_label: milestone-pr      # the PR closes an issue under a still-open milestone
+    # Set by hand on an issue to mark urgency toward a milestone; not applied by any workflow.
+    issue_urgency_labels: [release-critical, release-high, release-medium, release-low]
