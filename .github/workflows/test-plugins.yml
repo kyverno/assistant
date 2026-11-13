@@ -1,0 +1,50 @@
+# Runs the plugin and hook tests (tests/plugins, tests/hooks) on every pull request that touches what they test. They need
+# only Python and PyYAML: no Docker, no network, no Hermes.
+name: test-plugins
+
+on:
+  pull_request:
+    paths:
+      - "profiles/**"
+      - "container/org/**"
+      - "container/hooks/**"
+      - "tests/plugins/**"
+      - "tests/hooks/**"
+      - "tests/fixtures/**"
+      - ".github/workflows/test-plugins.yml"
+  push:
+    branches: [main]
+    paths:
+      - "profiles/**"
+      - "container/org/**"
+      - "container/hooks/**"
+      - "tests/plugins/**"
+      - "tests/hooks/**"
+      - "tests/fixtures/**"
+      - ".github/workflows/test-plugins.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install PyYAML
+        run: python3 -m pip install --quiet pyyaml
+
+      - name: Plugin tests
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 -m unittest discover -s tests/plugins -v
+
+      - name: Hook tests
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 -m unittest discover -s tests/hooks -v

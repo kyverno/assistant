@@ -10,9 +10,9 @@ HADOLINT_IMAGE := hadolint/hadolint@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e2
 TRIVY_IMAGE := aquasec/trivy@sha256:2416d1f74045b57274df1a340eee6b510cacd73c66a6ccb8da092b117eb7d222
 SHELL_SCRIPTS := install.sh scripts/adopt-ci.sh container/assistant container/assistant-docker container/lib.sh container/kyverno-start container/kyverno-main container/kyverno-env \
 	container/setup-profile.sh container/restore-state.sh container/verify-image.sh container/hooks/require-sandbox-terminal.sh \
-	container/assistant-workspace container/toolchains/go.sh container/toolchains/node.sh container/toolchains/kyverno-tools.sh
+	container/assistant-workspace container/toolchains/go.sh container/toolchains/node.sh container/toolchains/kyverno-tools.sh tests/image/run.sh
 
-.PHONY: help lint lint-shell lint-dockerfile lint-providers image test scan check run
+.PHONY: help lint lint-shell lint-dockerfile lint-providers image test unit image-check scan check run
 
 help: ## Show available development commands
 	@awk 'BEGIN { FS = ":.*## " } /^[a-zA-Z0-9_-]+:.*## / { printf "  %-18s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -34,12 +34,18 @@ image: ## Build the local sandbox image (override IMAGE and TAG as needed)
 
 test: image ## Build and run the Dockerfile's offline integration checks
 
+unit: ## Run the plugin and hook tests (Python and PyYAML only)
+	python3 -m unittest discover -s tests/plugins && python3 -m unittest discover -s tests/hooks
+
+image-check: image ## Build the image and run tests/image/run.sh against it
+	tests/image/run.sh $(IMAGE):$(TAG)
+
 scan: image ## Build and scan the local image for fixable critical vulnerabilities
 	docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
 		-v kyverno-assistant-trivy-cache:/root/.cache/trivy $(TRIVY_IMAGE) \
 		image --scanners vuln --severity CRITICAL --ignore-unfixed --exit-code 1 $(IMAGE):$(TAG)
 
-check: lint test ## Run linters and the Dockerfile integration checks
+check: lint unit image-check ## Run linters and the Dockerfile integration checks
 
 run: image ## Build and launch the sandbox using the local image
 	ASSISTANT_IMAGE=$(IMAGE):$(TAG) ./container/assistant $(ARGS)

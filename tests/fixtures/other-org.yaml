@@ -1,0 +1,22 @@
+# A made-up organisation with nothing in common with Kyverno: the plugins must work from this alone.
+name: example-org
+maintainer:
+  approval_bots: [review-bot]
+  branch_gates:
+    - name: release-gate
+      status_context: Release Gate
+      failure_issue_label: release-broken
+      branch_marker: "<!-- broken:(?P<branch>\\S+) -->"
+      bypass_label: gate-bypass
+  file_classes:
+    generated: ["gen/**", "*.pb.go"]
+    generated_exceptions: ["gen/keep.go"]
+    api_surface: ["api/**"]
+    critical: ["core/**"]
+    test_only: ["*_test.go", "tests/**"]
+  generated_inputs:
+    paths: ["schema/**/*.proto"]
+    dependency_modules: ["example.com/schema"]
+readiness:
+  ready_labels: [ready]
+  attention_labels: [needs-work]

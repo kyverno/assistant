@@ -7,12 +7,14 @@ on:
     paths:
       - "Makefile"
       - "container/**"
+      - "tests/image/**"
       - ".github/workflows/container-*.yml"
   push:
     branches: [main]
     paths:
       - "Makefile"
       - "container/**"
+      - "tests/image/**"
       - ".github/workflows/container-*.yml"
 
 permissions:
