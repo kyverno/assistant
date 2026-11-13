@@ -1,4 +1,28 @@
-# AI Assistant for open-source maintenance
+# AI Agent for open-source maintenance
+
+Maintaining an open-source project has become a daily grind of pull requests and issues:
+
+- **The queue never stops.** Every day brings more PRs and issues than one maintainer can read, so the work is sorting
+  them: good, stale, ready for review, waiting on the author.
+- **The small stuff adds up.** Nudging quiet authors, asking for a rebase, closing abandoned PRs, and explaining the same
+  things again to every first-time contributor.
+- **Quality is dropping.** More PRs arrive unfinished, unreviewed by their own author or unaware of the project's
+  conventions, and each one still needs a careful read.
+- **Context is hard to hold.** Which PRs and issues are linked, which PR to merge first, which milestone something
+  belongs to, and who is already working on what.
+
+An AI agent can take on this work, but the one you already use for coding is the wrong one to point at it. It runs on the
+machine you also use for your job, so while it reads an open-source project it can reach your company's code, documents and
+credentials, read your tokens, and take actions or make reads you never meant it to. Open-source repositories are public
+input anyone can write to, which makes that worse.
+
+Contributors have the opposite problem: they do not know where to start. They cannot tell which issues are worth taking,
+which are already claimed, fixed or deliberately left alone, what the project expects of a change, or what to learn next to
+grow from a first PR toward reviewer.
+
+This project answers all three. A **maintainer assistant** works the queue for you, a **contributor assistant** points
+contributors to the right work with the context to do it well, and both run in an [OpenShell](https://github.com/NVIDIA/OpenShell)
+sandbox that cannot see the rest of your computer.
 
 **AI assistants that work with the full context of an open-source project, and run in a sandbox that cannot see anything
 else on your computer.**
