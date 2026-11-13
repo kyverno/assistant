@@ -391,12 +391,13 @@ if [ -z "$ORG" ]; then
   [ -n "$ORG_OWNER" ] && [ -f "$REPO_ROOT/container/org/$ORG_OWNER/org.yaml" ] && ORG="$ORG_OWNER"
 fi
 if [ -z "$ORG" ]; then
+  # The profile's copy is only ever what this step installed, so one left from another repository would keep applying that
+  # organisation's file classes and gate here. Remove it.
   if [ -f "$PROFILE_DIR/org/org.yaml" ]; then
-    info "no pack chosen for this repository (set ASSISTANT_ORG=<name>); keeping the one already in the profile"
-  else
-    info "no organisation pack for this repository: the assistant still works, but reads every file as ordinary and knows no"
-    info "merge gate. Add container/org/<name>/org.yaml (docs/organisation-pack.md) and re-run with ASSISTANT_ORG=<name>."
+    rm -rf "$PROFILE_DIR/org" && info "removed the organisation pack left from an earlier install: it was not chosen for this repository"
   fi
+  info "no organisation pack for this repository: the assistant still works, but reads every file as ordinary and knows no"
+  info "merge gate. Add container/org/<name>/org.yaml (docs/organisation-pack.md) and re-run with ASSISTANT_ORG=<name>."
 elif [[ ! "$ORG" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
   fail "'$ORG' is not a valid pack name"; exit 1
 elif [ ! -f "$REPO_ROOT/container/org/$ORG/org.yaml" ]; then

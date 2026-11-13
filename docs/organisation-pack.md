@@ -18,7 +18,7 @@ The pack is copied into the image, read-only, so a manipulated agent cannot rewr
 | How you run it | Where the pack comes from |
 |---|---|
 | The sandbox or container image | The copy baked into the image at `/opt/kyverno/.../org/`, which the sandbox policy keeps read-only. It is read first; the copy in Hermes' writable home is never trusted over it. Choose it with `--org` when you build |
-| `scripts/install.sh` on your host | Copied into the profile on every run, from `container/org/$ASSISTANT_ORG`, or else `container/org/<owner of ASSISTANT_REPO>/`. Edit it there: the copy in the profile is overwritten. With neither, it installs with no pack and says so |
+| `scripts/install.sh` on your host | Copied into the profile on every run, from `container/org/$ASSISTANT_ORG`, or else `container/org/<owner of ASSISTANT_REPO>/`. Edit it there: the copy in the profile is overwritten. With neither, it installs with no pack and says so, and removes a pack left in the profile by an earlier install for another repository |
 
 ## What happens without one, or with a mistake
 
@@ -46,6 +46,10 @@ maintainer:
 ```
 
 ### Shared keys (top level)
+
+The top-level keys are `name`, `repositories`, `agent_docs`, `instructions_dir`, `codeowners`, `labels`, `readiness`,
+`entry_labels`, `reserved_labels`, `review_bots`, `ladder`, `noise_paths`, `test_files` and `maintainer`. Any other key is an
+error, so a typo like `maintaner:` is caught instead of silently doing nothing.
 
 | Key | Meaning |
 |---|---|

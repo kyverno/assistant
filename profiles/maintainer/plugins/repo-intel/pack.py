@@ -25,6 +25,11 @@ _KNOWN: dict[str, Optional[tuple[str, ...]]] = {
     "milestones": ("title_format", "open_milestone_label", "issue_urgency_labels"),
 }
 
+# Every top-level key a pack may have: `maintainer` is the maintainer assistant's; the rest are shared or the contributor
+# assistant's (profiles/contributor/plugins/contributor reads them). A key in neither profile is a typo, so it is an error.
+_ROOT_KEYS = ("name", "repositories", "agent_docs", "instructions_dir", "codeowners", "labels", "readiness", "entry_labels",
+              "reserved_labels", "review_bots", "ladder", "noise_paths", "test_files", "maintainer")
+
 # The shared `readiness:` section: the maintainer reads three of these, the contributor also reads checks_file.
 _READINESS_KEYS = ("ready_labels", "attention_labels", "infra_checks", "checks_file")
 
@@ -204,6 +209,7 @@ def parse(data: Any, source: Optional[str] = None, facts: str = "") -> Rules:
         data = {}
     if not isinstance(data, dict):
         raise PackError(f"the file must be a mapping of keys, not a {type(data).__name__}")
+    _check_keys(data, _ROOT_KEYS, "the file")
     m = _check_keys(data.get("maintainer"), tuple(_KNOWN), "maintainer")
     fc = _check_keys(m.get("file_classes"), _FILE_CLASSES, "maintainer.file_classes")
     gi = _check_keys(m.get("generated_inputs"), _KNOWN["generated_inputs"], "maintainer.generated_inputs")
