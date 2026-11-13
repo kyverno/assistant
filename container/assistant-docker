@@ -77,6 +77,7 @@ done
 
 # shellcheck source=container/lib.sh
 . "$HERE/lib.sh"
+policy_check
 choose_profile "$(docker ps -a --format '{{.Names}}' 2>/dev/null)" assistant-maint-docker assistant-contrib-docker
 select_profile "$KIND"
 NAME="${NAME:-$DEFAULT_NAME}"
@@ -161,6 +162,7 @@ step "3. Keys"
 info "secrets file: $SECRETS_FILE"
 [ "$RESET" = 1 ] && secrets_unset "$TOKEN_KEY"
 REPO="${ASSISTANT_REPO:-}"
+[ -n "$REPO" ] && resolve_policy "$REPO" "" 1
 LOGIN="${!LOGIN_VAR:-}"
 if [ -n "$(secrets_get "$TOKEN_KEY")" ]; then
   pass "GitHub token already in the secrets file (use --reset to replace it)"

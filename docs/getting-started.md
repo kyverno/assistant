@@ -48,7 +48,7 @@ It prints five numbered steps. This is what each one does, and what you do:
 |---|---|---|
 | **1. Docker and OpenShell** | Checks that Docker runs. Installs [OpenShell](https://github.com/NVIDIA/OpenShell) (its CLI and a background gateway) if it is missing | Nothing, unless Docker is not running |
 | **2. Image** | Pulls `ghcr.io/kyverno/assistant` the first time, about 1.2 GB compressed. Later runs reuse it | Wait a few minutes |
-| **3. GitHub token** | Asks which assistant you want if you did not say (**1 maintainer**, **2 contributor**). Asks which repository, as `owner/repo`: there is no default. Asks how to authorize GitHub (see below). Checks the token against the repository, then stores it **in OpenShell, outside the sandbox** | Type the repository, then sign in |
+| **3. GitHub token** | Asks which assistant you want if you did not say (**1 maintainer**, **2 contributor**). Asks which repository, as `owner/repo`: there is no default unless your organisation's policy sets one. Asks how to authorize GitHub (see below). Checks the token against the repository, then stores it **in OpenShell, outside the sandbox** | Type the repository, then sign in |
 | **4. Sandbox** | Creates the sandbox from the image and applies the network policy. The first time takes a minute or two | Wait |
 | **5. Assistant** | Starts inside the sandbox. It reads your GitHub username from the token, then starts the **GitHub Copilot sign-in**, which prints a code and a page. Then you pick a model | Open <https://github.com/login/device>, enter the code, approve, pick a model |
 
@@ -196,7 +196,7 @@ Wrong, expired or revoked? A 404 means the token cannot see the repo. Replace it
 An organisation publishes `assistant-policy.yaml` at the root of its `.github` repository
 ([example](../container/assistant-policy.yaml)). When you enter `acme/api`, the launcher looks for
 `acme/.github/assistant-policy.yaml` and asks `Use it?`; answer `n` to go without, or type another location (an https
-URL or a file). If it finds none, it asks whether you have one. The answer is remembered; you are asked again only if the
+URL or a file). If it finds none, it asks whether you have one; nothing found and nothing entered means no limits. The answer is remembered; you are asked again only if the
 organisation changes the file. To skip the questions, set `ASSISTANT_POLICY` to a file or https URL, or put the file in your
 own image at `/opt/kyverno/launcher/assistant-policy.yaml`.
 

@@ -1,0 +1,19 @@
+# What an organisation lets this assistant do on its repositories. The launcher reads it. An organisation publishes its own as
+# <owner>/.github/assistant-policy.yaml and the launcher finds it from the repository you enter; to use another, set
+# ASSISTANT_POLICY=/path/to/assistant-policy.yaml (or an https URL). This copy, next to the launcher, limits nothing.
+# Keys, all optional:
+#
+#   default_repo   offered when the person is asked which repository to work on
+#   repos          owner/repo patterns the assistant may be started on ("acme/*", "acme/api"); the launcher refuses any
+#                  other repository. Without it, any repository is allowed.
+#   fork_repos     repository names pushed to in the person's own fork with --push-to-fork (default: the repository's name)
+#   token          "fine-grained" refuses a token that can act beyond selected repositories (a gh sign-in, a classic
+#                  token) and does not offer the gh sign-in; "any" (default) accepts either
+#
+# default_repo: acme/api
+# repos:
+#   - acme/*
+# fork_repos:
+#   - api
+#   - website
+token: any
