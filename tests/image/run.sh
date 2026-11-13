@@ -9,7 +9,10 @@ FIXTURES="$HERE/../fixtures"
 FAILED=0
 ok()  { printf '  ok    %s\n' "$1"; }
 bad() { printf '  FAIL  %s\n' "$1"; FAILED=1; }
-check() { local what="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$what"; else bad "$what"; fi; }
+check() {
+  local what="$1" out; shift
+  if out="$("$@" 2>&1)"; then ok "$what"; else bad "$what"; printf '%s\n' "$out" | tail -n 8 | sed 's/^/          /'; fi
+}
 
 # shellcheck disable=SC2119,SC2120  # the arguments are docker run options, and none are needed most of the time
 # Run a shell snippet in the image as the sandbox user, with Hermes' Python as $PY and the profile folders set up.
@@ -47,7 +50,8 @@ spec = importlib.util.spec_from_file_location('repo_intel', d + '/__init__.py', 
 m = importlib.util.module_from_spec(spec); sys.modules['repo_intel'] = m; spec.loader.exec_module(m)
 from repo_intel import pack_tools
 out = json.loads(pack_tools.handle_repo_pack({}))
-assert out['success'] and out['gates'], out
+assert out['success'] and out['branch_gates'], out
+assert out['pack'] == '/opt/kyverno/profiles/maintainer/org/org.yaml', out['pack']
 PYEOF"
 check "another organisation's pack works from a file, and sequences PRs" inimage <<<"$PRELUDE
 HERMES_HOME=\$HERMES_HOME/profiles/maintainer \$PY -I - <<'PYEOF'
@@ -95,6 +99,8 @@ check "a push to the fork is allowed" allows maintainer "$PYRUN" git-push-guard.
 echo "== state survives a new container"
 VOL="assistant-check-$$"
 docker volume create "$VOL" >/dev/null
+# A new volume belongs to root; the sandbox user (1000) has to be able to write to it.
+docker run --rm --user root --entrypoint chown -v "$VOL":/state "$IMAGE" 1000:1000 /state
 check "dashboard state is written" inimage -v "$VOL":/state <<<"$PRELUDE
 HERMES_HOME=/state \$PY -I - <<'PYEOF'
 import importlib.util, sys
