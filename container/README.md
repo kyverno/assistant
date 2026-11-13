@@ -26,7 +26,7 @@ troubleshooting are all in **[docs/container.md](../docs/container.md)**.
 | `kyverno` | The launcher you run on your laptop |
 | `lib.sh` | Shared by both launchers: output helpers, the GitHub token prompt, the image build or pull, and the list of state kept across `--upgrade` |
 | `kyverno-env`, `dashboard-relay` | Used only by `--no-openshell`, inside the container: reads the keys the launcher copied in, and passes the dashboard to the port Docker publishes |
-| `assistant-docker` | What `kyverno --no-openshell` runs: the same image in plain Docker, without OpenShell (less protection; see docs/container.md, "Running without OpenShell") |
+| `assistant-docker` | What `assistant --no-openshell` runs: the same image in plain Docker, without OpenShell (less protection; see docs/container.md, "Running without OpenShell") |
 | `restore-state.sh` | Uploaded by the launcher during `--upgrade` to put your state back |
 | `policy.yaml` | The sandbox's filesystem and network policy. Keep the Copilot inference paths listed by name (see docs/container.md, "Safety layers") |
 | `providers/*.yaml` | OpenShell provider profiles: the GitHub token (with the MCP tool allowlist the proxy enforces) and the model-provider keys (each limited to chat and model-list paths) |

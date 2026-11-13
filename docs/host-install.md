@@ -13,7 +13,7 @@
 git clone https://github.com/kyverno/assistant.git
 cd assistant
 ./scripts/install.sh      # installs, prompts for your credentials, then verifies everything
-kyverno chat
+maintainer chat
 ```
 
 You need Docker, the Hermes CLI and a GitHub token. The model is chosen in Hermes, as described in step 5.
@@ -117,7 +117,7 @@ credentials.
 ### 5. Run it
 
 ```bash
-kyverno chat
+maintainer chat
 ```
 
 Or mention the bot in the Slack channel you invited it to.

@@ -8,18 +8,12 @@ up, no webhook receiver, no GitHub App to register. Install flow only.
 ## Install
 
 ```bash
-hermes profile install github.com/kyverno/assistant --name maintainer --alias -y
+hermes profile install profiles/maintainer --name maintainer --alias -y
 ```
 
-`--alias` takes no value — it creates a shell wrapper command named after
-`--name` (or the manifest's own name if `--name` is omitted). `--alias
-maintainer` is a common-looking but wrong invocation; it parses `kyverno` as a
-second, unexpected positional argument and fails with "unrecognized
-arguments."
-
-(While this is still prototyped in this sandbox repo rather than published
-separately, install from a local checkout instead: `hermes profile install .
---name kyverno --alias -y`.)
+Run it from a checkout of this repository. `--alias` takes no value: it creates a shell wrapper command named after
+`--name`. `--alias maintainer` is a wrong invocation; it parses `maintainer` as a second, unexpected positional argument
+and fails with "unrecognized arguments."
 
 `./scripts/install.sh` runs this plus everything else below (gateway,
 sanity checks) and is the recommended path — see the README's Setup
@@ -69,12 +63,12 @@ committed) and fill in these yourself:
 ## Run
 
 ```bash
-kyverno chat
+maintainer chat
 ```
 
-Talking to it on Slack needs one more thing `kyverno chat` doesn't cover:
+Talking to it on Slack needs one more thing `maintainer chat` doesn't cover:
 Hermes runs exactly one gateway *per host* (not per profile) as the inbound
-process for every profile's messaging platforms — `kyverno chat` only starts
+process for every profile's messaging platforms — `maintainer chat` only starts
 a foreground CLI session, it doesn't make the gateway listen for Slack
 mentions. `scripts/install.sh` does this automatically when Slack
 credentials are present in `.env`; by hand, install the host gateway once,
@@ -87,14 +81,14 @@ hermes gateway status   # confirm it's supervised and running
 ```
 
 `~/.hermes/logs/gateway.log` should show `slack connected (profile:
-kyverno)`. A per-profile `hermes gateway run`/`install` fails on purpose
+maintainer)`. A per-profile `hermes gateway run`/`install` fails on purpose
 (`exited with code 78`) once a host gateway exists — that's the double-bind
 guard (two pollers on one bot token, port conflicts), not a bug.
 
 ## Update
 
 ```bash
-hermes profile update kyverno
+hermes profile update maintainer
 ```
 
 Pulls the latest distribution version; the maintainer's own `.env`, memories,

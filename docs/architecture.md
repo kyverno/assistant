@@ -165,9 +165,9 @@ If Slack replies work but the queue never posts (or vice versa), these are two i
 code paths — check which one is actually failing before assuming a single token problem.
 
 Hermes runs exactly one gateway *per host*, not per profile, as the inbound process for every
-profile's messaging platforms — `kyverno chat` only starts a foreground CLI session; it never
+profile's messaging platforms — `maintainer chat` only starts a foreground CLI session; it never
 makes anything listen for a Slack mention. The gateway is installed once from the `default`
-profile (`hermes gateway install`), serving every profile including `kyverno`; a per-profile
+profile (`hermes gateway install`), serving every profile including `maintainer`; a per-profile
 `hermes gateway run`/`install` fails on purpose once a host gateway exists, to guard against
 double-binding one bot token from two pollers. `scripts/install.sh` installs it automatically
 when Slack credentials are present.

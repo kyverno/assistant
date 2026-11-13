@@ -653,7 +653,7 @@ fi
 step "Done"
 
 info "Model: choose one in the chat with /model, or run: hermes -p $PROFILE model  (or put a key such as ANTHROPIC_API_KEY in $ENV_FILE)"
-info "Talk to it: hermes -p $PROFILE chat  (or 'kyverno chat' if the alias took)"
+info "Talk to it: hermes -p $PROFILE chat  (or '$PROFILE chat' if the alias took)"
 info "Dashboard: hermes -p $PROFILE dashboard  (Maintainer tab, http://127.0.0.1:9119/maintainer)"
 info ""
 info "Cron jobs ship paused — review before turning any on:"
