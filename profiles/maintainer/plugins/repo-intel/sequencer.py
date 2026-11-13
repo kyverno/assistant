@@ -161,6 +161,12 @@ def build_hard_edges(prs: list[PR], repo_default_branch: str, rules: Rules,
         for b in output_touchers:
             if a.number != b.number:
                 edges.append((a.number, b.number, "generated-file"))
+    # A PR that changes an input and its regenerated output still has to land before a PR that only changes the output. It is
+    # never itself an output-only PR, so these edges cannot close a cycle.
+    for a in both_input:
+        for b in output_touchers:
+            if a.number != b.number and not b.is_generated_input(rules):
+                edges.append((a.number, b.number, "generated-file"))
 
     all_inputs = input_only + both_input
     for i, a in enumerate(all_inputs):
