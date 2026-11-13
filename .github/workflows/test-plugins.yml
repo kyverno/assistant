@@ -11,6 +11,7 @@ on:
       - "tests/plugins/**"
       - "tests/hooks/**"
       - "tests/fixtures/**"
+      - "tests/requirements.txt"
       - ".github/workflows/test-plugins.yml"
   push:
     branches: [main]
@@ -21,6 +22,7 @@ on:
       - "tests/plugins/**"
       - "tests/hooks/**"
       - "tests/fixtures/**"
+      - "tests/requirements.txt"
       - ".github/workflows/test-plugins.yml"
   workflow_dispatch:
 
@@ -36,8 +38,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install PyYAML
-        run: python3 -m pip install --quiet pyyaml
+      - name: Install PyYAML (pinned, with hashes)
+        run: 'python3 -m pip install --quiet --require-hashes --only-binary=:all: -r tests/requirements.txt'
 
       - name: Plugin tests
         env:
