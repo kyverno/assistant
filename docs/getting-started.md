@@ -16,6 +16,7 @@ and keeping it running.
 - [Case 3: an Intel Mac, or Docker only](#case-3-an-intel-mac-or-docker-only)
 - [Case 4: building from a clone](#case-4-building-from-a-clone)
 - [Tokens](#tokens)
+- [For an organisation: which repositories, which tokens](#for-an-organisation-which-repositories-which-tokens)
 - [Choosing a model](#choosing-a-model)
 - [Letting it push to your fork](#letting-it-push-to-your-fork)
 - [Upgrading](#upgrading)
@@ -189,6 +190,26 @@ everything. To comment on an issue, or to open a pull request from your fork, th
 (or use the `gh` sign-in, which can).
 
 Wrong, expired or revoked? A 404 means the token cannot see the repo. Replace it with `--reset`.
+
+## For an organisation: which repositories, which tokens
+
+An organisation publishes `assistant-policy.yaml` at the root of its `.github` repository
+([example](../container/assistant-policy.yaml)). When you enter `acme/api`, the launcher looks for
+`acme/.github/assistant-policy.yaml` and asks `Use it?`; answer `n` to go without, or type another location (an https
+URL or a file). If it finds none, it asks whether you have one. The answer is remembered; you are asked again only if the
+organisation changes the file. To skip the questions, set `ASSISTANT_POLICY` to a file or https URL, or put the file in your
+own image at `/opt/kyverno/launcher/assistant-policy.yaml`.
+
+Keys, all optional:
+
+- `repos`: the `owner/repo` patterns (`acme/*`, `acme/api`) the assistant may be started on. Any other is refused.
+- `default_repo`, `fork_repos`: what to offer when asking, and which fork repositories `--push-to-fork` allows.
+- `token: fine-grained`: refuses a token that can act beyond selected repositories (the `gh` sign-in, a classic token) and
+  does not offer the `gh` sign-in.
+
+A policy that cannot be read, or is malformed, stops the launcher: it never falls back to no limits. The check runs on your
+machine, so it stops mistakes, not someone who edits their own copy. What the agent can do once it runs is limited by
+OpenShell's policies, not by this file: see the [README](../README.md#protected-by-openshell).
 
 ## Choosing a model
 
