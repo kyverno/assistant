@@ -25,24 +25,24 @@ skill loads only when actually asked for.
 
 ## Prerequisites
 
-- `fetch_pr_candidates`/`fetch_pr_details` (plugin tools, `plugins/kyverno-fetch/`)
+- `fetch_pr_candidates`/`fetch_pr_details` (plugin tools, `plugins/repo-intel/`)
   — ranking here (security first, then `semver_level`) isn't search-expressible,
   so always digest-then-detail, never one flat fetch.
-- `sequence_prs` (plugin tool, `plugins/kyverno-sequencer/`) — for step 6's
+- `sequence_prs` (plugin tool, `plugins/repo-intel/`) — for step 6's
   blocks/blocked-by pass.
 - `mcp-github`: `search_pull_requests`, `search_code`, `list_dependabot_alerts`,
   `get_dependabot_alert`, `list_releases`, `get_latest_release`,
   `pull_request_read`, `list_discussions`.
 - `mcp-slack`: `conversations_history` — only if configured.
-- `mnemosyne_recall`/`_triple_query` — see `kyverno-context`'s memory reference.
-- Env: `KYVERNO_REPO`, `SLACK_HOME_CHANNEL`.
+- `mnemosyne_recall`/`_triple_query` — see `repo-context`'s memory reference.
+- Env: `ASSISTANT_REPO`, `SLACK_HOME_CHANNEL`.
 
 ## Procedure: Dependabot queue
 
 Every Dependabot PR appears exactly once.
 
 1. **Fetch by author, not label.** Ranking (security first, then severity) is
-   relational, not search-expressible: `fetch_pr_candidates(repo=KYVERNO_REPO,
+   relational, not search-expressible: `fetch_pr_candidates(repo=ASSISTANT_REPO,
    search_query="author:app/dependabot", detail="digest", limit=60)`, rank by
    security label/`GHSA-`/`CVE-` mention first, then `semver_level` (major/minor/
    patch, `unknown` treated as an unconfirmed major), take the top 10, then
@@ -50,7 +50,7 @@ Every Dependabot PR appears exactly once.
    `copilot_review`/`ci_state`. State the slice size against the digest's own
    `total_count` — there may be more than 10 real Dependabot PRs open; say so
    rather than implying this is the whole set. The labels (`ready-for-review`,
-   `needs-review`, `major-bump`) are the triage sweep's read of the same facts —
+   `needs-review`, `major-bump`; the pack's `facts` say what each means) are the triage sweep's read of the same facts —
    cite them when they agree, and say so when a label is missing or contradicts
    the fetched level.
 2. **Group the set**: the same dependency in several PRs (e.g. one action bumped in two
@@ -62,12 +62,12 @@ Every Dependabot PR appears exactly once.
    bumps for its severity; a refused call means this token can't see alerts — say so
    and rely on the PR body.
 4. **Risk, per PR**, each claim cited:
-   - Go module: `search_code` the import path in `KYVERNO_REPO`, group call sites by
-     package; hits under `pkg/engine`/`pkg/cel`/`pkg/webhooks`/`pkg/validation`/
-     `pkg/image` are elevated risk. For a major or minor bump, read the release notes
+   - Go module: `search_code` the import path in `ASSISTANT_REPO`, group call sites by
+     package; hits in files the pack classes as `critical` (`repo_pack`'s `file_classes`)
+     are elevated risk. For a major or minor bump, read the release notes
      the PR body embeds and name any breaking change or deprecation that touches those
-     call sites. `k8s.io/*`, `sigs.k8s.io/*` and `github.com/kyverno/api` bumps
-     (`kind/codegen`) also need the regenerated outputs in the PR's `changed_files` — a
+     call sites. A bump matching the pack's `dependency_bots.codegen_module_globs`
+     (labelled `codegen_kind_label`) also needs the regenerated outputs in the PR's `changed_files` — a
      `go.mod`/`go.sum`-only diff means they're stale.
    - Workflow action: `search_code` for `uses: <action>` to name the workflows that run
      it; one with write permissions, secrets, or a release/publish step is elevated.
@@ -75,10 +75,10 @@ Every Dependabot PR appears exactly once.
    - CI not green: `pull_request_read(method="get_check_runs")` for the failing checks'
      names. The same check failing on unrelated Dependabot PRs is a shared cause —
      report it once and say it isn't this bump's doing.
-   - `mnemosyne_triple_query` for `caused_e2e_failure` on the packages the call sites
+   - `mnemosyne_triple_query` for `caused_gate_failure` on the packages the call sites
      fall in; `mnemosyne_recall` for an earlier decision on this dependency (a
      deliberate skip, a known-bad version).
-5. **Reviews**: `copilot_review.verdict`/`summary`/`findings`, and `coderabbit_approved`.
+5. **Reviews**: `copilot_review.verdict`/`summary`/`findings`, and `bot_approved`.
    When Copilot isn't approving, `pull_request_read(method="get_review_comments")` and
    say whether each finding needs a code change (blocking) or is advisory (changelog,
    docs). Any human review is read the same way.
@@ -91,7 +91,7 @@ Every Dependabot PR appears exactly once.
    - Blocks / blocked by: call `sequence_prs` with the Dependabot PRs plus any
      related open PRs. Dependabot PRs overlap on `go.mod`/`go.sum` by nature — report
      that as one note (merge one at a time; Dependabot rebases the rest), not as a
-     conflict per pair. A `github.com/kyverno/api` bump orders ahead of PRs touching
+     conflict per pair. A bump of a module in the pack's `generated_inputs.dependency_modules` orders ahead of PRs touching
      generated outputs; state `gate_blocked` wherever true.
    - Outside context: `SLACK_HOME_CHANNEL` if configured, and `list_discussions`
      (client-side matched, no search exists) for a thread naming the bot, a
@@ -121,7 +121,7 @@ file), Copilot's verdict, the CI cause, related PRs, and what it blocks or waits
 
 ## Pitfalls
 
-- Don't assume a label exists — `kyverno-context`'s live `list_label` is the
+- Don't assume a label exists — `repo-context`'s live `list_label` is the
   source of truth.
 - Ranking by security/severity is relational — never a flat `limit`-only fetch;
   digest-then-detail every time, same reason `pr-queue`'s "most urgent" default

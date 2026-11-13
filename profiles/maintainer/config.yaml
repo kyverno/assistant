@@ -1,4 +1,4 @@
-# kyverno-assistant — Hermes profile config.
+# Maintainer assistant — Hermes profile config.
 #
 # Security-critical, hand-edited only. Enforcement is layered, each layer
 # independently verified against the real upstream servers (see
@@ -55,7 +55,7 @@ mcp_servers:
       # label/state check (e.g. the e2e-gate).
       #
       # Label taxonomy + CODEOWNERS — read live, never hardcoded (see
-      # skills/kyverno-context). get_team_members/get_teams resolve
+      # skills/repo-context). get_team_members/get_teams resolve
       # team-based CODEOWNERS entries against MAINTAINER_GITHUB_LOGIN.
       #
       # Risk enrichment for queue reasoning — read-only.
@@ -184,22 +184,19 @@ mcp_servers:
 # already reduced to its verified tool list by mcp_servers.*.tools.include
 # above — this just groups them; it does not do any filtering of its own.
 custom_toolsets:
-  kyverno-assistant-tools:
+  maintainer-tools:
     - mcp-github
     - mcp-slack
-    # kyverno-sequencer: a bundled plugin (plugins/kyverno-sequencer/), not an MCP server.
-    # Registers one tool, sequence_prs — a pure function over already-fetched PR metadata, no
-    # GitHub/Slack access of its own. See docs/architecture.md for the packaging verification.
-    - kyverno-sequencer
-    # kyverno-fetch: a bundled plugin (plugins/kyverno-fetch/). Registers fetch_pr_candidates —
-    # talks to GitHub's GraphQL API directly with this profile's own REPO_GITHUB_TOKEN, replacing
-    # N sequential pull_request_read calls with one tool call.
-    - kyverno-fetch
-    # kyverno-dashboard: a bundled plugin (plugins/kyverno-dashboard/). Registers update_dashboard,
+    # repo-intel: a bundled plugin (plugins/repo-intel/), not an MCP server. Registers the fetch tools
+    # (fetch_pr_candidates and friends: GitHub's GraphQL API called directly with this profile's own
+    # REPO_GITHUB_TOKEN, replacing N sequential pull_request_read calls with one tool call) and
+    # sequence_prs, a pure function over already-fetched PR metadata. See docs/architecture.md.
+    - repo-intel
+    # maintainer-dashboard: a bundled plugin (plugins/maintainer-dashboard/). Registers update_dashboard,
     # which writes the maintainer's dashboard tab state; no GitHub/Slack access.
-    - kyverno-dashboard
+    - maintainer-dashboard
 
-toolsets: ["kyverno-assistant-tools"]
+toolsets: ["maintainer-tools"]
 
 # `toolsets:` only scopes MCP tool grants. Hermes' built-in tools (terminal,
 # file, browser, code_execution, etc.) ship enabled by default regardless —
@@ -278,9 +275,8 @@ skills:
 plugins:
   enabled:
     - mnemosyne
-    # kyverno-sequencer, kyverno-fetch: bundled at plugins/<name>/ (not the community catalog
+    # repo-intel: bundled at plugins/<name>/ (not the community catalog
     # like mnemosyne) — installed as part of this repo, not a separate `hermes plugins install`.
-    - kyverno-sequencer
-    - kyverno-fetch
-    - kyverno-dashboard
+    - repo-intel
+    - maintainer-dashboard
 agent: {}

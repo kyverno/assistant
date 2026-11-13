@@ -13,7 +13,7 @@
 git clone https://github.com/kyverno/assistant.git
 cd assistant
 ./scripts/install.sh      # installs, prompts for your credentials, then verifies everything
-kyverno chat
+maintainer chat
 ```
 
 You need Docker, the Hermes CLI and a GitHub token. The model is chosen in Hermes, as described in step 5.
@@ -89,8 +89,11 @@ The script is idempotent: re-run it as often as you like and it only does what i
 
 1. **Install and prompts:** installs the profile, then asks for each missing credential (GitHub
    token, username, repo) and whether to set up Slack and the sandboxed terminal. Values are saved to
-   `~/.hermes/profiles/kyverno/.env`. Press Enter at any prompt to skip it.
-2. **Checks:** installs the messaging gateway (only if Slack is configured), checks that the GitHub
+   `~/.hermes/profiles/maintainer/.env`. Press Enter at any prompt to skip it.
+2. **Organisation pack:** copies your pack from `container/org/` into the profile (see
+   [`organisation-pack.md`](organisation-pack.md)): `ASSISTANT_ORG=<name>` if you set it, otherwise the one named after the owner
+   of your repository. Without one the assistant still runs, but knows no file classes or merge gate, and the installer says so.
+3. **Checks:** installs the messaging gateway (only if Slack is configured), checks that the GitHub
    and Slack tools are reachable and the hooks are approved, and prints ✓ or ✗ for each check.
 
 If you skipped a prompt, the script stops and lists what is missing. Fill it in at the `.env`
@@ -101,7 +104,7 @@ skips the prompts and works this way from the start.
 |---|---|---|
 | `REPO_GITHUB_TOKEN` | yes | Token from step 2 |
 | `MAINTAINER_GITHUB_LOGIN` | yes | Your GitHub username |
-| `KYVERNO_REPO` | yes | `owner/repo` the assistant manages (default `kyverno/kyverno`) |
+| `ASSISTANT_REPO` | yes | `owner/repo` the assistant manages (no default: the installer asks) |
 | `ANTHROPIC_API_KEY`, `COPILOT_GITHUB_TOKEN`, … | no | Optional model keys; Hermes can also sign in to a provider for you (step 5) |
 | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN` | Slack only | Bot and app-level tokens |
 | `SLACK_ALLOWED_USERS` | Slack only | Your Slack member ID |
@@ -114,12 +117,12 @@ credentials.
 ### 5. Run it
 
 ```bash
-kyverno chat
+maintainer chat
 ```
 
 Or mention the bot in the Slack channel you invited it to.
 
-The model is yours to choose, the way Hermes does it: run `hermes -p kyverno model` and pick any
+The model is yours to choose, the way Hermes does it: run `hermes -p maintainer model` and pick any
 provider, type `/model` in a chat, or add a provider key such as `ANTHROPIC_API_KEY` to the profile's
 `.env`. A Claude Pro or Max login works only with purchased extra usage
 ([Anthropic's rules](https://code.claude.com/docs/en/legal-and-compliance),
@@ -140,9 +143,9 @@ The profile ships a weekday-morning merge-sequence digest that posts to your Sla
 arrives **paused**, so nothing posts to Slack on a schedule until you resume it:
 
 ```bash
-hermes cron list                          # shows "kyverno-review-digest", paused
-hermes cron resume kyverno-review-digest
-hermes cron edit kyverno-review-digest    # change the time or channel
+hermes cron list                          # shows "review-digest", paused
+hermes cron resume review-digest
+hermes cron edit review-digest    # change the time or channel
 ```
 
 ### 8. Update
@@ -158,14 +161,14 @@ sandboxed terminal are kept.
 ## The dashboard
 
 A browser board that shows what the agent just told you, linked, grouped and sortable, so you don't
-scroll the chat or copy links by hand. (The sandbox runs it too; see the [README](../README.md#the-dashboard).)
+scroll the chat or copy links by hand. (The sandbox runs it too; see the [README](usage.md#the-dashboard).)
 
 ```bash
-hermes -p kyverno dashboard
+hermes -p maintainer dashboard
 ```
 
-Pick **Kyverno** in the sidebar under Plugins, or open
-`http://127.0.0.1:9119/kyverno?profile=kyverno`. It refreshes every 15 seconds. Keep it open next to
+Pick **Maintainer** in the sidebar under Plugins, or open
+`http://127.0.0.1:9119/maintainer?profile=maintainer`. It refreshes every 15 seconds. Keep it open next to
 the chat: it fills when the agent answers a queue, stale-PR, issue-triage or Discussions request,
-not in the background. The tabs are described in the [README](../README.md#the-dashboard). The Kyverno tab is
+not in the background. The tabs are described in the [README](usage.md#the-dashboard). The Maintainer tab is
 read-only; confirming and acting still happen in the chat.

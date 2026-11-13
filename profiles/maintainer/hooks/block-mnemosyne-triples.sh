@@ -21,9 +21,9 @@ tool_input = payload.get("tool_input") or {}
 
 if tool == "mnemosyne_triple_add":
     allowed = {
-        "caused_e2e_failure",
-        "e2e_failure_opened",
-        "e2e_failure_closed",
+        "caused_gate_failure",
+        "gate_failure_opened",
+        "gate_failure_closed",
         "excludes",
         "prioritizes",
     }

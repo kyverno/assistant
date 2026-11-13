@@ -50,7 +50,7 @@ network_policies:
       - { path: /usr/bin/git }
       - { path: /usr/lib/git-core/git-remote-https }
 
-  # Toolchains and dependencies, for building and testing code in the sandbox (container/kyverno-workspace): Go and
+  # Toolchains and dependencies, for building and testing code in the sandbox (container/assistant-workspace): Go and
   # Node releases, Go modules (through the module mirror and its checksum database), npm packages, and the Kyverno CLI
   # and Chainsaw release files. Read-only (GET), and only the programs that download them may reach these hosts.
   toolchains:

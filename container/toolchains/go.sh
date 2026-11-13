@@ -1,6 +1,6 @@
 # shellcheck shell=bash disable=SC2153,SC2034
-# ARCH and TOOLS are set by kyverno-workspace, which sources this file.
-# Go toolchain for kyverno-workspace. The version comes from the repository's own go.mod, so a build uses what its CI uses.
+# ARCH and TOOLS are set by assistant-workspace, which sources this file.
+# Go toolchain for assistant-workspace. The version comes from the repository's own go.mod, so a build uses what its CI uses.
 #   tc_want <repo dir>   the version to install
 #   tc_have <version>    succeeds when it is already installed
 #   tc_install <version> download (checksum verified) and unpack it

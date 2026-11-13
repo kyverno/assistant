@@ -23,9 +23,9 @@ labelled `needs-author-action`, and the ones the stale sweep has since marked
 
 ## Prerequisites
 
-- `kyverno-context` loaded (CODEOWNERS, for needs-help hand-off candidates).
+- `repo-context` loaded (CODEOWNERS, for needs-help hand-off candidates).
 - `fetch_pr_candidates(..., include_stale_detail=true)` (plugin tool,
-  `plugins/kyverno-fetch/`) — adds `maintainer_can_modify`, `staled_at`,
+  `plugins/repo-intel/`) — adds `maintainer_can_modify`, `staled_at`,
   `last_commit_at`, `author_comments_since_stale`, and per closing issue its real
   `assignees` and `other_closing_prs`. `detail="digest"` (capped at 60) drops
   body/review text for ranking a whole stale set by something search can't
@@ -35,7 +35,7 @@ labelled `needs-author-action`, and the ones the stale sweep has since marked
   and posting the recommendation comment.
 - `issue-actions`' guardrail and assign/unassign action — the real write for
   "Reassign," on the closing issue, never the PR.
-- Env: `KYVERNO_REPO`.
+- Env: `ASSISTANT_REPO`.
 
 ## Procedure: stale PR decisions
 
@@ -73,7 +73,7 @@ slice. Fetch once they choose.
      both cited.
    - Issue open and wanted (`milestone_open`, a bug/regression-type label, or
      already `help wanted`) → **Reassign**: unassign this PR's author from the
-     issue if assigned, offer it to the path owners (`kyverno-context` CODEOWNERS
+     issue if assigned, offer it to the path owners (`repo-context` CODEOWNERS
      on `changed_files`) or via `help wanted`. If `maintainer_can_modify` and the
      PR itself reads close to done (CI green, few unresolved threads), also offer
      **take over the branch** as an alternative to reassigning fresh.
@@ -92,7 +92,7 @@ slice. Fetch once they choose.
 
 ## Procedure: needs-author-action status (on request, before staling)
 
-`fetch_pr_candidates(repo=KYVERNO_REPO, search_query="label:needs-author-action")`
+`fetch_pr_candidates(repo=ASSISTANT_REPO, search_query="label:needs-author-action")`
 — `include_stale_detail` stays false, nothing has staled yet. Per PR: the blocker
 kind (the readiness comment's machine-readable marker, via `pull_request_read`),
 days until `stale` from the last author activity, and which PRs have had the

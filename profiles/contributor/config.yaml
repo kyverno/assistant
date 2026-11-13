@@ -1,4 +1,4 @@
-# kyverno-contributor: Hermes profile config for a contributor to the Kyverno project.
+# Contributor assistant — Hermes profile config for a contributor to an open-source project.
 #
 # Security-critical, hand-edited only. The contributor profile can read GitHub widely and write two
 # things: a comment on an issue or PR (add_issue_comment) and a pull request from the contributor's own fork
@@ -56,13 +56,13 @@ mcp_servers:
         - create_pull_request
 
 custom_toolsets:
-  kyverno-contributor-tools:
+  contributor-tools:
     - mcp-github
     # profiles/contributor/plugins/contributor: knowledge_for, explain_path, related_prs, find_issues,
     # issue_history, my_pr_state, journey_summary, journey_note, journey_self_report, inbox_read.
-    - kyverno-contributor
+    - contributor
 
-toolsets: ["kyverno-contributor-tools"]
+toolsets: ["contributor-tools"]
 
 # `toolsets:` only scopes MCP tool grants. Hermes' built-in tools (terminal, file, browser, ...) are off
 # unless listed here; scripts/install.sh adds terminal and file only when the OpenShell sandbox is set up.

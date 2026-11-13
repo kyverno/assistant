@@ -15,7 +15,7 @@ tool = payload.get("tool_name") or ""
 if re.search(r"merge|delete_repo|force_push", tool):
     print(json.dumps({
         "action": "block",
-        "message": f"{tool} is not permitted for kyverno-assistant — see SOUL.md",
+        "message": f"{tool} is not permitted for this assistant — see SOUL.md",
     }))
 else:
     print("{}")

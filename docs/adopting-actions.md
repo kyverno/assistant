@@ -1,6 +1,6 @@
 # Adopting the CI actions
 
-Part of the [kyverno-assistant README](../README.md#ci-automation-for-your-repositories). These actions are independent
+Part of the [README](../README.md#prepare-your-repository). These actions are independent
 of the agent.
 
 You need no install, image or model. One person runs one command; it opens a pull request in each repository you

@@ -1,8 +1,8 @@
-# Model provider key for the Kyverno assistant, held by OpenShell. The sandbox only sees a placeholder in
+# Model provider key for the assistant, held by OpenShell. The sandbox only sees a placeholder in
 # OPENAI_API_KEY; the proxy swaps in the real key on requests to api.openai.com, and only from Hermes' Python.
-id: kyverno-openai
-display_name: OpenAI (Kyverno assistant)
-description: OpenAI API key for the Kyverno assistant's model, injected by the proxy only
+id: assistant-openai
+display_name: OpenAI (assistant)
+description: OpenAI API key for the assistant's model, injected by the proxy only
 category: inference
 inference_capable: true
 credentials:

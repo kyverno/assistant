@@ -151,11 +151,11 @@ def go_summary(sources: Dict[str, str], module: Optional[str]) -> Dict[str, Any]
 
 
 def _importers(repo: str, module: Optional[str], directory: str, sha: str) -> Dict[str, Any]:
-    """Who imports this Go package, from the clone `kyverno-workspace` made in the sandbox (GitHub's code search is too
+    """Who imports this Go package, from the clone `assistant-workspace` made in the sandbox (GitHub's code search is too
     slow and incomplete for this). The clone may be at another commit than the one analysed; the answer says which."""
-    clone = os.path.join(os.environ.get("KYVERNO_WORKSPACE_ROOT", "/sandbox"), repo.split("/", 1)[1])
+    clone = os.path.join(os.environ.get("ASSISTANT_WORKSPACE_ROOT") or "/sandbox", repo.split("/", 1)[1])
     if not module or not os.path.isdir(os.path.join(clone, ".git")):
-        return {"available": False, "note": "no clone in the sandbox yet: run `kyverno-workspace %s`, then ask again" % repo}
+        return {"available": False, "note": "no clone in the sandbox yet: run `assistant-workspace %s`, then ask again" % repo}
     package = module + ("/" + directory if directory else "")
     try:
         head = subprocess.run(["git", "-C", clone, "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10).stdout.strip()
@@ -170,6 +170,9 @@ def _importers(repo: str, module: Optional[str], directory: str, sha: str) -> Di
             "folders_total": len(folders), "test_files_importing": sum(1 for f in outside if f.endswith("_test.go")),
             "note": "from `git grep` in the clone's working tree; blank imports and generated files are included"}
 
+
+# File-name endings that mean a test in most repositories; the pack adds its own (`test_files`).
+_TEST_SUFFIXES = ("_test.go", "_test.py", ".test.ts", ".test.js", ".spec.ts", ".spec.js")
 
 def explain_path(client, org: Dict[str, Any], repo: str, path: str, ref: Optional[str] = None,
                  max_commits: int = 10) -> Dict[str, Any]:
@@ -188,7 +191,7 @@ def explain_path(client, org: Dict[str, Any], repo: str, path: str, ref: Optiona
     files = sorted(e["path"] for e in listing if e["type"] == "file")
     subdirs = sorted(e["name"] for e in listing if e["type"] == "dir")
     go_files = [f for f in files if f.endswith(".go") and not f.endswith("_test.go")]
-    tests = [f for f in files if f.endswith("_test.go") or f.endswith(("kyverno-test.yaml", "chainsaw-test.yaml"))]
+    tests = [f for f in files if f.endswith(_TEST_SUFFIXES + tuple(org.get("test_files") or ()))]
     kinds = Counter(f.rsplit(".", 1)[-1] if "." in f.rsplit("/", 1)[-1] else "(none)" for f in files)
 
     out: Dict[str, Any] = {

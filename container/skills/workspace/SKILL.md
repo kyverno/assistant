@@ -11,7 +11,7 @@ platforms: [linux, macos, windows]
 
 The terminal and file tools run inside an OpenShell sandbox: nothing on the user's computer is reachable, there
 are no tokens in it, and it can write only under `/sandbox` and `/tmp`. Network access is GitHub reads plus the
-download hosts for Go, Node, Go modules, npm packages and the Kyverno CLI and Chainsaw. Everything else is denied.
+download hosts for Go, Node, Go modules, npm packages and, for policy repositories, the Kyverno CLI and Chainsaw. Everything else is denied.
 
 ## When to Use
 
@@ -20,16 +20,16 @@ download hosts for Go, Node, Go modules, npm packages and the Kyverno CLI and Ch
 
 ## Steps
 
-1. **Set up once per repository. Never run `git clone` yourself:** it is refused, and it would skip the setup that makes pushing and sign-off work. `kyverno-workspace <owner/repo>` clones it to `/sandbox/<name>` and installs
+1. **Set up once per repository. Never run `git clone` yourself:** it is refused, and it would skip the setup that makes pushing and sign-off work. `assistant-workspace <owner/repo>` clones it to `/sandbox/<name>` and installs
    the toolchains it declares (Go from `go.mod`, Node from `.nvmrc` or `package.json`, the Kyverno CLI and Chainsaw
    for policy repositories), checking each download against the vendor's checksum. Tell the user the first run
-   downloads a lot, and that the first Go build of kyverno/kyverno compiles for 10 to 15 minutes. Then
+   downloads a lot, and that the first build of a large Go module can compile for 10 to 15 minutes. Then
    `cd /sandbox/<name> && source /sandbox/.toolchains/env.sh` (new shells pick this up on their own).
    If the tools do not install, report which download failed and stop; do not work around the sandbox.
 2. **Reproduce first.** For an issue, find the failing command in the report and run it. For a PR, fetch it and
    run what its CI runs: `git fetch origin pull/<n>/head:pr-<n> && git switch pr-<n>`. Read the project's
    `DEVELOPMENT.md` and CI workflow for the exact commands. Run the narrowest thing that shows the problem
-   (`go test ./pkg/<package>/...`, one Chainsaw test, one `kyverno test` folder), not the whole repository.
+   (`go test ./pkg/<package>/...`, one end-to-end test, one test folder), not the whole repository.
    For a failing check, read its log first (`actions_get`, then `get_job_logs` for the failed job) to get the exact
    command and error, then run that command here; say if it fails only in CI and not in the sandbox.
    Show the command and the output; a reproduction that you did not run is not a reproduction.
@@ -43,7 +43,7 @@ download hosts for Go, Node, Go modules, npm packages and the Kyverno CLI and Ch
    "not verified" list for what the sandbox cannot run (cluster tests, end-to-end, other platforms). Never say
    something passed unless you ran it and saw it pass.
 5. **Commit** with `git commit -s` (the project's CI requires a sign-off on every commit), conventional messages.
-6. **Hand it over.** If `kyverno-workspace` printed "pushes go to your fork", the user turned pushing on: show them
+6. **Hand it over.** If `assistant-workspace` printed "pushes go to your fork", the user turned pushing on: show them
    `git log --stat` and the branch name, and once they say yes, `git push -u fork <branch>`. A contributor can push to the `fork`
    remote only (their own fork). A maintainer can also push to `origin`, the repository they manage, to fix a PR branch.
    A hook refuses force pushes, deletes and pushes to main, master or a release branch, and the network rule refuses any
@@ -56,7 +56,7 @@ download hosts for Go, Node, Go modules, npm packages and the Kyverno CLI and Ch
    - OpenShell: `openshell sandbox download <sandbox> /sandbox/<name>/patches .` (see `openshell sandbox list`)
    - plain Docker: `docker cp <container>:/sandbox/<name>/patches .`
    - then in their own checkout: `git switch -c <branch> && git am patches/*.patch`, push to their fork, open the PR.
-   Tell them once that `container/kyverno --push-to-fork` would let you push yourself.
+   Tell them once that `container/assistant --push-to-fork` would let you push yourself.
 
 ## When something is blocked
 

@@ -1,6 +1,6 @@
-name: kyverno-assistant
+name: maintainer-assistant
 version: 0.1.0
-description: "On-demand PR review queue assistant for a Kyverno maintainer"
+description: "On-demand PR review queue assistant for a repository maintainer"
 hermes_requires: ">=0.12.0"
 author: "Suhaani Agarwal"
 license: "Apache-2.0"
@@ -24,12 +24,12 @@ env_requires:
   - name: SLACK_HOME_CHANNEL
     description: "Maintainers channel ID to read priority signals from and post the queue in"
     required: true
-  - name: KYVERNO_REPO
-    description: "owner/repo this assistant manages (e.g. kyverno/kyverno)"
+  - name: ASSISTANT_REPO
+    description: "owner/repo this assistant manages (for example your-org/your-repo)"
     required: true
   - name: ANTHROPIC_API_KEY
-    description: "Optional. Anthropic API key; or choose any provider with `hermes -p kyverno model`."
+    description: "Optional. Anthropic API key; or choose any provider with `hermes -p maintainer model`."
     required: false
   - name: COPILOT_GITHUB_TOKEN
-    description: "Optional. Copilot PAT (Copilot Requests permission), or sign in with `hermes -p kyverno model`."
+    description: "Optional. Copilot PAT (Copilot Requests permission), or sign in with `hermes -p maintainer model`."
     required: false

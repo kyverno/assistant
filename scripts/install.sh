@@ -1,10 +1,11 @@
 #!/bin/bash
-# Idempotent installer for the kyverno-assistant Hermes profile. Re-run this
+# Idempotent installer for the maintainer assistant Hermes profile. Re-run this
 # same script after each step it asks you to do (fill in .env, etc.) — it
 # detects what's already done and only does what's left.
 set -uo pipefail
 
-PROFILE="${1:-kyverno}"
+PROFILE="${1:-}"
+[ -n "$PROFILE" ] || PROFILE=maintainer
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC="$REPO_ROOT/profiles/maintainer"
 PROFILE_DIR="$HOME/.hermes/profiles/$PROFILE"
@@ -228,7 +229,7 @@ if [ "$INTERACTIVE" = 1 ]; then
   info "Press Enter at any prompt to skip it and fill it in $ENV_FILE yourself."
   prompt_for REPO_GITHUB_TOKEN "GitHub token (fine-grained PAT, see README step 2): " secret
   prompt_for MAINTAINER_GITHUB_LOGIN "Your GitHub username: "
-  prompt_for KYVERNO_REPO "Repo to manage (owner/repo): "
+  prompt_for ASSISTANT_REPO "Repo to manage (owner/repo): "
 
   if [ -z "$(env_get SLACK_BOT_TOKEN)" ] && [ -z "$(env_get SLACK_APP_TOKEN)" ]; then
     info ""
@@ -272,10 +273,10 @@ pass "all required credentials are filled in ($ENV_FILE)"
 
 # Catch a bad REPO_GITHUB_TOKEN now instead of as a 401 from the tools later.
 check_github_token() {
-  GH_TOKEN_VAL="$(env_get REPO_GITHUB_TOKEN)" GH_REPO_VAL="$(env_get KYVERNO_REPO)" python3 - <<'PY'
+  GH_TOKEN_VAL="$(env_get REPO_GITHUB_TOKEN)" GH_REPO_VAL="$(env_get ASSISTANT_REPO)" python3 - <<'PY'
 import os, re, ssl, urllib.error, urllib.request
 tok = os.environ['GH_TOKEN_VAL']
-repo = os.environ['GH_REPO_VAL'] or 'kyverno/kyverno'
+repo = os.environ['GH_REPO_VAL']    # empty before a repository is chosen: then only the token itself is checked
 if re.search(r'[\s"\']', tok):
     print('malformed: the token contains spaces or quotes')
     raise SystemExit
@@ -287,7 +288,7 @@ try:
     ctx = ssl.create_default_context(cafile=certifi.where())
 except ImportError:
     ctx = None
-req = urllib.request.Request(f'https://api.github.com/repos/{repo}', headers={
+req = urllib.request.Request(f'https://api.github.com/repos/{repo}' if repo else 'https://api.github.com/user', headers={
     'Authorization': f'Bearer {tok}', 'User-Agent': 'kyverno-assistant-install'})
 try:
     urllib.request.urlopen(req, timeout=15, context=ctx)
@@ -300,9 +301,9 @@ PY
 }
 TOKEN_STATUS=$(check_github_token)
 case "$TOKEN_STATUS" in
-  ok) pass "REPO_GITHUB_TOKEN works for $(env_get KYVERNO_REPO)" ;;
+  ok) pass "REPO_GITHUB_TOKEN works for $(env_get ASSISTANT_REPO)" ;;
   http\ 401) fail "GitHub rejected REPO_GITHUB_TOKEN (401): it is wrong, expired or revoked — create a new one and fix $ENV_FILE" ;;
-  http\ 403|http\ 404) fail "REPO_GITHUB_TOKEN cannot read $(env_get KYVERNO_REPO) (${TOKEN_STATUS#http }): give the fine-grained token access to that repo, or get the org to approve it" ;;
+  http\ 403|http\ 404) fail "REPO_GITHUB_TOKEN cannot read $(env_get ASSISTANT_REPO) (${TOKEN_STATUS#http }): give the fine-grained token access to that repo, or get the org to approve it" ;;
   malformed*) fail "REPO_GITHUB_TOKEN in $ENV_FILE is malformed (${TOKEN_STATUS#malformed: }) — it must be just the one token, no quotes" ;;
   *) info "could not verify REPO_GITHUB_TOKEN (${TOKEN_STATUS:-no answer}) — continuing" ;;
 esac
@@ -317,9 +318,9 @@ done
 # GitHub Copilot signs in with a device-code login only, never with a PAT. Hermes picks the first valid
 # token among COPILOT_GITHUB_TOKEN, GH_TOKEN and GITHUB_TOKEN, and the Copilot API rejects PATs. The repo PAT
 # lives in REPO_GITHUB_TOKEN, a name Hermes doesn't look at, so the two never meet.
-#   KYVERNO_COPILOT_LOGIN=yes  sign in (again) without asking, e.g. after the token expired
-#   KYVERNO_COPILOT_LOGIN=no   skip it
-WANT_COPILOT="${KYVERNO_COPILOT_LOGIN:-}"
+#   ASSISTANT_COPILOT_LOGIN=yes  sign in (again) without asking, e.g. after the token expired
+#   ASSISTANT_COPILOT_LOGIN=no   skip it
+WANT_COPILOT="${ASSISTANT_COPILOT_LOGIN:-}"
 if [ -z "$WANT_COPILOT" ] && [ "$INTERACTIVE" = 1 ] && [ -z "$(env_get COPILOT_GITHUB_TOKEN)" ]; then
   read -r -p "  Sign in to GitHub Copilot for the model (device code in your browser; skip with n) [Y/n]: " WANT_COPILOT </dev/tty
   case "$WANT_COPILOT" in [Nn]*) WANT_COPILOT=no ;; *) WANT_COPILOT=yes ;; esac
@@ -335,7 +336,7 @@ save_env_value('COPILOT_GITHUB_TOKEN', token)
 "; then
     pass "Copilot signed in (COPILOT_GITHUB_TOKEN saved). Pick it with: hermes -p $PROFILE model"
   else
-    fail "Copilot sign-in did not finish — retry with: KYVERNO_COPILOT_LOGIN=yes ./scripts/install.sh"
+    fail "Copilot sign-in did not finish — retry with: ASSISTANT_COPILOT_LOGIN=yes ./scripts/install.sh"
   fi
 fi
 
@@ -347,7 +348,7 @@ if [ -n "$MODEL_KEEP" ]; then
 fi
 
 # Hermes only substitutes ${HERMES_SKILL_DIR}/${HERMES_SESSION_ID} in SKILL.md
-# content — ${KYVERNO_REPO} etc. are never resolved by Hermes itself, so the
+# content — ${ASSISTANT_REPO} etc. are never resolved by Hermes itself, so the
 # model would otherwise read that literal placeholder text. Do it ourselves.
 python3 -c "
 import glob
@@ -359,7 +360,7 @@ with open('$ENV_FILE') as f:
             continue
         k, _, v = line.partition('=')
         values[k.strip()] = v.strip()
-for var in ('KYVERNO_REPO', 'MAINTAINER_GITHUB_LOGIN', 'SLACK_HOME_CHANNEL'):
+for var in ('ASSISTANT_REPO', 'MAINTAINER_GITHUB_LOGIN', 'SLACK_HOME_CHANNEL'):
     val = values.get(var)
     if not val:
         continue
@@ -371,12 +372,39 @@ for var in ('KYVERNO_REPO', 'MAINTAINER_GITHUB_LOGIN', 'SLACK_HOME_CHANNEL'):
 "
 pass "skill instructions resolved to real env values"
 
+step "3b. Organisation pack"
+# Every rule and fact about your repository that the plugins use (file classes, the merge gate, which labels mean ready)
+# is the pack in container/org/<name>/. The profile does not carry it, so it is copied in here, on every run.
+# ASSISTANT_ORG names it; without that, the one named after the repository's owner (acme/repo uses container/org/acme/).
+ORG="${ASSISTANT_ORG:-}"
+if [ -z "$ORG" ]; then
+  ORG_OWNER="$(env_get ASSISTANT_REPO)"; ORG_OWNER="${ORG_OWNER%%/*}"
+  [ -n "$ORG_OWNER" ] && [ -f "$REPO_ROOT/container/org/$ORG_OWNER/org.yaml" ] && ORG="$ORG_OWNER"
+fi
+if [ -z "$ORG" ]; then
+  # The profile's copy is only ever what this step installed, so one left from another repository would keep applying that
+  # organisation's file classes and gate here. Remove it.
+  if [ -f "$PROFILE_DIR/org/org.yaml" ]; then
+    rm -rf "$PROFILE_DIR/org" && info "removed the organisation pack left from an earlier install: it was not chosen for this repository"
+  fi
+  info "no organisation pack for this repository: the assistant still works, but reads every file as ordinary and knows no"
+  info "merge gate. Add container/org/<name>/org.yaml (docs/organisation-pack.md) and re-run with ASSISTANT_ORG=<name>."
+elif [[ ! "$ORG" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+  fail "'$ORG' is not a valid pack name"; exit 1
+elif [ ! -f "$REPO_ROOT/container/org/$ORG/org.yaml" ]; then
+  fail "no pack at container/org/$ORG/org.yaml (see docs/organisation-pack.md)"; exit 1
+else
+  rm -rf "$PROFILE_DIR/org" && cp -R "$REPO_ROOT/container/org/$ORG" "$PROFILE_DIR/org" \
+    && pass "organisation pack '$ORG' installed from container/org/$ORG" \
+    || { fail "could not copy the pack into $PROFILE_DIR/org"; exit 1; }
+fi
+
 step "4. AGENTS.md cache"
 
 # Discovers every AGENTS.md/ARCHITECTURE.md in the repo (not just api/AGENTS.md — kyverno/kyverno
 # has one per major package: pkg/engine, pkg/cel, pkg/webhooks, etc., plus root AGENTS.md and
 # ARCHITECTURE.md) via one git-tree call, then caches each as its own mnemosyne entry so
-# kyverno-context can recall the one relevant to whatever package is in play instead of a fresh
+# repo-context can recall the one relevant to whatever package is in play instead of a fresh
 # search_code every session.
 AGENTS_SEED_FILE="$(mktemp)"
 python3 -c "
@@ -397,7 +425,7 @@ with open('$ENV_FILE') as f:
         k, _, v = line.partition('=')
         values[k.strip()] = v.strip()
 
-repo = values.get('KYVERNO_REPO')
+repo = values.get('ASSISTANT_REPO')
 token = values.get('REPO_GITHUB_TOKEN')
 
 def api_get(path):
@@ -437,7 +465,7 @@ for path in doc_paths:
         failed.append(path)
         continue
     entries.append({
-        'id': f'kyverno-doc:{path}',
+        'id': f'repo-doc:{path}',
         'content': f'--- {path} ---\n{content}',
         'source': 'install-seed',
         'timestamp': '2026-01-01T00:00:00',
@@ -459,12 +487,12 @@ print(f'OK: {len(entries)} cached' + (f', {len(failed)} failed: {failed}' if fai
 
 if grep -q "^OK:" "$AGENTS_SEED_FILE.status"; then
   if hermes -p "$PROFILE" mnemosyne import -i "$AGENTS_SEED_FILE" --force >/dev/null 2>&1; then
-    pass "$(sed 's/^OK: //' "$AGENTS_SEED_FILE.status") (recall by 'kyverno-doc:<path>' any session)"
+    pass "$(sed 's/^OK: //' "$AGENTS_SEED_FILE.status") (recall by 'repo-doc:<path>' any session)"
   else
     info "docs fetched but mnemosyne import failed — run: hermes -p $PROFILE mnemosyne import -i $AGENTS_SEED_FILE --force"
   fi
 else
-  info "$(cat "$AGENTS_SEED_FILE.status") — skipping cache, kyverno-context will fall back to search_code"
+  info "$(cat "$AGENTS_SEED_FILE.status") — skipping cache, repo-context will fall back to search_code"
 fi
 rm -f "$AGENTS_SEED_FILE" "$AGENTS_SEED_FILE.status"
 
@@ -510,7 +538,7 @@ step "6. Sandboxed terminal"
 # The terminal runs inside an NVIDIA OpenShell sandbox: no tokens, read-only GitHub, every
 # decision audited. Without the sandbox the profile has no terminal at all.
 SANDBOX_TERMINAL="no"
-WANT_SANDBOX="${KYVERNO_SANDBOX_TERMINAL:-}"
+WANT_SANDBOX="${ASSISTANT_SANDBOX_TERMINAL:-}"
 [ -z "$WANT_SANDBOX" ] && [ "$PREV_TERMINAL" = "ssh" ] && WANT_SANDBOX=yes
 if [ -z "$WANT_SANDBOX" ] && [ "$INTERACTIVE" = 1 ]; then
   info "Optional: a sandboxed terminal for the assistant (installs NVIDIA OpenShell and builds a"
@@ -552,7 +580,7 @@ PY
     fail "sandbox setup failed — the terminal stays off. Fix the error above and re-run this script"
   fi
 else
-  info "skipped — no terminal (re-run with KYVERNO_SANDBOX_TERMINAL=yes to add it later)"
+  info "skipped — no terminal (re-run with ASSISTANT_SANDBOX_TERMINAL=yes to add it later)"
 fi
 
 step "7. Sanity checks"
@@ -625,8 +653,8 @@ fi
 step "Done"
 
 info "Model: choose one in the chat with /model, or run: hermes -p $PROFILE model  (or put a key such as ANTHROPIC_API_KEY in $ENV_FILE)"
-info "Talk to it: hermes -p $PROFILE chat  (or 'kyverno chat' if the alias took)"
-info "Dashboard: hermes -p $PROFILE dashboard  (Kyverno tab, http://127.0.0.1:9119/kyverno)"
+info "Talk to it: hermes -p $PROFILE chat  (or '$PROFILE chat' if the alias took)"
+info "Dashboard: hermes -p $PROFILE dashboard  (Maintainer tab, http://127.0.0.1:9119/maintainer)"
 info ""
 info "Cron jobs ship paused — review before turning any on:"
 info "  hermes -p $PROFILE cron list"

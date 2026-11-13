@@ -19,11 +19,16 @@ class OrgFileError(RuntimeError):
     pass
 
 
+# The pack baked into the image: read-only to the agent (the sandbox policy keeps /opt/kyverno read-only), unlike the copy
+# in Hermes' writable home. It is read first; the home copy is for installs where nothing is baked.
+IMAGE_PACK = Path("/opt/kyverno/profiles/contributor/org/org.yaml")
+
+
 def candidate_paths() -> list:
-    
-    paths = []
-    if os.environ.get("KYVERNO_ORG_FILE"):
-        paths.append(Path(os.environ["KYVERNO_ORG_FILE"]))
+    paths = [IMAGE_PACK]
+    explicit = os.environ.get("ASSISTANT_ORG_FILE")
+    if explicit:
+        paths.append(Path(explicit))
     paths.append(hermes_home() / "org" / "org.yaml")
     return paths
 

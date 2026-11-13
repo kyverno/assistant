@@ -5,9 +5,9 @@ The assistant (Hermes, its Kyverno profile, and the memory plugin) runs entirely
 launcher does the rest.
 
 ```bash
-container/kyverno --build     # first time: builds the image from this checkout, then starts it
-container/kyverno             # every later run: reattach (or start) the sandbox
-container/kyverno --build --upgrade   # after pulling a new version: rebuild and recreate, keeping your state
+container/assistant --build     # first time: builds the image from this checkout, then starts it
+container/assistant             # every later run: reattach (or start) the sandbox
+container/assistant --build --upgrade   # after pulling a new version: rebuild and recreate, keeping your state
 ```
 
 Needs Docker Desktop 4.60 or newer on Apple Silicon macOS, or Docker on Linux (x86_64 or arm64; what has been tried on
@@ -18,7 +18,7 @@ The first image build takes 15 to 30 minutes on a laptop with 8 GB of RAM; after
 
 | Where | What runs there |
 |---|---|
-| **Your laptop** | Docker, the OpenShell CLI and gateway, and the launcher (`container/kyverno`), plus one forwarded port (`127.0.0.1:9219`) to the dashboard. Nothing else. |
+| **Your laptop** | Docker, the OpenShell CLI and gateway, and the launcher (`container/assistant`), plus one forwarded port (`127.0.0.1:9219`) to the dashboard. Nothing else. |
 | **OpenShell gateway** (on the laptop) | Holds your GitHub token and any model API keys, enforces the network policy through a proxy, and keeps the audit log. |
 | **The sandbox** | Hermes, the profile (skills, plugins, hooks), the memory plugin and its database, the dashboard, the agent's terminal, and the Copilot sign-in token. |
 
@@ -48,7 +48,7 @@ Everything not listed is denied (`policy.yaml` and `providers/*.yaml`).
 | Copilot inference (`api.githubcopilot.com`: `/models`, `/chat/completions`, `/responses`, `/embeddings`, `/v1/**`; and `api.individual`, `api.business`, `api.enterprise.githubcopilot.com`) | Yes, with Hermes' own Copilot token. `/mcp/` is deliberately not among the paths on the shared host (see "Safety layers") |
 | `github.com` login endpoints | Only the two device-code paths |
 | `github.com`, `codeload`, `raw.githubusercontent.com` | Read-only, for the agent's terminal, no credential |
-| Toolchain hosts (`go.dev`, `proxy.golang.org`, `nodejs.org`, `registry.npmjs.org`, and a few more) | GET only, and only for the installer's own binaries (`curl`, Go, Node). Used by `kyverno-workspace`; every download is checked against the vendor's checksum |
+| Toolchain hosts (`go.dev`, `proxy.golang.org`, `nodejs.org`, `registry.npmjs.org`, and a few more) | GET only, and only for the installer's own binaries (`curl`, Go, Node). Used by `assistant-workspace`; every download is checked against the vendor's checksum |
 | `github.com` `git-receive-pack`, only with `--push-to-fork` | Pushes to your own forks (and, for a maintainer, the repository they manage), nothing else. The credential is swapped in by the proxy; a hook also refuses force pushes, deletes and pushes to main |
 | `models.dev` | Read-only, for the `/model` list |
 | A model provider you added with `--provider` | Only that provider's API host |
@@ -65,21 +65,21 @@ Verified means it was run in a real sandbox, on the image as built from this che
 | REST and GraphQL reads with the real token | Verified | Merge, delete and GraphQL mutations refused by the proxy |
 | Safety hooks (merge blocker, mnemosyne triples, terminal guard) | Verified | Approved at build time, listed as allowed |
 | Memory plugin (mnemosyne) | Verified | Starts, searches, consolidates, with the network off. Embedding model is in the image |
-| Skills, plugins (`kyverno-fetch`, `kyverno-sequencer`) | Verified loaded | 63 GitHub tools, 29 skills in the banner |
+| Skills, plugins (`repo-intel`) | Verified loaded | 63 GitHub tools, 29 skills in the banner |
 | GitHub Copilot sign-in and a model reply | Verified | Device-code login works inside the sandbox. Which models answer depends on your plan: see below |
 | Anthropic / NVIDIA / OpenAI keys | Partly | The request reaches the provider with the key swapped in. A real reply is untested |
 | Agent terminal and file tools | Enabled, not exercised | They run locally in the sandbox; the hook allows them only inside OpenShell |
 | Slack | Not available | The Slack MCP server runs under Docker, which a sandbox does not have |
 | Linux (amd64) | Verified on a runner | On a GitHub runner (Ubuntu 24.04, kernel 6.17, Docker Engine 28): an amd64 image was built there and the whole stack ran, with the placeholder token, the proxy refusing a merge, read-only hooks and the dashboard answering. Not a real laptop, and not by the publish workflow; arm64 Linux is untried |
-| Dashboard | Verified | Runs in the sandbox; the launcher forwards `127.0.0.1:9219`. A sample item written through the agent's own `update_dashboard` function was served by it, with the Kyverno tab's script and styles loading |
+| Dashboard | Verified | Runs in the sandbox; the launcher forwards `127.0.0.1:9219`. A sample item written through the agent's own `update_dashboard` function was served by it, with the Maintainer tab's script and styles loading |
 | Scheduled jobs (cron, the Slack digest) | Not available | They run inside the Hermes gateway, which is not started |
-| `AGENTS.md` cache seeding | Not done | `kyverno-context` falls back to searching GitHub |
+| `AGENTS.md` cache seeding | Not done | `repo-context` falls back to searching GitHub |
 | Keeping state when the image is upgraded | Verified | `--upgrade`: see below |
 
 ## Upgrading and your state
 
 State lives inside the sandbox and survives stopping and starting it. A new image means a new sandbox, so
-`container/kyverno --build --upgrade` (or `--image NEW`) saves your state, recreates the sandbox from the new
+`container/assistant --build --upgrade` (or `--image NEW`) saves your state, recreates the sandbox from the new
 image, and puts the state back. It carries only what is yours:
 
 - the memory database, the notes in `memories/`, the chat history and sessions, and the dashboard's data
@@ -126,11 +126,11 @@ silently be missing from the other.
 
 ## Running without OpenShell
 
-OpenShell is the default and the way to run this. If you do not want it, `container/kyverno --no-openshell` runs the
+OpenShell is the default and the way to run this. If you do not want it, `container/assistant --no-openshell` runs the
 same image as one plain Docker container instead. It is an opt-in with weaker protection, not an equal alternative.
 
 ```bash
-container/kyverno --no-openshell [--build | --image IMAGE] [--provider P ...] [--upgrade] [--reset] [--allow-terminal]
+container/assistant --no-openshell [--build | --image IMAGE] [--provider P ...] [--upgrade] [--reset] [--allow-terminal]
 ```
 
 | | OpenShell (default) | `--no-openshell` |
@@ -140,7 +140,7 @@ container/kyverno --no-openshell [--build | --image IMAGE] [--provider P ...] [-
 | Merges | Refused by the proxy, whatever the token can do | Only the token's scopes stop them. Use a fine-grained token (README step 1), not the `gh` sign-in |
 | Tool allowlist on the GitHub MCP server | Enforced by the proxy | Hermes' own filter only |
 | Terminal and file tools | Allowed, inside the sandbox | Blocked. `--allow-terminal` turns them on, and then the container is the only boundary |
-| Coding environment (`kyverno-workspace`) | Downloads only from the allowed toolchain hosts | The same scripts and checksums, but the container can reach anything, so the host allowlist is not there. Needs `--allow-terminal` |
+| Coding environment (`assistant-workspace`) | Downloads only from the allowed toolchain hosts | The same scripts and checksums, but the container can reach anything, so the host allowlist is not there. Needs `--allow-terminal` |
 | Pushing (`--push-to-fork`) | Token held by the gateway, pushes limited to your forks | Not available: the launcher refuses it. The assistant hands over patches |
 | Audit log | `openshell logs` | None |
 | Dashboard | Forwarded to `127.0.0.1:9219` | The same address. Hermes keeps it on loopback inside the container; a small relay passes it to a port Docker publishes on `127.0.0.1` only, on a network that only this container joins |
@@ -148,7 +148,7 @@ container/kyverno --no-openshell [--build | --image IMAGE] [--provider P ...] [-
 What it still does: the container runs as a non-root user with every Linux capability dropped, `no-new-privileges`
 and a process limit, and nothing from your machine is mounted. Docker is the only requirement. It was tried on Apple Silicon only.
 
-**Keys.** They live in `~/.config/kyverno-assistant/secrets.env` (override with `KYVERNO_SECRETS_FILE`), mode 600, as
+**Keys.** They live in `~/.config/assistant/secrets.env` (override with `ASSISTANT_SECRETS_FILE`), mode 600, as
 `KEY=value` lines. On every start the launcher copies the allowed keys (`REPO_GITHUB_TOKEN`, `ANTHROPIC_API_KEY`,
 `OPENAI_API_KEY`, `NVIDIA_API_KEY`) into a tmpfs inside the container. They are not in the image, not in
 `docker inspect`, and not on the container's disk; the tmpfs is empty again when the container stops.
@@ -158,10 +158,10 @@ container from the new image and restores it, as with OpenShell. Removing the co
 
 **Keys changed?** Re-running the launcher copies the new keys in and restarts the dashboard so it picks them up.
 
-**Removing it.** `docker rm -f kyverno-assistant-docker`, `docker network rm kyverno-assistant-docker-net`, and delete the secrets file.
+**Removing it.** `docker rm -f assistant-maint-docker`, `docker network rm assistant-maint-docker-net`, and delete the secrets file.
 This loses the container's state.
 
-**Choosing between them later.** The two modes use different names (`kyverno-assistant` sandbox, `kyverno-assistant-docker`
+**Choosing between them later.** The two modes use different names (`assistant-maint` sandbox, `assistant-maint-docker`
 container), so they do not interfere. State is not shared between them.
 
 ## Choosing a model
@@ -170,7 +170,7 @@ container), so they do not interfere. State is not shared between them.
   model list marks several models `enabled` that a free account still rejects with
   `model_not_supported`, so only a real request tells you. `gpt-4.1` and `gpt-4o-mini` answered on a free
   account. Switch in chat with `/model gpt-4.1 --global`.
-- **Another provider:** `container/kyverno --provider anthropic` (or `openai`, `nvidia`). The key is
+- **Another provider:** `container/assistant --provider anthropic` (or `openai`, `nvidia`). The key is
   asked once and kept in OpenShell. The proxy adds the real key only on chat and model-list requests
   (`/v1/chat/completions`, `/v1/responses`, `/v1/messages`, `/v1/models`). Anything else on those hosts is refused,
   so a prompt-injected command cannot use your key for file uploads, batch jobs or fine-tuning. Hermes features
@@ -192,7 +192,7 @@ container), so they do not interfere. State is not shared between them.
 
 ## Publishing the image (maintainers)
 
-Users can always build the image themselves with `container/kyverno --build`. To let them download it instead
+Users can always build the image themselves with `container/assistant --build`. To let them download it instead
 (a few minutes, and identical for everyone), `.github/workflows/container-image.yml` builds it in CI and publishes
 it to the GitHub Container Registry as `ghcr.io/<owner>/assistant`, one multi-architecture image for Apple
 Silicon / arm64 Linux and Intel / amd64 Linux. Each architecture is built on a native runner.
@@ -222,11 +222,11 @@ One-time setup for an org admin:
    launcher pulls without logging in.
 
 The launcher pulls `ghcr.io/kyverno/assistant:latest` by default. To pin a version, or to use a fork or a different
-registry, set `KYVERNO_IMAGE` or pass `--image`:
+registry, set `ASSISTANT_IMAGE` or pass `--image`:
 
 ```bash
-container/kyverno --image ghcr.io/kyverno/assistant:v0.1.0 --upgrade     # a release
-container/kyverno --image ghcr.io/kyverno/assistant@sha256:<digest>       # exactly this build
+container/assistant --image ghcr.io/kyverno/assistant:v0.1.0 --upgrade     # a release
+container/assistant --image ghcr.io/kyverno/assistant@sha256:<digest>       # exactly this build
 ```
 
 Before the manifest is created, the workflow scans both architectures with Trivy and stops if either has a fixable
@@ -292,7 +292,7 @@ Things are pinned so builds are reproducible, which means updates are deliberate
 | GitHub Actions | Commit hashes in `.github/workflows/` | Dependabot, weekly |
 | Hermes | `HERMES_COMMIT` in the Dockerfile | By hand. See below |
 | `mnemosyne-hermes`, `mnemosyne-memory`, `anthropic`, `PyJWT` | The `uv pip install` line in the Dockerfile | By hand, when Hermes moves. Drop the PyJWT pin once Hermes requires 2.14.0 or newer |
-| OpenShell | `OPENSHELL_VERSION` in `container/kyverno` | By hand. See below |
+| OpenShell | `OPENSHELL_VERSION` in `container/assistant` | By hand. See below |
 | shellcheck, hadolint | Digests in `.github/workflows/container-lint.yml` | By hand, occasionally |
 | Trivy (the release gate) | Digest in `.github/workflows/container-image.yml` | By hand, occasionally |
 
@@ -302,12 +302,12 @@ Things are pinned so builds are reproducible, which means updates are deliberate
    network, if Hermes cannot tell its own version, or if the agent could write to Hermes' code or the safety hooks.
 2. Check whether the `mnemosyne-*` pin is still right: remove it, build, and see if the memory provider still
    loads. It was needed because `mnemosyne-hermes` 0.7.4 refuses to start with the Hermes we pin.
-3. Start a sandbox from the new image and check: the hooks are listed as allowed (`hermes -p kyverno hooks list`),
-   the GitHub MCP connects (`hermes -p kyverno mcp test github`), and a short chat answers.
+3. Start a sandbox from the new image and check: the hooks are listed as allowed (`hermes -p maintainer hooks list`),
+   the GitHub MCP connects (`hermes -p maintainer mcp test github`), and a short chat answers.
 4. Scan the new image:
    ```bash
    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest image \
-     --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed kyverno-assistant:dev
+     --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed assistant:dev
    ```
 
 **Bumping OpenShell:** change `OPENSHELL_VERSION`, then run the launcher through: first start, `--upgrade`,

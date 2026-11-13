@@ -8,34 +8,34 @@ set -u
 
 export HERMES_HOME=/opt/hermes-home/.hermes
 export PATH="/opt/hermes-home/.local/bin:$PATH"
-PORT="${KYVERNO_DASHBOARD_PORT:-9219}"
+PORT="${ASSISTANT_DASHBOARD_PORT:-9219}"
 
-# Without OpenShell (container/kyverno --no-openshell) the launcher writes the keys into a tmpfs file a moment after
+# Without OpenShell (container/assistant --no-openshell) the launcher writes the keys into a tmpfs file a moment after
 # the container starts. Wait for it, so the dashboard starts with them.
-if [ "${KYVERNO_RUNTIME:-}" = docker ]; then
+if [ "${ASSISTANT_RUNTIME:-}" = docker ]; then
   for _ in $(seq 1 120); do [ -f /run/kyverno-secrets/env ] && break; sleep 1; done
 fi
 
 if [ "${1:-maintainer}" != maintainer ]; then exec sleep infinity; fi
 
-# --isolated makes the server profile-scoped, which is what makes it find this profile's Kyverno tab.
+# --isolated makes the server profile-scoped, which is what makes it find this profile's Maintainer tab.
 # --skip-build serves the web UI that is already built into the image.
 (
   while true; do
     # Re-read the keys on every start, so a restart after the launcher changed them picks them up.
-    if [ "${KYVERNO_RUNTIME:-}" = docker ]; then
+    if [ "${ASSISTANT_RUNTIME:-}" = docker ]; then
       # shellcheck source=container/kyverno-env
       . /usr/local/bin/kyverno-env
       kyverno_load_secrets
     fi
-    hermes -p kyverno dashboard --isolated --no-open --skip-build --port "$PORT" || true
+    hermes -p maintainer dashboard --isolated --no-open --skip-build --port "$PORT" || true
     sleep 5
   done
 ) >> /tmp/dashboard.log 2>&1 &
 
 # Without OpenShell, Docker publishes the relay's port; the dashboard itself stays on 127.0.0.1 (see dashboard-relay).
-if [ "${KYVERNO_RUNTIME:-}" = docker ]; then
-  dashboard-relay "${KYVERNO_RELAY_PORT:-38219}" "$PORT" >> /tmp/dashboard-relay.log 2>&1 &
+if [ "${ASSISTANT_RUNTIME:-}" = docker ]; then
+  dashboard-relay "${ASSISTANT_RELAY_PORT:-38219}" "$PORT" >> /tmp/dashboard-relay.log 2>&1 &
 fi
 
 exec sleep infinity

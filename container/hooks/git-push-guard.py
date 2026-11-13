@@ -2,12 +2,12 @@
 """pre_tool_call hook for the terminal, shared by both profiles. Fails closed (config.yaml sets fail_closed: true).
 
 The sandbox's network policy decides which repositories a `git push` can reach (your own forks, plus the managed
-repository for a maintainer; see container/kyverno --push-to-fork). It cannot see inside the push, so this hook
+repository for a maintainer; see container/assistant --push-to-fork). It cannot see inside the push, so this hook
 covers the rest. A contributor pushes to the `fork` remote only; a maintainer may also push to `origin`, to fix a PR
 branch of the repository they manage. Neither forces, deletes a branch, or pushes to main, master or a release
 branch: a direct push to the default branch would skip the review and merge gate.
 
-It also refuses a bare `git clone`: the agent must run `kyverno-workspace OWNER/REPO` instead, which clones the same
+It also refuses a bare `git clone`: the agent must run `assistant-workspace OWNER/REPO` instead, which clones the same
 repository and also sets up the `fork` remote, the push credential, the sign-off setting and the toolchains. A plain
 clone has none of that, so a later `git push` would fail and the commits would lack the sign-off.
 
@@ -20,7 +20,7 @@ import shlex
 import sys
 
 PROTECTED = re.compile(r"^(main|master|release[-/].*)$")
-# The contributor profile's folder is named kyverno-contributor; Hermes sets HERMES_HOME to the profile's folder.
+# The contributor profile's folder is named contributor; Hermes sets HERMES_HOME to it.
 REMOTES = {"fork"} if os.environ.get("HERMES_HOME", "").rstrip("/").endswith("contributor") else {"fork", "origin"}
 FORCE_FLAGS = {"-f", "-d", "--force", "--delete", "--mirror", "--all", "--prune", "--tags"}
 
@@ -38,7 +38,7 @@ def check(tokens):
     while i < len(args) and args[i].startswith("-"):
         i += 2 if args[i] in ("-C", "-c", "--git-dir", "--work-tree") else 1
     if i < len(args) and args[i] == "clone":
-        return ("do not use git clone: run `kyverno-workspace OWNER/REPO` (for example kyverno-workspace kyverno/kyverno). "
+        return ("do not use git clone: run `assistant-workspace OWNER/REPO` (for example assistant-workspace owner/repo). "
                 "It clones the repository into /sandbox and sets up your fork, sign-off and toolchains")
     if i >= len(args) or args[i] != "push":
         return None

@@ -2,7 +2,7 @@
 
 > **In the sandbox deployment** the agent runs inside an OpenShell sandbox, which adds a network proxy that swaps in the GitHub token, refuses merges, repository deletion and GraphQL mutations on the REST API, and checks every GitHub MCP tool call against the same allowlist as `config.yaml`. See [`container.md`](container.md) for those extra layers. This document describes the design and the layers common to both setups.
 
-kyverno-assistant is a [Hermes profile distribution](https://hermes-agent.nousresearch.com/docs/user-guide/profile-distributions):
+The assistant is a [Hermes profile distribution](https://hermes-agent.nousresearch.com/docs/user-guide/profile-distributions):
 `distribution.yaml` + `SOUL.md` + `config.yaml` + `skills/` + `plugins/` + `hooks/` +
 `cron/`, git-installed with `hermes profile install`, updated with `hermes profile update`.
 
@@ -15,7 +15,7 @@ kyverno-assistant is a [Hermes profile distribution](https://hermes-agent.nousre
 
 ## What it can and can't do
 
-- Reads anything on `KYVERNO_REPO`: PRs, diffs, reviews, labels, CODEOWNERS, milestones,
+- Reads anything on `ASSISTANT_REPO`: PRs, diffs, reviews, labels, CODEOWNERS, milestones,
   issues, Discussions, security/Dependabot alerts, Actions logs. Reads the configured Slack
   channel.
 - Using the maintainer's own `REPO_GITHUB_TOKEN`: adds labels, posts comments, requests changes,
@@ -63,16 +63,16 @@ ever wanted:
   this PR in Slack" is a bounded-window scan with client-side text matching, never a real
   search (Slack's own `search.messages` API doesn't work with a bot token anyway).
 
-## Why two bundled plugins instead of MCP servers
+## Why a bundled plugin instead of MCP servers
 
-`profiles/maintainer/plugins/kyverno-fetch/` and `profiles/maintainer/plugins/kyverno-sequencer/` are bundled Hermes plugins (plain
+`profiles/maintainer/plugins/repo-intel/` is a bundled Hermes plugin (plain
 Python, not MCP servers) — `__init__.py` exposes `register(ctx)`, which registers each
-tool's schema (from `tools.py`) with Hermes; still needs an explicit `config.yaml` toolset
+tool's schema (from `fetch_tools.py` and `sequence_tools.py`) with Hermes; still needs an explicit `config.yaml` toolset
 grant and a `plugins.enabled:` entry like any other tool — bundled isn't auto-trusted. They
 ship with the repo (no separate packaging step, no extra install) and are discovered
 per-profile under `~/.hermes/profiles/<profile>/plugins/<name>/`.
 
-- **`kyverno-fetch`** — `fetch_pr_candidates(repo, search_query, limit)` replaces what would
+- **fetch** (`repo-intel`) — `fetch_pr_candidates(repo, search_query, limit)` replaces what would
   otherwise be a `search_pull_requests` call plus one sequential `pull_request_read` per PR
   (real cost against a live queue: dozens of PRs, one round trip each). It talks to GitHub's
   GraphQL/REST APIs directly over `urllib` using the profile's own `REPO_GITHUB_TOKEN` — same
@@ -96,7 +96,7 @@ per-profile under `~/.hermes/profiles/<profile>/plugins/<name>/`.
   `timelineItems`). Verified live against `kyverno/kyverno` (2026-10-05): both
   `closedByPullRequestsReferences` and `ClosedEvent.closer`'s `PullRequest`/`Commit`
   union resolve correctly end to end, not just by schema introspection.
-- **`kyverno-sequencer`** — `sequence_prs` takes that richer metadata and builds a hard
+- **sequencer** (`repo-intel`) — `sequence_prs` takes that richer metadata and builds a hard
   dependency graph, no scoring: 4 edge types (stacked branches — one PR's base branch is
   another's head; generated-file input-before-output; an explicit body reference to another
   candidate; two candidates closing the same issue, which goes to `unresolved` instead of an
@@ -127,17 +127,17 @@ From `kyverno/kyverno`'s own `Makefile` and `.github/workflows/`:
   signals; a PR can carry both, and `pr-queue` states them separately rather than conflating
   them.
 
-See `profiles/maintainer/skills/kyverno-context/SKILL.md` for the full codegen/CI reference and
+See `profiles/maintainer/skills/repo-context/SKILL.md` for the full codegen/CI reference and
 `profiles/maintainer/skills/pr-queue/SKILL.md` for how it's used in sequencing.
 
 ## Why labels and CODEOWNERS are never hardcoded
 
-`KYVERNO_REPO` can point at `kyverno/kyverno` or a sandbox repo, each with its own label set
-and CODEOWNERS file. `kyverno-context` resolves both live every session (`list_label`,
+`ASSISTANT_REPO` can point at `kyverno/kyverno` or a sandbox repo, each with its own label set
+and CODEOWNERS file. `repo-context` resolves both live every session (`list_label`,
 `get_file_contents` on `CODEOWNERS`) rather than assuming it already knows a repo's
 conventions — the same principle extends to `AGENTS.md`/`ARCHITECTURE.md` (cached into
 Mnemosyne by `scripts/install.sh`, recalled instead of re-fetched) and to arbitrary repo
-questions (`search_code`, scoped with `repo:${KYVERNO_REPO}` explicitly — it is not
+questions (`search_code`, scoped with `repo:${ASSISTANT_REPO}` explicitly — it is not
 auto-scoped).
 
 `search_code` approximates "what would this break" via text search — no real call graph, so
@@ -165,9 +165,9 @@ If Slack replies work but the queue never posts (or vice versa), these are two i
 code paths — check which one is actually failing before assuming a single token problem.
 
 Hermes runs exactly one gateway *per host*, not per profile, as the inbound process for every
-profile's messaging platforms — `kyverno chat` only starts a foreground CLI session; it never
+profile's messaging platforms — `maintainer chat` only starts a foreground CLI session; it never
 makes anything listen for a Slack mention. The gateway is installed once from the `default`
-profile (`hermes gateway install`), serving every profile including `kyverno`; a per-profile
+profile (`hermes gateway install`), serving every profile including `maintainer`; a per-profile
 `hermes gateway run`/`install` fails on purpose once a host gateway exists, to guard against
 double-binding one bot token from two pollers. `scripts/install.sh` installs it automatically
 when Slack credentials are present.

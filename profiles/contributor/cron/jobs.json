@@ -1,16 +1,16 @@
 {
   "jobs": [
     {
-      "id": "kyverno-contributor-watch",
-      "name": "kyverno-contributor-watch",
-      "_frequency": "Every 20 minutes. Runs scripts/kyverno-watch.py with no model: it only calls GitHub and prints what changed.",
+      "id": "contributor-watch",
+      "name": "contributor-watch",
+      "_frequency": "Every 20 minutes. Runs scripts/contributor-watch.py with no model: it only calls GitHub and prints what changed.",
       "prompt": "",
       "skills": [],
       "skill": null,
       "model": null,
       "provider": null,
       "base_url": null,
-      "script": "kyverno-watch.py",
+      "script": "contributor-watch.py",
       "no_agent": true,
       "monitor_script": null,
       "monitor_url": null,

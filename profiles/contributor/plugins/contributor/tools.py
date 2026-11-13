@@ -16,7 +16,7 @@ def _schema(name: str, description: str, properties: Dict[str, Any], required=No
     return {"name": name, "description": description, "parameters": params}
 
 
-_REPO = {"type": "string", "description": "'owner/repo'. Omit to use KYVERNO_REPO."}
+_REPO = {"type": "string", "description": "'owner/repo'. Omit to use ASSISTANT_REPO."}
 _REF = {"type": "string", "description": "Branch, tag or commit. Omit for the default branch head."}
 _INT = {"type": "integer"}
 
@@ -25,7 +25,7 @@ def _call(fn: Callable[..., Dict[str, Any]], args: Dict[str, Any], **kw) -> str:
     """fn(client, org, repo, **kw) -> dict, with errors reported as {"success": false}."""
     repo = github.default_repo(args)
     if not repo:
-        return json.dumps({"success": False, "error": "repo (or KYVERNO_REPO) is required"})
+        return json.dumps({"success": False, "error": "repo (or ASSISTANT_REPO) is required"})
     try:
         return json.dumps(fn(github.Client(), rules.load_org(), repo, **kw))
     except (github.GitHubError, rules.OrgFileError) as exc:

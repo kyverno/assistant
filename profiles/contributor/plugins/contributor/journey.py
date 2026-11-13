@@ -24,7 +24,8 @@ MAX_TEXT = 300
 
 
 def base_dir() -> Path:
-    return Path(os.environ.get("KYVERNO_CONTRIBUTOR_HOME") or hermes_home() / "kyverno-contributor")
+    explicit = os.environ.get("ASSISTANT_CONTRIBUTOR_HOME")
+    return Path(explicit) if explicit else hermes_home() / "contributor-state"
 
 
 def path() -> Path:

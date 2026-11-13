@@ -74,33 +74,35 @@ scanner and image handling).
 
 ## Making the assistants generic
 
-What is Kyverno-specific today, and where it goes:
+The maintainer assistant is generic: everything specific to an organisation is data in its **organisation pack**
+([`organisation-pack.md`](organisation-pack.md)), and the plugins and skills carry only method. The contributor
+assistant is not yet: its pack still requires a contribution-ladder section.
 
-| Today | Becomes |
+| Was Kyverno-specific | Now |
 | --- | --- |
-| `KYVERNO_REPO` env var | `ASSISTANT_REPOS` (comma list of `owner/repo`); `KYVERNO_REPO` kept as an alias for one release |
-| `skills/kyverno-context` (labels, codegen facts, `Kyverno Release X.Y.Z`) | a generic `repo-context` skill that does the live lookups, plus a **context pack** per org supplying the fixed facts |
-| `plugins/kyverno-fetch`, `plugins/kyverno-sequencer` | renamed `repo-fetch`, `repo-sequencer`; file classes (`GENERATED`, `API_SURFACE`, `ADMISSION_CRITICAL`) and the "e2e gate" check name move from code to the context pack |
-| `SOUL.md`, README, image and launcher names (`kyverno`, `kyverno-assistant`) | neutral names; Kyverno becomes the first context pack |
-| hard-coded Kyverno hosts and paths in the sandbox policy | derived from `ASSISTANT_REPOS`; extra hosts listed in the pack |
+| `KYVERNO_REPO` and the other `KYVERNO_*` settings | `ASSISTANT_REPO` and `ASSISTANT_*`; There is no default repository |
+| File classes, the e2e gate, bot names, `kyverno/api` and the milestone format in `sequencer.py` and `fetch.py` | The `maintainer:` section of `container/org/<name>/org.yaml`, read by `plugins/repo-intel/pack.py`. No pack means no file classes and no gate |
+| `skills/kyverno-context` | A generic `repo-context` skill, plus `container/org/kyverno/facts.md` for Kyverno's prose. The `repo_pack` tool hands both to the agent |
+| `plugins/kyverno-fetch` and `plugins/kyverno-sequencer` | One plugin, `plugins/repo-intel` |
+| Launcher, sandbox, container and profile names | `container/assistant`, `assistant-maint`, `assistant-contrib`, profiles `maintainer` and `contributor`. |
+| `--push-to-fork` allowing forks named kyverno, website and policies | A fork of `ASSISTANT_REPO`, or whatever `ASSISTANT_PUSH_REPOS` names |
+| Choosing the pack | `container/assistant --build --org NAME` bakes `container/org/NAME/` into an image |
 
-A **context pack** is a directory (`contexts/<org>/`) with `context.yaml` (milestone naming, release branches,
-check names to treat as infra, file-class globs, codegen directories), and optional `facts.md` for prose the
-agent should know. `contexts/kyverno/` is built from what `kyverno-context` and the sequencer hold now; a new
-org adds its own directory and points `ASSISTANT_CONTEXT` at it. The profile install copies it in the way it
-copies skills.
+Kept on purpose: `/opt/kyverno`, which the sandbox policy keeps read-only to protect the safety hooks.
+
+Still to do: the contributor assistant on the same pack (without the required ladder), sandbox policy hosts derived
+from the pack, and reading the repository's agent docs live instead of the install-time cache.
 
 The assistants stay human-invoked and still cannot merge; none of this changes the safety model.
 
 ## Order of work
 
-1. **Done in this change:** `.github/actions/pr-management` ported, `adopt-ci-templates/` caller workflows and config, `scripts/adopt-ci.sh`,
-   `NOTICE` for the Apache-2.0 source, this document.
-2. **Done:** `scripts/adopt-ci.sh`, one command that opens the adoption PR in each named repository; see
-   [`adopting-actions.md`](adopting-actions.md).
-3. Later, only if wanted: `security-triage`, `flaky-tests`, `vuln-scan`.
-4. After `feat/profiles-contributor` merges: neutral names, `ASSISTANT_REPOS`, `repo-context` skill, plugin
-   renames, and `contexts/kyverno/`.
+1. **Done:** `.github/actions/pr-management` ported, `adopt-ci-templates/` caller workflows and config,
+   `scripts/adopt-ci.sh` (one command opens the adoption PR in each named repository, see
+   [`adopting-actions.md`](adopting-actions.md)), and `issue-management`.
+2. **Done:** the maintainer assistant on the organisation pack, with neutral names and settings.
+3. Next: the contributor assistant on the pack; then the plugin work in the README's roadmap.
+4. Later, only if wanted: `security-triage`, `flaky-tests`, `vuln-scan`.
 5. Move Kyverno repos from #18275's copy to `kyverno/assistant/.github/actions/pr-management@<sha>` once it is merged
    and this repo has a tagged, reviewed commit to pin.
 

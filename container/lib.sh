@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# Shared by the two launchers, container/kyverno (OpenShell) and container/kyverno-docker (--no-openshell).
+# Shared by the two launchers, container/assistant (OpenShell) and container/assistant-docker (--no-openshell).
 # Sourced, never run. The caller sets HERE, REPO_ROOT, IMAGE, BUILD and UPGRADE first, and defines
 # instance_exists (is the sandbox or container already there?) and INSTANCE (its name).
 
@@ -26,15 +26,16 @@ provider_env_var() {
 
 # What differs between the two assistants, for both launchers. They share the image, not the sandbox (or container),
 # the GitHub token or the state. Sets HERMES_PROFILE, PROVIDER and PROVIDER_FILE (OpenShell), TOKEN_KEY (the name the
-# token has in the secrets file without OpenShell), LOGIN_VAR, DEFAULT_NAME and DEFAULT_DOCKER_NAME, and the wording.
+# token has in the secrets file without OpenShell), LOGIN_VAR, DEFAULT_NAME (the default name of that profile's instance) and the wording. 
 # Picks the profile when --profile was not given: the one you already have a sandbox for, else it asks (on a terminal)
 # or falls back to maintainer. Args: names of the existing sandboxes or containers, then the maintainer and the
-# contributor default names.
+# contributor default names (NAME_M and NAME_C, which select_profile uses).
 choose_profile() {
-  [ -n "$KIND" ] && return 0
   local existing="$1" m="$2" c="$3" has_m=0 has_c=0 choice
+  NAME_M="$m"; NAME_C="$c"
   grep -qx "$m" <<<"$existing" && has_m=1
   grep -qx "$c" <<<"$existing" && has_c=1
+  [ -n "$KIND" ] && return 0
   if [ "$has_m$has_c" = 10 ]; then
     KIND=maintainer; info "starting the maintainer assistant, the only one you have (--profile contributor for the other)"; return 0
   fi
@@ -57,35 +58,57 @@ choose_profile() {
 select_profile() {
   case "$1" in
     maintainer)
-      HERMES_PROFILE=kyverno; PROVIDER=kyverno-repo-github; PROVIDER_FILE=repo-github.yaml
+      HERMES_PROFILE=maintainer; PROVIDER=assistant-repo-github; PROVIDER_FILE=repo-github.yaml
       TOKEN_KEY=REPO_GITHUB_TOKEN; LOGIN_VAR=MAINTAINER_GITHUB_LOGIN
-      DEFAULT_NAME=kyverno-assistant; DEFAULT_DOCKER_NAME=kyverno-assistant-docker
-      REPO_ASK="Repo to manage (owner/repo) [kyverno/kyverno]: "
+      DEFAULT_NAME="$NAME_M"
+      REPO_ASK="Repo to manage (owner/repo): "
       TOKEN_SCOPE="the assistant still cannot merge."
       TOKEN_PASTE_HELP="Paste your fine-grained GitHub token (see README step 1)." ;;
     contributor)
-      HERMES_PROFILE=kyverno-contributor; PROVIDER=kyverno-contributor-github; PROVIDER_FILE=repo-github-contributor.yaml
+      HERMES_PROFILE=contributor; PROVIDER=assistant-contributor-github; PROVIDER_FILE=repo-github-contributor.yaml
       TOKEN_KEY=CONTRIBUTOR_REPO_GITHUB_TOKEN; LOGIN_VAR=CONTRIBUTOR_GITHUB_LOGIN
-      DEFAULT_NAME=kyverno-contributor; DEFAULT_DOCKER_NAME=kyverno-contributor-docker
-      REPO_ASK="Repo you contribute to (owner/repo) [kyverno/kyverno]: "
+      DEFAULT_NAME="$NAME_C"
+      REPO_ASK="Repo you contribute to (owner/repo): "
       TOKEN_SCOPE="the assistant can only read, comment, and open a PR from your fork."
-      TOKEN_PASTE_HELP="Paste a fine-grained GitHub token of your own account (public repositories, read-only, is enough to read; commenting, and opening a PR, on kyverno repositories need a token that can write there)." ;;
+      TOKEN_PASTE_HELP="Paste a fine-grained GitHub token of your own account (public repositories, read-only, is enough to read; commenting, and opening a PR, on the repository need a token that can write there)." ;;
     *) echo "unknown profile '$1' (maintainer or contributor)" >&2; exit 2 ;;
   esac
+}
+
+# The repository an existing instance is set up for. On later runs the host does not know it: it is in the instance's
+# profile .env (ASSISTANT_REPO). Fills REPO if it is empty; leaves it empty if it
+# cannot be read. Needs instance_exec and instance_exists.
+repo_from_instance() {
+  [ -z "${REPO:-}" ] || return 0
+  instance_exists || return 0
+  REPO="$(instance_exec sh -c "grep -E '^ASSISTANT_REPO=' /opt/hermes-home/.hermes/profiles/$HERMES_PROFILE/.env 2>/dev/null | head -n 1 | cut -d= -f2-" 2>/dev/null)" || REPO=""
+  valid_repo "$REPO" 2>/dev/null || REPO=""
+  return 0
 }
 
 # What is yours across an --upgrade: memory, chat history, your repo and username, the Copilot sign-in, the model you
 # chose. Paths under the profile directory. The profile itself (skills, hooks, plugins, settings) comes from the new image.
 # shellcheck disable=SC2034  # used by the launchers that source this file
-STATE_FILES=".env config.yaml .kyverno-model-chosen mnemosyne/data memories sessions kyverno-dashboard kyverno-contributor state.db state.db-wal state.db-shm"
+STATE_FILES=".env config.yaml .kyverno-model-chosen mnemosyne/data memories sessions maintainer-dashboard contributor-state state.db state.db-wal state.db-shm"
 
 # Build the image from this checkout (--build), or pull it when it is missing or --upgrade asks for the newest.
+# --org NAME (or ASSISTANT_ORG) picks the organisation pack, container/org/NAME/, to bake into a build; the default is
+# kyverno's, the worked example.
 ensure_image() {
+  ORG_PACK="${ORG_PACK:-${ASSISTANT_ORG:-kyverno}}"
+  if [[ ! "$ORG_PACK" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then fail "'$ORG_PACK' is not a valid pack name"; exit 2; fi
+  if [ "$BUILD" != 1 ] && [ "$ORG_PACK" != kyverno ]; then
+    fail "--org NAME bakes your pack into an image you build: add --build (the published image carries Kyverno's pack)"; exit 2
+  fi
+  if [ "$BUILD" = 1 ] && [ ! -f "$REPO_ROOT/container/org/$ORG_PACK/org.yaml" ]; then
+    fail "no pack at container/org/$ORG_PACK/org.yaml (see docs/organisation-pack.md)"; exit 2
+  fi
   if [ "$BUILD" = 1 ]; then
     [ -f "$REPO_ROOT/container/Dockerfile" ] || { fail "--build needs a checkout of the repository (this launcher was taken from an image)"; exit 1; }
-    IMAGE="kyverno-assistant:dev"
+    IMAGE="assistant:dev"
     info "building $IMAGE from this checkout (the first build takes several minutes)..."
-    docker build -f "$REPO_ROOT/container/Dockerfile" -t "$IMAGE" "$REPO_ROOT" || { fail "image build failed"; exit 1; }
+    docker build -f "$REPO_ROOT/container/Dockerfile" -t "$IMAGE" --build-arg "ORG_PACK=$ORG_PACK" "$REPO_ROOT" \
+      || { fail "image build failed"; exit 1; }
     if [ "$UPGRADE" != 1 ] && instance_exists; then
       info "note: '$INSTANCE' already exists and keeps running the image it was made from; add --upgrade to switch it to this build"
     fi
@@ -109,8 +132,8 @@ ensure_image() {
 # token_note_gh (printed under the gh option) and token_note_paste (printed before the paste prompt), and picks the
 # default option in TOKEN_DEFAULT (1 = gh, 2 = paste).
 acquire_github_token() {
-  [ -z "$REPO" ] && read -r -p "  ${REPO_ASK:-Repo to manage (owner/repo) [kyverno/kyverno]: }" REPO
-  REPO="${REPO:-kyverno/kyverno}"
+  [ -z "$REPO" ] && read -r -p "  ${REPO_ASK:-Repo to manage (owner/repo): }" REPO
+  [ -n "$REPO" ] || { fail "no repository: type owner/repo, or set ASSISTANT_REPO"; exit 1; }
   valid_repo "$REPO" || { fail "'$REPO' is not an owner/repo name (letters, digits, dots, dashes, underscores)"; exit 1; }
   PAT=""
   local method="paste" choice="" code
@@ -162,7 +185,7 @@ acquire_github_token() {
   fi
 }
 
-# --- pushing to your own fork (container/kyverno --push-to-fork) ---
+# --- pushing to your own fork (container/assistant --push-to-fork) ---
 # The login a GitHub token belongs to. The token goes in through stdin, so it never shows in a process list.
 token_login() {
   printf 'header = "Authorization: Bearer %s"\n' "$1" \
@@ -176,8 +199,8 @@ token_login() {
 git_push_profile() {
   local login="$1" t; shift
   cat <<EOF
-id: kyverno-git-push
-display_name: Kyverno assistant git push
+id: assistant-git-push
+display_name: assistant git push
 description: Lets the sandbox push branches to ${login}'s own forks (and a maintainer's own repository), and nowhere else
 category: source_control
 credentials:

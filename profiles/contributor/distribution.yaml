@@ -1,6 +1,6 @@
-name: kyverno-contributor
+name: contributor-assistant
 version: 0.1.0
-description: "A coach for people contributing to Kyverno: finds work worth doing, explains how the code fits together, prepares evidence-backed PRs, makes review feedback understandable, and tracks the path from first PR to reviewer"
+description: "A coach for people contributing to an open-source project: finds work worth doing, explains how the code fits together, prepares evidence-backed PRs, makes review feedback understandable, and tracks the path from first PR to reviewer"
 hermes_requires: ">=0.12.0"
 author: "Suhaani Agarwal"
 license: "Apache-2.0"
@@ -12,12 +12,12 @@ env_requires:
   - name: CONTRIBUTOR_GITHUB_LOGIN
     description: "Your GitHub username: used to find your PRs, reviews and journey"
     required: true
-  - name: KYVERNO_REPO
-    description: "owner/repo you contribute to (e.g. kyverno/kyverno)"
+  - name: ASSISTANT_REPO
+    description: "owner/repo you contribute to (for example your-org/your-repo)"
     required: true
   - name: ANTHROPIC_API_KEY
-    description: "Optional. Anthropic API key; or choose any provider with `hermes -p kyverno-contributor model`."
+    description: "Optional. Anthropic API key; or choose any provider with `hermes -p contributor model`."
     required: false
   - name: COPILOT_GITHUB_TOKEN
-    description: "Optional. Copilot PAT (Copilot Requests permission), or sign in with `hermes -p kyverno-contributor model`."
+    description: "Optional. Copilot PAT (Copilot Requests permission), or sign in with `hermes -p contributor model`."
     required: false

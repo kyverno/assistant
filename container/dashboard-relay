@@ -1,7 +1,7 @@
 #!/usr/bin/python3 -I
 """Forward one TCP port to the Hermes dashboard, which listens on 127.0.0.1 inside the container.
 
-Used only without OpenShell (container/kyverno --no-openshell). Docker can publish a port only if something listens on
+Used only without OpenShell (container/assistant --no-openshell). Docker can publish a port only if something listens on
 the container's own address, but Hermes refuses a dashboard on a non-loopback address unless an auth provider is set up.
 So the dashboard stays on loopback and this relay is the only thing on the container's address. The launcher publishes
 it on 127.0.0.1 of your machine, on a network of its own that no other container joins.

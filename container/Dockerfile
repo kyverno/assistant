@@ -1,5 +1,5 @@
-# The Kyverno assistant as one OpenShell sandbox image: Hermes (pinned) plus the maintainer profile.
-# Build from the repo root:  docker build -f container/Dockerfile -t kyverno-assistant:dev .
+# The assistant as one OpenShell sandbox image: Hermes (pinned) plus the maintainer profile.
+# Build from the repo root:  docker build -f container/Dockerfile -t assistant:dev .
 #
 # Two stages. "build" installs and sets everything up, then removes what the finished image does not need
 # (Python environments that Hermes' installer and plugin installs leave behind, and a download cache). "final"
@@ -47,12 +47,16 @@ COPY profiles/contributor/hooks   /opt/kyverno/profiles/contributor/hooks
 COPY profiles/contributor/plugins /opt/kyverno/profiles/contributor/plugins
 COPY profiles/contributor/skills  /opt/kyverno/profiles/contributor/skills
 COPY profiles/contributor/cron    /opt/kyverno/profiles/contributor/cron
-COPY profiles/contributor/org     /opt/kyverno/profiles/contributor/org
+# The organisation pack both profiles read (one source, installed with each profile as org/).
+# Which pack: container/org/<ORG_PACK>/ (build with `container/assistant --build --org NAME`, or `make image ORG=NAME`).
+ARG ORG_PACK=kyverno
+COPY container/org/${ORG_PACK} /opt/kyverno/profiles/maintainer/org
+COPY container/org/${ORG_PACK} /opt/kyverno/profiles/contributor/org
 COPY profiles/contributor/scripts /opt/kyverno/profiles/contributor/scripts
 # The terminal runs locally inside the sandbox here, not over ssh into a second one.
 COPY container/hooks/require-sandbox-terminal.sh /opt/kyverno/profiles/maintainer/hooks/require-sandbox-terminal.sh
 COPY container/hooks/require-sandbox-terminal.sh /opt/kyverno/profiles/contributor/hooks/require-sandbox-terminal.sh
-# Pushes from the terminal go to the user's own fork only (see container/kyverno --push-to-fork); both profiles use this hook.
+# Pushes from the terminal go to the user's own fork only (see container/assistant --push-to-fork); both profiles use this hook.
 COPY container/hooks/git-push-guard.py /opt/kyverno/profiles/maintainer/hooks/git-push-guard.py
 COPY container/hooks/git-push-guard.py /opt/kyverno/profiles/contributor/hooks/git-push-guard.py
 # The memory plugin's approval gate has a gap that the maintainer profile's hook closes; both profiles use that one hook.
@@ -65,12 +69,12 @@ RUN chmod 755 /opt/kyverno/profiles/*/hooks/* && chmod -R a+rX /opt/kyverno
 # (uid 1000), so everything it writes into Hermes' home is already writable at runtime.
 USER 1000:1000
 RUN export HERMES_HOME=/opt/hermes-home/.hermes \
-    && hermes profile install /opt/kyverno/profiles/maintainer --name kyverno -y \
-    && printf 'y\n' | script -qec "hermes -p kyverno plugins install mnemosyne --enable" /dev/null \
-    && PLUGINS="$(hermes -p kyverno plugins list 2>&1)" \
+    && hermes profile install /opt/kyverno/profiles/maintainer --name maintainer -y \
+    && printf 'y\n' | script -qec "hermes -p maintainer plugins install mnemosyne --enable" /dev/null \
+    && PLUGINS="$(hermes -p maintainer plugins list 2>&1)" \
     && printf '%s\n' "$PLUGINS" | grep -q 'mnemosyne.*enabled' \
-    && hermes profile install /opt/kyverno/profiles/contributor --name kyverno-contributor -y \
-    && PLUGINS="$(hermes -p kyverno-contributor plugins list 2>&1)" \
+    && hermes profile install /opt/kyverno/profiles/contributor --name contributor -y \
+    && PLUGINS="$(hermes -p contributor plugins list 2>&1)" \
     && printf '%s\n' "$PLUGINS" | grep -q 'mnemosyne.*enabled'
 # The second profile does not run `plugins install mnemosyne`: that re-resolves Hermes' dependencies and builds a whole
 # second Python environment (37 minutes and gigabytes). The plugin is already in the shared environment and the
@@ -101,11 +105,11 @@ RUN export HERMES_HOME=/opt/hermes-home/.hermes \
 RUN export HERMES_HOME=/opt/hermes-home/.hermes \
     && PY="$(ls -d /opt/hermes-home/.hermes/tools/python-*/bin/python3 | head -n 1)" \
     && UV="$(find /opt/hermes-home/.hermes/tools -name uv -type f -print -quit)" \
-    && ACTIVE="$(HERMES_HOME=$HERMES_HOME/profiles/kyverno "$PY" -I -c 'import sys; sys.path.insert(0, "/opt/hermes"); import hermes_bootstrap, mnemosyne_hermes as m; print(m.__file__.split("/lib/python")[0])' | tail -n 1)" \
+    && ACTIVE="$(HERMES_HOME=$HERMES_HOME/profiles/maintainer "$PY" -I -c 'import sys; sys.path.insert(0, "/opt/hermes"); import hermes_bootstrap, mnemosyne_hermes as m; print(m.__file__.split("/lib/python")[0])' | tail -n 1)" \
     && "$UV" pip install --python "$ACTIVE/bin/python" --prerelease=allow "mnemosyne-hermes==0.7.3" "mnemosyne-memory==4.0.0b3" "anthropic==0.87.0" "PyJWT[crypto]==2.14.0" \
     && "$UV" pip install --python "$ACTIVE/bin/python" --no-deps "certifi==2026.10.19" "Pillow==13.0.0" \
     && "$ACTIVE/bin/python" -I -c 'import certifi, PIL; from PIL import Image; image = Image.new("RGB", (2, 2)); assert image.resize((1, 1)).size == (1, 1); assert certifi.__version__ == "2026.10.19"; assert PIL.__version__ == "13.0.0"; print("certifi", certifi.__version__, "| Pillow", PIL.__version__, "| image resize passed")' \
-    && HERMES_HOME=$HERMES_HOME/profiles/kyverno "$PY" -I -c '\
+    && HERMES_HOME=$HERMES_HOME/profiles/maintainer "$PY" -I -c '\
 import sys; sys.path.insert(0, "/opt/hermes"); import hermes_bootstrap, anthropic; \
 from plugins.memory import load_memory_provider; \
 p = load_memory_provider("mnemosyne"); \
@@ -119,19 +123,19 @@ sys.exit(0 if p else 1)'
 # Download it now, into that same folder (the contributor profile reads the same files through a symlink).
 RUN export HERMES_HOME=/opt/hermes-home/.hermes \
     && PY="$(ls -d /opt/hermes-home/.hermes/tools/python-*/bin/python3 | head -n 1)" \
-    && "$PY" -I -c 'import sys; sys.path.insert(0, "/opt/hermes"); import hermes_bootstrap; from fastembed import TextEmbedding; v = list(TextEmbedding("BAAI/bge-small-en-v1.5", cache_dir="/opt/hermes-home/.hermes/profiles/kyverno/cache/fastembed").embed(["warm up"]))[0]; print("embedding model ready, dimensions:", len(v)); sys.exit(0 if len(v) == 384 else 1)' \
-    && mkdir -p /opt/hermes-home/.hermes/profiles/kyverno-contributor/cache \
-    && ln -s /opt/hermes-home/.hermes/profiles/kyverno/cache/fastembed /opt/hermes-home/.hermes/profiles/kyverno-contributor/cache/fastembed
+    && "$PY" -I -c 'import sys; sys.path.insert(0, "/opt/hermes"); import hermes_bootstrap; from fastembed import TextEmbedding; v = list(TextEmbedding("BAAI/bge-small-en-v1.5", cache_dir="/opt/hermes-home/.hermes/profiles/maintainer/cache/fastembed").embed(["warm up"]))[0]; print("embedding model ready, dimensions:", len(v)); sys.exit(0 if len(v) == 384 else 1)' \
+    && mkdir -p /opt/hermes-home/.hermes/profiles/contributor/cache \
+    && ln -s /opt/hermes-home/.hermes/profiles/maintainer/cache/fastembed /opt/hermes-home/.hermes/profiles/contributor/cache/fastembed
 
 # The rest of the one-time profile setup (skills, hook paths, terminal and Slack settings): see the script.
 COPY --chmod=755 container/setup-profile.sh /usr/local/bin/kyverno-setup-profile
-RUN kyverno-setup-profile maintainer kyverno && kyverno-setup-profile contributor kyverno-contributor
+RUN kyverno-setup-profile maintainer maintainer && kyverno-setup-profile contributor contributor
 
 # Keep certifi in pip's embedded copies and ensurepip's wheel free of the same vulnerable release.
 RUN export HERMES_HOME=/opt/hermes-home/.hermes \
     && UV="$(find /opt/hermes-home/.hermes/tools -name uv -type f -print -quit)" \
     && PY="$(ls -d /opt/hermes-home/.hermes/tools/python-*/bin/python3 | head -n 1)" \
-    && ACTIVE="$(HERMES_HOME=$HERMES_HOME/profiles/kyverno "$PY" -I -c 'import sys; sys.path.insert(0, "/opt/hermes"); import hermes_bootstrap, mnemosyne_hermes as m; print(m.__file__.split("/lib/python")[0])' | tail -n 1)" \
+    && ACTIVE="$(HERMES_HOME=$HERMES_HOME/profiles/maintainer "$PY" -I -c 'import sys; sys.path.insert(0, "/opt/hermes"); import hermes_bootstrap, mnemosyne_hermes as m; print(m.__file__.split("/lib/python")[0])' | tail -n 1)" \
     && "$UV" pip install --python "$ACTIVE/bin/python" --upgrade "pip==26.2.2" \
     && for python in /opt/hermes-home/.hermes/tools/python-*/bin/python3 /opt/hermes-home/.local/share/uv/python/cpython-*/bin/python3; do \
          [ -x "$python" ] || continue; \
@@ -163,7 +167,7 @@ RUN export HERMES_HOME=/opt/hermes-home/.hermes \
 # what is removed, the proofs in the final stage fail the build.
 RUN export HERMES_HOME=/opt/hermes-home/.hermes \
     && PY="$(ls -d /opt/hermes-home/.hermes/tools/python-*/bin/python3 | head -n 1)" \
-    && ACTIVE_ID="$(HERMES_HOME=$HERMES_HOME/profiles/kyverno "$PY" -I -c 'import sys; sys.path.insert(0, "/opt/hermes"); import hermes_bootstrap, mnemosyne_hermes as m; print(m.__file__.split("/venv/")[0].split("/")[-1])' | tail -n 1)" \
+    && ACTIVE_ID="$(HERMES_HOME=$HERMES_HOME/profiles/maintainer "$PY" -I -c 'import sys; sys.path.insert(0, "/opt/hermes"); import hermes_bootstrap, mnemosyne_hermes as m; print(m.__file__.split("/venv/")[0].split("/")[-1])' | tail -n 1)" \
     && test -n "$ACTIVE_ID" \
     && for d in /opt/hermes-home/.hermes/installs/*/environments/*; do \
          if [ "$(basename "$d")" != "$ACTIVE_ID" ]; then echo "removing superseded environment $(basename "$d")"; rm -rf "$d"; fi; \
@@ -191,12 +195,12 @@ COPY --from=build --chown=1000:1000 /opt/hermes-home /opt/hermes-home
 RUN ln -s /opt/hermes-home/.local/bin/hermes /usr/local/bin/hermes
 COPY --chmod=755 container/kyverno-start container/kyverno-main container/kyverno-env container/dashboard-relay /usr/local/bin/
 # Clone a repository and install the toolchains it declares (Go, Node, the Kyverno CLI), for building and testing in the sandbox.
-COPY --chmod=755 container/kyverno-workspace /usr/local/bin/kyverno-workspace
+COPY --chmod=755 container/assistant-workspace /usr/local/bin/assistant-workspace
 COPY --chmod=755 container/toolchains /usr/local/lib/kyverno/toolchains
 # The launcher, so a user can run the assistant from the image alone, without cloning this repository. It runs on the
 # user's machine, not in the sandbox: `docker run --rm IMAGE tar -C /opt/kyverno -c launcher | tar -x` copies it out.
 # The same release then carries the launcher and the image it starts, so the two cannot drift apart.
-COPY --chmod=755 container/kyverno container/kyverno-docker container/restore-state.sh /opt/kyverno/launcher/
+COPY --chmod=755 container/assistant container/assistant-docker container/restore-state.sh /opt/kyverno/launcher/
 COPY container/lib.sh container/policy.yaml /opt/kyverno/launcher/
 COPY container/providers /opt/kyverno/launcher/providers
 # The workspace folder the agent's terminal starts in. OpenShell makes it itself; plain Docker needs it to exist and be writable.

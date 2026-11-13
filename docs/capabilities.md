@@ -1,4 +1,4 @@
-# What kyverno-assistant can do
+# What the assistant can do
 
 A tour of the assistant's skills with real example prompts. Everything shown
 here maps directly to a skill's actual procedure — see the linked
@@ -199,8 +199,8 @@ A scheduled job ships with the profile (`cron/jobs.json`) — weekday
 mornings, it builds the merge sequence and posts a short digest to your
 Slack channel on its own: what's new since the last digest, and the
 current review order. It arrives paused; `hermes cron resume
-kyverno-review-digest` turns it on, and `hermes cron edit
-kyverno-review-digest --schedule "..."` changes the timing. Each run
+review-digest` turns it on, and `hermes cron edit
+review-digest --schedule "..."` changes the timing. Each run
 remembers its own last output, so the digest says what changed rather than
 repeating the whole list every morning.
 
@@ -232,7 +232,7 @@ won't regenerate now-stale generated files.
 ## Seeing results on the dashboard
 
 Everything the agent presents — PR queue, stale PRs, issue triage, Discussions — and
-every action you confirm is also written to the Kyverno tab of `hermes -p kyverno
+every action you confirm is also written to the Maintainer tab of `hermes -p maintainer
 dashboard`: linked items with verdicts, related PRs/issues, drafted comments, and an
 activity log. Use it to keep the full picture in front of you instead of scrolling the
 chat. See the README's "The dashboard".

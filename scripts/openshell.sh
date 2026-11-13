@@ -11,10 +11,10 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SANDBOX_DIR="$REPO_ROOT/profiles/maintainer/sandbox"      # Dockerfile + policy.yaml
 OPENSHELL_VERSION="${OPENSHELL_VERSION:-v0.1.3}"
-SANDBOX="${KYVERNO_SANDBOX:-kyverno-terminal}"
+SANDBOX="${ASSISTANT_SANDBOX:-kyverno-terminal}"
 IMAGE="kyverno-assistant-terminal:local"
 SSH_HOST="openshell-${SANDBOX}.default"
-AUDIT_DIR="${KYVERNO_AUDIT_DIR:-$HOME/.kyverno-assistant/audit}"
+AUDIT_DIR="${ASSISTANT_AUDIT_DIR:-$HOME/.kyverno-assistant/audit}"
 SSH_CONFIG="$HOME/.ssh/config"
 MARK_BEGIN="# BEGIN kyverno-assistant sandbox"
 MARK_END="# END kyverno-assistant sandbox"

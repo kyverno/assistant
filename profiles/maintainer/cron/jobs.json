@@ -1,10 +1,10 @@
 {
   "jobs": [
     {
-      "id": "kyverno-review-digest",
-      "name": "kyverno-review-digest",
+      "id": "review-digest",
+      "name": "review-digest",
       "_frequency": "Weekdays (Mon-Fri) at 09:00, server-local time. schedule.expr: '0 9 * * 1-5'.",
-      "prompt": "Build the merge sequence for the maintainer's KYVERNO_REPO. Post a short, scannable digest: what changed since the last digest, and the current review order with one-line reasons - not a full brief per PR.",
+      "prompt": "Build the merge sequence for the maintainer's ASSISTANT_REPO. Post a short, scannable digest: what changed since the last digest, and the current review order with one-line reasons - not a full brief per PR.",
       "skills": ["pr-queue"],
       "skill": "pr-queue",
       "model": null,
@@ -44,11 +44,11 @@
       "workdir": null
     },
     {
-      "id": "kyverno-memory-sweep",
-      "name": "kyverno-memory-sweep",
+      "id": "memory-sweep",
+      "name": "memory-sweep",
       "_frequency": "Every 5 days at 07:00, server-local time. schedule.expr: '0 7 */5 * *' (the day-of-month-divisible-by-5 approximation standard cron uses for 'every N days' — mostly every 5 days, with an occasional skip/double at a month boundary).",
-      "prompt": "Silent backend sweep for KYVERNO_REPO, not a maintainer-facing report. Since your last run: (1) find PRs that closed without merging - for each with a known reason (an explicit maintainer comment, or a clear closing comment), mnemosyne_remember a short note: the PR, its topic, and why it didn't merge. (2) Check whether any e2e-failure tracking issue opened or closed - for each, mnemosyne_triple_add(subject=<the touched package-pair if determinable from the merged PRs implicated>, predicate='e2e_failure_opened' or 'e2e_failure_closed', object='<date>, <issue number>'); when a specific merged PR's package combination is clearly implicated, also add a separate triple with predicate='caused_e2e_failure'. Only these five predicates exist - never invent another. If nothing new was found, reply with exactly [SILENT]. If something was found, reply with one short line per new item - this is the only case anything gets posted anywhere.",
-      "skills": ["pr-queue", "kyverno-context"],
+      "prompt": "Silent backend sweep for ASSISTANT_REPO, not a maintainer-facing report. Since your last run: (1) find PRs that closed without merging - for each with a known reason (an explicit maintainer comment, or a clear closing comment), mnemosyne_remember a short note: the PR, its topic, and why it didn't merge. (2) Check whether any e2e-failure tracking issue opened or closed - for each, mnemosyne_triple_add(subject=<the touched package-pair if determinable from the merged PRs implicated>, predicate='gate_failure_opened' or 'gate_failure_closed', object='<date>, <issue number>'); when a specific merged PR's package combination is clearly implicated, also add a separate triple with predicate='caused_gate_failure'. Only these five predicates exist - never invent another. If nothing new was found, reply with exactly [SILENT]. If something was found, reply with one short line per new item - this is the only case anything gets posted anywhere.",
+      "skills": ["pr-queue", "repo-context"],
       "skill": "pr-queue",
       "model": null,
       "provider": null,
@@ -87,9 +87,9 @@
       "workdir": null
     },
     {
-      "id": "kyverno-memory-consolidate",
-      "name": "kyverno-memory-consolidate",
-      "_frequency": "Weekly, Sundays at 06:00, server-local time. schedule.expr: '0 6 * * 0'. Deliberately less frequent than kyverno-memory-sweep — consolidation compresses whatever the sweep already wrote; it doesn't need to run right after every sweep.",
+      "id": "memory-consolidate",
+      "name": "memory-consolidate",
+      "_frequency": "Weekly, Sundays at 06:00, server-local time. schedule.expr: '0 6 * * 0'. Deliberately less frequent than memory-sweep — consolidation compresses whatever the sweep already wrote; it doesn't need to run right after every sweep.",
       "prompt": "Call mnemosyne_sleep to consolidate accumulated memory entries into distilled patterns. This is a purely mechanical maintenance step, not a maintainer-facing report - reply with exactly [SILENT] regardless of outcome.",
       "skills": [],
       "skill": null,
