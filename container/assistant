@@ -23,8 +23,8 @@
 #                  Your cloned repositories and their unpushed work always come along.
 #   --no-attach    set everything up but do not open the chat
 #   --reset        forget the stored GitHub token and ask for it again
-#   --push-to-fork let the assistant push branches to your own fork of ASSISTANT_REPO (set ASSISTANT_PUSH_REPOS
-#                  for others) and, as a maintainer, to the repository you manage, and nowhere else. Never force, never
+#   --push-to-fork let the assistant push branches to your own fork of ASSISTANT_REPO (the policy's fork_repos, or
+#                  ASSISTANT_PUSH_REPOS, for others) and, as a maintainer, to the repository you manage, and nowhere else. Never force, never
 #                  to main. A second credential, kept in OpenShell, asked once.
 #   --no-push      remove that again
 set -uo pipefail
@@ -71,6 +71,7 @@ done
 
 # shellcheck source=container/lib.sh
 . "$HERE/lib.sh"
+policy_check
 
 choose_profile "$(openshell sandbox list 2>/dev/null | awk 'NR>1{print $1}')" assistant-maint assistant-contrib
 select_profile "$KIND"
@@ -217,6 +218,7 @@ if [ "$RESET" = 1 ]; then
   openshell provider delete "$PROVIDER" >/dev/null 2>&1
 fi
 REPO="${ASSISTANT_REPO:-}"
+[ -n "$REPO" ] && resolve_policy "$REPO" "" 1
 LOGIN="${!LOGIN_VAR:-}"
 if openshell provider get "$PROVIDER" >/dev/null 2>&1; then
   pass "GitHub token already stored in OpenShell (use --reset to replace it)"
@@ -268,10 +270,12 @@ if [ "$PUSH" = 1 ]; then
   [ -z "$PUSH_LOGIN" ] && { fail "could not tell whose forks to allow: set ASSISTANT_PUSH_LOGIN to your GitHub username"; exit 1; }
   PUSH_REPOS=()
   repo_from_instance    # on a later run the repository is in the sandbox's profile, not in your environment
-  # Forks it may push to: the names in ASSISTANT_PUSH_REPOS, else the repository you named (ASSISTANT_REPO).
-  [ -z "${ASSISTANT_PUSH_REPOS:-}" ] && [ -z "$REPO" ] \
+  # Forks it may push to: the names in ASSISTANT_PUSH_REPOS, else the policy's fork_repos, else the repository you named (ASSISTANT_REPO).
+  FORK_REPOS="${ASSISTANT_PUSH_REPOS:-$(policy_list fork_repos | tr '\n' ' ')}"
+  [ -z "${FORK_REPOS// /}" ] && FORK_REPOS="${REPO#*/}"
+  [ -z "${FORK_REPOS// /}" ] \
     && { fail "do not know which forks to allow: set ASSISTANT_REPO (owner/repo) or ASSISTANT_PUSH_REPOS (repository names, space-separated)"; exit 1; }
-  for r in ${ASSISTANT_PUSH_REPOS:-${REPO#*/}}; do
+  for r in $FORK_REPOS; do
     valid_repo "$PUSH_LOGIN/$r" || { fail "'$r' is not a repository name"; exit 1; }
     PUSH_REPOS+=("$PUSH_LOGIN/$r")
   done

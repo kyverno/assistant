@@ -201,7 +201,7 @@ COPY --chmod=755 container/toolchains /usr/local/lib/kyverno/toolchains
 # user's machine, not in the sandbox: `docker run --rm IMAGE tar -C /opt/kyverno -c launcher | tar -x` copies it out.
 # The same release then carries the launcher and the image it starts, so the two cannot drift apart.
 COPY --chmod=755 container/assistant container/assistant-docker container/restore-state.sh /opt/kyverno/launcher/
-COPY container/lib.sh container/policy.yaml /opt/kyverno/launcher/
+COPY container/lib.sh container/policy.yaml container/assistant-policy.yaml /opt/kyverno/launcher/
 COPY container/providers /opt/kyverno/launcher/providers
 # The workspace folder the agent's terminal starts in. OpenShell makes it itself; plain Docker needs it to exist and be writable.
 RUN install -d -o 1000 -g 1000 /sandbox
