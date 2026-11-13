@@ -72,6 +72,24 @@ org = rules.load_org()
 print("organisation file loads:", org["name"], "|", len(tools.TOOLS), "tools")
 PYEOF
 
+echo "== maintainer: organisation pack"
+# The pack is in the image, where the sandbox policy keeps it read-only, and in the profile; the plugin reads the image copy.
+test -f /opt/kyverno/profiles/maintainer/org/org.yaml
+test -f "$HERMES_HOME/profiles/maintainer/org/org.yaml"
+test ! -w /opt/kyverno/profiles/maintainer/org/org.yaml
+HERMES_HOME=$HERMES_HOME/profiles/maintainer "$PY" -I - <<'PYEOF'
+import importlib.util, sys
+sys.path.insert(0, "/opt/hermes"); import hermes_bootstrap
+plugin = "/opt/hermes-home/.hermes/profiles/maintainer/plugins/repo-intel"
+spec = importlib.util.spec_from_file_location("repo_intel", plugin + "/__init__.py", submodule_search_locations=[plugin])
+module = importlib.util.module_from_spec(spec); sys.modules["repo_intel"] = module; spec.loader.exec_module(module)
+from repo_intel import pack
+rules = pack.load()
+assert rules.source == str(pack.IMAGE_PACK), "the pack was not read from the image copy: %s" % rules.source
+assert rules.generated and rules.gates, "the pack loaded empty"
+print("organisation pack loads from the image copy:", rules.source, "|", len(rules.gates), "gate,", len(rules.generated), "generated globs")
+PYEOF
+
 echo "== workspace: script, toolchains and the shared skill"
 test -x /usr/local/bin/assistant-workspace
 test -x /usr/local/bin/kyverno-workspace    # the old name, kept as an alias

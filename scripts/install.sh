@@ -381,6 +381,32 @@ for var in ('ASSISTANT_REPO', 'MAINTAINER_GITHUB_LOGIN', 'SLACK_HOME_CHANNEL'):
 "
 pass "skill instructions resolved to real env values"
 
+step "3b. Organisation pack"
+# Every rule and fact about your repository that the plugins use (file classes, the merge gate, which labels mean ready)
+# is the pack in container/org/<name>/. The profile does not carry it, so it is copied in here, on every run.
+# ASSISTANT_ORG names it; without that, the one named after the repository's owner (acme/repo uses container/org/acme/).
+ORG="${ASSISTANT_ORG:-}"
+if [ -z "$ORG" ]; then
+  ORG_OWNER="$(env_get ASSISTANT_REPO)"; ORG_OWNER="${ORG_OWNER%%/*}"
+  [ -n "$ORG_OWNER" ] && [ -f "$REPO_ROOT/container/org/$ORG_OWNER/org.yaml" ] && ORG="$ORG_OWNER"
+fi
+if [ -z "$ORG" ]; then
+  if [ -f "$PROFILE_DIR/org/org.yaml" ]; then
+    info "no pack chosen for this repository (set ASSISTANT_ORG=<name>); keeping the one already in the profile"
+  else
+    info "no organisation pack for this repository: the assistant still works, but reads every file as ordinary and knows no"
+    info "merge gate. Add container/org/<name>/org.yaml (docs/organisation-pack.md) and re-run with ASSISTANT_ORG=<name>."
+  fi
+elif [[ ! "$ORG" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+  fail "'$ORG' is not a valid pack name"; exit 1
+elif [ ! -f "$REPO_ROOT/container/org/$ORG/org.yaml" ]; then
+  fail "no pack at container/org/$ORG/org.yaml (see docs/organisation-pack.md)"; exit 1
+else
+  rm -rf "$PROFILE_DIR/org" && cp -R "$REPO_ROOT/container/org/$ORG" "$PROFILE_DIR/org" \
+    && pass "organisation pack '$ORG' installed from container/org/$ORG" \
+    || { fail "could not copy the pack into $PROFILE_DIR/org"; exit 1; }
+fi
+
 step "4. AGENTS.md cache"
 
 # Discovers every AGENTS.md/ARCHITECTURE.md in the repo (not just api/AGENTS.md — kyverno/kyverno
