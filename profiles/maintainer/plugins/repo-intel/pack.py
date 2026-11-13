@@ -25,6 +25,9 @@ _KNOWN: dict[str, Optional[tuple[str, ...]]] = {
     "milestones": ("title_format", "open_milestone_label", "issue_urgency_labels"),
 }
 
+# The shared `readiness:` section: the maintainer reads three of these, the contributor also reads checks_file.
+_READINESS_KEYS = ("ready_labels", "attention_labels", "infra_checks", "checks_file")
+
 # Highest tier first: a file that matches several is reported as the first.
 _TIERS = (("generated", "GENERATED"), ("api_surface", "API_SURFACE"), ("critical", "ADMISSION_CRITICAL"),
           ("test_only", "TEST_ONLY"))
@@ -39,8 +42,14 @@ def _home() -> Path:
         return Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes")
 
 
+# The pack baked into the image. The sandbox policy keeps /opt/kyverno read-only, so the agent cannot rewrite it, unlike
+# the copy `hermes profile install` puts in Hermes' writable home. It is read first; the profile copy is for host
+# installs, where nothing is baked.
+IMAGE_PACK = Path("/opt/kyverno/profiles/maintainer/org/org.yaml")
+
+
 def candidate_paths() -> list[Path]:
-    paths = []
+    paths = [IMAGE_PACK]
     if os.environ.get("ASSISTANT_ORG_FILE") or os.environ.get("KYVERNO_ORG_FILE"):
         paths.append(Path(os.environ.get("ASSISTANT_ORG_FILE") or os.environ["KYVERNO_ORG_FILE"]))
     paths.append(_home() / "org" / "org.yaml")
@@ -144,7 +153,7 @@ class Rules:
 
     def classify(self, path: str) -> str:
         """'GENERATED' | 'API_SURFACE' | 'ADMISSION_CRITICAL' | 'TEST_ONLY' | 'STANDARD'."""
-        if path not in self.generated_exceptions and _any(path, self.generated):
+        if not _any(path, self.generated_exceptions) and _any(path, self.generated):
             return "GENERATED"
         for key, tier in _TIERS[1:]:
             if _any(path, getattr(self, key)):
@@ -171,6 +180,14 @@ def _strings(value: Any, where: str) -> tuple[str, ...]:
     return tuple(value)
 
 
+def _text(value: Any, where: str) -> Optional[str]:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise PackError(f"{where}: expected text")
+    return value
+
+
 def _check_keys(section: Any, allowed: tuple[str, ...], where: str) -> dict:
     if section is None:
         return {}
@@ -182,20 +199,33 @@ def _check_keys(section: Any, allowed: tuple[str, ...], where: str) -> dict:
     return section
 
 
-def parse(data: dict, source: Optional[str] = None, facts: str = "") -> Rules:
-    m = _check_keys((data or {}).get("maintainer"), tuple(_KNOWN), "maintainer")
+def parse(data: Any, source: Optional[str] = None, facts: str = "") -> Rules:
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        raise PackError(f"the file must be a mapping of keys, not a {type(data).__name__}")
+    m = _check_keys(data.get("maintainer"), tuple(_KNOWN), "maintainer")
     fc = _check_keys(m.get("file_classes"), _FILE_CLASSES, "maintainer.file_classes")
     gi = _check_keys(m.get("generated_inputs"), _KNOWN["generated_inputs"], "maintainer.generated_inputs")
     db = _check_keys(m.get("dependency_bots"), _KNOWN["dependency_bots"], "maintainer.dependency_bots")
     ms = _check_keys(m.get("milestones"), _KNOWN["milestones"], "maintainer.milestones")
 
-    readiness = (data or {}).get("readiness") or {}
+    readiness = _check_keys(data.get("readiness"), _READINESS_KEYS, "readiness")
+    _text(readiness.get("checks_file"), "readiness.checks_file")
+    raw_gates = m.get("branch_gates")
+    if raw_gates is None:
+        raw_gates = []
+    if not isinstance(raw_gates, list):
+        raise PackError("maintainer.branch_gates: expected a list")
     gates = []
-    for i, g in enumerate(m.get("branch_gates") or []):
+    for i, g in enumerate(raw_gates):
         g = _check_keys(g, _KNOWN["branch_gates"], f"maintainer.branch_gates[{i}]")
         for required in ("name", "failure_issue_label", "bypass_label"):
             if not g.get(required):
                 raise PackError(f"maintainer.branch_gates[{i}]: {required} is required")
+            _text(g[required], f"maintainer.branch_gates[{i}].{required}")
+        _text(g.get("status_context"), f"maintainer.branch_gates[{i}].status_context")
+        _text(g.get("branch_marker"), f"maintainer.branch_gates[{i}].branch_marker")
         try:
             marker = re.compile(g["branch_marker"]) if g.get("branch_marker") else None
         except re.error as exc:
@@ -212,16 +242,16 @@ def parse(data: dict, source: Optional[str] = None, facts: str = "") -> Rules:
         input_paths=_strings(gi.get("paths"), "maintainer.generated_inputs.paths"),
         input_modules=_strings(gi.get("dependency_modules"), "maintainer.generated_inputs.dependency_modules"),
         codegen_module_globs=_strings(db.get("codegen_module_globs"), "maintainer.dependency_bots.codegen_module_globs"),
-        codegen_kind_label=db.get("codegen_kind_label"),
-        milestone_title_format=ms.get("title_format"),
-        open_milestone_label=ms.get("open_milestone_label"),
+        codegen_kind_label=_text(db.get("codegen_kind_label"), "maintainer.dependency_bots.codegen_kind_label"),
+        milestone_title_format=_text(ms.get("title_format"), "maintainer.milestones.title_format"),
+        open_milestone_label=_text(ms.get("open_milestone_label"), "maintainer.milestones.open_milestone_label"),
         issue_urgency_labels=_strings(ms.get("issue_urgency_labels"), "maintainer.milestones.issue_urgency_labels"),
         ready_labels=_strings(readiness.get("ready_labels"), "readiness.ready_labels"),
         attention_labels=_strings(readiness.get("attention_labels"), "readiness.attention_labels"),
         infra_checks=_strings(readiness.get("infra_checks"), "readiness.infra_checks"),
-        review_bots=_strings((data or {}).get("review_bots"), "review_bots"),
-        agent_docs=_strings((data or {}).get("agent_docs"), "agent_docs"),
-        codeowners=(data or {}).get("codeowners"),
+        review_bots=_strings(data.get("review_bots"), "review_bots"),
+        agent_docs=_strings(data.get("agent_docs"), "agent_docs"),
+        codeowners=_text(data.get("codeowners"), "codeowners"),
         facts=facts,
     )
 
@@ -243,7 +273,7 @@ def load(path: Optional[str] = None) -> Rules:
             try:
                 facts_file = p.parent / "facts.md"
                 facts = facts_file.read_text() if facts_file.is_file() else ""
-                _cache[key] = parse(yaml.safe_load(p.read_text()) or {}, str(p), facts)
+                _cache[key] = parse(yaml.safe_load(p.read_text()), str(p), facts)
             except yaml.YAMLError as exc:
                 raise PackError(f"{p}: {exc}") from exc
             except PackError as exc:
