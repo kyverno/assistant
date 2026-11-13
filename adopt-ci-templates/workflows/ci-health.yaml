@@ -1,0 +1,17 @@
+name: CI health
+
+# Read-only report on how the workflow named in .github/ci-health.json has been doing. It writes the job summary
+# and an artifact and never changes issues, labels or statuses.
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "43 5 * * *"
+
+permissions: {}
+
+jobs:
+  report:
+    permissions:
+      contents: read
+      actions: read
+    uses: kyverno/assistant/.github/workflows/ci-health.yml@<full-commit-SHA>

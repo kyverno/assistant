@@ -97,6 +97,16 @@ has a default) and follows the `ISSUE_AUTOMATION_LIVE` repository variable, so i
 `true`. It is not part of `scripts/adopt-ci.sh` yet. The rules and keys are in
 [`.github/actions/issue-management/README.md`](../.github/actions/issue-management/README.md).
 
+## CI health report
+
+`ci-health` is adopted by hand for now; `scripts/adopt-ci.sh` does not add it. Copy
+`adopt-ci-templates/workflows/ci-health.yaml`, `adopt-ci-templates/workflows/check-ci-health.yaml` and
+`adopt-ci-templates/ci-health.json` into the repository, set `<full-commit-SHA>`, and edit the config (the workflow
+to analyse, how a failed test appears in its log, which error text means infrastructure). It is read-only, so there
+is no preview switch: the workflow writes a job summary and an artifact and changes nothing else. It needs
+`contents: read` and `actions: read`, and an organisation that restricts actions must allow `kyverno/assistant@*`.
+See [`.github/actions/ci-health/README.md`](../.github/actions/ci-health/README.md).
+
 ## Why a script, and what else was considered
 
 | Approach | Used by | Why not the main route |
