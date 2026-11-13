@@ -7,7 +7,8 @@ Repository layout, the Makefile targets, CI and releases.
 ```
 Makefile                 common lint, image build, scan and run targets (make help)
 container/               the sandbox: Dockerfile, launcher, policy, provider profiles (see container/README.md)
-.github/workflows/       builds and publishes the sandbox image
+.github/workflows/       lint, tests, the image build check and the release build
+tests/                   plugin, hook and image tests, with small synthetic fixtures
 profiles/maintainer/     the maintainer profile: distribution.yaml, SOUL.md, config.yaml, hooks/,
                          plugins/, skills/, cron/, sandbox/ (the host install's terminal image and policy)
 profiles/contributor/    the contributor profile: same shape, plus one plugin and scripts/contributor-watch.py
@@ -32,10 +33,22 @@ Run `make help` to see the available commands. The most useful targets are:
 | `make image` | Build `assistant:dev` locally |
 | `make test` | Build the image and run its offline startup, plugin and memory checks |
 | `make scan` | Scan the local image for fixable critical vulnerabilities |
-| `make check` | Run lint and image-build checks |
+| `make unit` | Run the plugin and hook tests (`tests/plugins`, `tests/hooks`); needs only Python and PyYAML |
+| `make image-check` | Build the image and run `tests/image/run.sh` against it |
+| `make check` | Run lint, the unit tests and the image checks |
 | `make run ARGS="--provider anthropic"` | Launch the sandbox using the locally built image |
 
 Override `IMAGE` or `TAG` for a different local image name, for example `make image TAG=debug`.
+
+**What CI checks on a pull request**
+
+| Workflow | Runs when you change | Checks |
+|---|---|---|
+| `container-lint` | `container/`, `tests/image/` | ShellCheck and Hadolint |
+| `test-plugins` | `profiles/`, `container/org/`, `container/hooks/`, `tests/` | The pack, the sequencer, the dashboard and journey state, and the safety hooks, in seconds |
+| `container-build` | `container/`, `profiles/`, `tests/image/` | Builds the image without publishing (so `verify-image.sh` runs), then `tests/image/run.sh`: the launcher as the installer extracts it, another organisation's pack, the hooks inside the image, and state kept across containers |
+
+The tests use small made-up packs and PR lists (`tests/fixtures/`), never recorded GitHub data.
 
 The files below are the maintainer profile's, under `profiles/maintainer/`.
 

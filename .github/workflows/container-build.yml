@@ -1,0 +1,57 @@
+# Builds the sandbox image on every pull request that could change it, without publishing, and runs tests/image/run.sh on
+# the result. The Dockerfile already runs container/verify-image.sh during the build (offline), so a build that finishes
+# has passed those checks; tests/image/run.sh adds what a user meets: the launcher, other organisations' packs, the hooks
+# and state kept across containers. Only amd64 is built here; the release workflow builds both architectures.
+name: container-build
+
+on:
+  pull_request:
+    paths:
+      - "container/**"
+      - "profiles/**"
+      - "tests/image/**"
+      - "tests/fixtures/**"
+      - ".github/workflows/container-build.yml"
+  push:
+    branches: [main]
+    paths:
+      - "container/**"
+      - "profiles/**"
+      - "tests/image/**"
+      - "tests/fixtures/**"
+      - ".github/workflows/container-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build the image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: container/Dockerfile
+          platforms: linux/amd64
+          load: true
+          push: false
+          provenance: false
+          tags: assistant:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Image checks
+        run: tests/image/run.sh assistant:ci
