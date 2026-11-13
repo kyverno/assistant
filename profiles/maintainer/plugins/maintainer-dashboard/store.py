@@ -27,19 +27,7 @@ def _home() -> Path:
 
 
 def state_path() -> Path:
-    """Where the state lives. State from before the rename sits in kyverno-dashboard/; the first caller moves it. Every
-    caller takes the same lock for that, so two processes starting together cannot split the state between two folders."""
-    new, old = _home() / "maintainer-dashboard", _home() / "kyverno-dashboard"
-    if old.is_dir() and not new.exists():
-        _home().mkdir(parents=True, exist_ok=True)
-        with open(_home() / ".dashboard-migrate.lock", "w") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            if old.is_dir() and not new.exists():    # looked again, now that nobody else is moving it
-                try:
-                    old.rename(new)
-                except OSError:
-                    pass
-    return (old if old.is_dir() and not new.exists() else new) / "state.json"
+    return _home() / "maintainer-dashboard" / "state.json"
 
 
 def now() -> str:

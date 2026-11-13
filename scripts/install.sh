@@ -3,13 +3,9 @@
 # same script after each step it asks you to do (fill in .env, etc.) — it
 # detects what's already done and only does what's left.
 set -uo pipefail
-# These settings used to start with KYVERNO_; the old names still work.
-for _v in $(compgen -v KYVERNO_); do _n="ASSISTANT_${_v#KYVERNO_}"; [ -n "${!_n:-}" ] || export "$_n=${!_v}"; done; unset _v _n
 
 PROFILE="${1:-}"
-if [ -z "$PROFILE" ]; then    # an install made before the rename is called kyverno: keep updating that one
-  if [ -d "$HOME/.hermes/profiles/kyverno" ]; then PROFILE=kyverno; else PROFILE=maintainer; fi
-fi
+[ -n "$PROFILE" ] || PROFILE=maintainer
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC="$REPO_ROOT/profiles/maintainer"
 PROFILE_DIR="$HOME/.hermes/profiles/$PROFILE"
@@ -221,11 +217,6 @@ prompt_for() {
   [ -n "$reply" ] && env_set "$key" "$reply"
   return 0
 }
-
-# Older installs called the repo setting KYVERNO_REPO; keep it working under the new name.
-if [ -z "$(env_get ASSISTANT_REPO)" ] && [ -n "$(env_get KYVERNO_REPO)" ]; then
-  env_set ASSISTANT_REPO "$(env_get KYVERNO_REPO)"
-fi
 
 # Older installs called the repo token GITHUB_TOKEN; keep it working under the new name.
 if [ -z "$(env_get REPO_GITHUB_TOKEN)" ] && [ -n "$(env_get GITHUB_TOKEN)" ]; then

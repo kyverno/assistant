@@ -254,9 +254,9 @@ to also carry the downloaded toolchains and build caches (large). From a clone: 
 | Forget the stored GitHub token | `assistant --reset` |
 | Stop the sandbox | `openshell sandbox stop assistant-contrib` (the launcher starts it again) |
 | Delete a sandbox and everything in it | `openshell sandbox delete assistant-contrib` (maintainer: `assistant-maint`) |
-| Delete the stored GitHub token | `openshell provider delete kyverno-contributor-github` (maintainer: `kyverno-repo-github`) |
-| Delete a model key | `openshell provider delete kyverno-anthropic` (or `-openai`, `-nvidia`) |
-| Delete the push token | `openshell provider delete kyverno-git-push` |
+| Delete the stored GitHub token | `openshell provider delete assistant-contributor-github` (maintainer: `assistant-repo-github`) |
+| Delete a model key | `openshell provider delete assistant-anthropic` (or `-openai`, `-nvidia`) |
+| Delete the push token | `openshell provider delete assistant-git-push` |
 | Delete the image | `docker rmi ghcr.io/kyverno/assistant:latest` |
 
 With `--no-openshell`, the clones and toolchains live in a Docker volume that outlives the container:
@@ -279,7 +279,7 @@ With `--no-openshell`, the clones and toolchains live in a Docker volume that ou
 | `Docker Desktop … is older than 4.60` | Update Docker Desktop |
 | A build is very slow or runs out of memory | Raise Docker's memory (Settings → Resources) to at least 4 GB |
 | `sandbox … did not become Ready` | The launcher prints its state and log. Delete the sandbox and run the launcher again |
-| `could not register the provider profile` | OpenShell holds an older copy. Delete the sandbox, the provider and `openshell profile delete kyverno-repo-github` (or `-contributor-github`), then run again |
+| `could not register the provider profile` | OpenShell holds an older copy. Delete the sandbox, the provider and `openshell profile delete assistant-repo-github` (or `-contributor-github`), then run again |
 
 More: the [README troubleshooting table](usage.md#troubleshooting) and [docs/container.md](container.md).
 

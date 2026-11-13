@@ -536,4 +536,4 @@ what to do first. What is built is above. What is planned, in order, is not buil
 | Running on your host instead of a sandbox | [`docs/host-install.md`](docs/host-install.md) |
 | Working on this repository | [`docs/development.md`](docs/development.md) |
 
-Licensed under Apache-2.0. Not affiliated with GitHub, NVIDIA or CNCF.
+Licensed under Apache-2.0.

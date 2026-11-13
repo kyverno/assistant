@@ -1,6 +1,6 @@
 # Model provider key for the assistant, held by OpenShell. The sandbox only sees a placeholder in
 # NVIDIA_API_KEY; the proxy swaps in the real key on requests to integrate.api.nvidia.com, and only from Hermes' Python.
-id: kyverno-nvidia
+id: assistant-nvidia
 display_name: NVIDIA (assistant)
 description: NVIDIA API key for the assistant's model, injected by the proxy only
 category: inference

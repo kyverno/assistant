@@ -5,8 +5,6 @@
 # (Without OpenShell, a relay in the container passes it on to Docker's published port.)
 # It belongs to the maintainer profile; the contributor sandbox (kyverno-main contributor) just stays alive.
 set -u
-# These settings used to start with KYVERNO_; the old names still work.
-for _v in $(compgen -v KYVERNO_); do _n="ASSISTANT_${_v#KYVERNO_}"; [ -n "${!_n:-}" ] || export "$_n=${!_v}"; done; unset _v _n
 
 export HERMES_HOME=/opt/hermes-home/.hermes
 export PATH="/opt/hermes-home/.local/bin:$PATH"

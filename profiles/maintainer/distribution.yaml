@@ -1,4 +1,4 @@
-name: kyverno-assistant
+name: maintainer-assistant
 version: 0.1.0
 description: "On-demand PR review queue assistant for a repository maintainer"
 hermes_requires: ">=0.12.0"

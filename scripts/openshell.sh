@@ -7,8 +7,6 @@
 #   rules    list | approve ID | reject ID [reason] | history   (access requests from the agent)
 #   remove   delete the sandbox, ssh entry and collector (keeps OpenShell and audit logs)
 set -uo pipefail
-# These settings used to start with KYVERNO_; the old names still work.
-for _v in $(compgen -v KYVERNO_); do _n="ASSISTANT_${_v#KYVERNO_}"; [ -n "${!_n:-}" ] || export "$_n=${!_v}"; done; unset _v _n
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SANDBOX_DIR="$REPO_ROOT/profiles/maintainer/sandbox"      # Dockerfile + policy.yaml

@@ -20,7 +20,7 @@ import shlex
 import sys
 
 PROTECTED = re.compile(r"^(main|master|release[-/].*)$")
-# The contributor profile's folder is named contributor (kyverno-contributor before the rename); Hermes sets HERMES_HOME to it.
+# The contributor profile's folder is named contributor; Hermes sets HERMES_HOME to it.
 REMOTES = {"fork"} if os.environ.get("HERMES_HOME", "").rstrip("/").endswith("contributor") else {"fork", "origin"}
 FORCE_FLAGS = {"-f", "-d", "--force", "--delete", "--mirror", "--all", "--prune", "--tags"}
 

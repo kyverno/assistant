@@ -153,7 +153,7 @@ def go_summary(sources: Dict[str, str], module: Optional[str]) -> Dict[str, Any]
 def _importers(repo: str, module: Optional[str], directory: str, sha: str) -> Dict[str, Any]:
     """Who imports this Go package, from the clone `assistant-workspace` made in the sandbox (GitHub's code search is too
     slow and incomplete for this). The clone may be at another commit than the one analysed; the answer says which."""
-    clone = os.path.join(os.environ.get("ASSISTANT_WORKSPACE_ROOT") or os.environ.get("KYVERNO_WORKSPACE_ROOT") or "/sandbox", repo.split("/", 1)[1])
+    clone = os.path.join(os.environ.get("ASSISTANT_WORKSPACE_ROOT") or "/sandbox", repo.split("/", 1)[1])
     if not module or not os.path.isdir(os.path.join(clone, ".git")):
         return {"available": False, "note": "no clone in the sandbox yet: run `assistant-workspace %s`, then ask again" % repo}
     package = module + ("/" + directory if directory else "")

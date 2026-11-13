@@ -16,8 +16,7 @@
 #                     token (in the one secrets file) and state; model keys are shared.
 #   --build           build the image from this checkout (container/Dockerfile) instead of pulling one
 #   --image IMAGE     use this image (default: $ASSISTANT_IMAGE, else ghcr.io/kyverno/assistant:latest)
-#   --name NAME       container name (default: assistant-maint-docker, or assistant-contrib-docker; an existing
-#                     kyverno-assistant-docker or kyverno-contributor-docker keeps its name)
+#   --name NAME       container name (default: assistant-maint-docker, or assistant-contrib-docker)
 #   --provider P      also use model provider P (anthropic, openai or nvidia): its API key is asked once and kept in
 #                     the secrets file. Without it, the assistant uses GitHub Copilot.
 #   --upgrade         recreate the container from the (new) image and keep your state: memory, chat history, repo
@@ -35,8 +34,6 @@
 # launcher copies it into a tmpfs inside the container on every start (so the keys are never in the image, in
 # `docker inspect`, or on the container's disk) and the agent reads them from there.
 set -uo pipefail
-# These settings used to start with KYVERNO_; the old names still work.
-for _v in $(compgen -v KYVERNO_); do _n="ASSISTANT_${_v#KYVERNO_}"; [ -n "${!_n:-}" ] || export "$_n=${!_v}"; done; unset _v _n
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/.." && pwd)"
@@ -47,10 +44,6 @@ DASH_PORT="${ASSISTANT_DASHBOARD_PORT:-9219}"   # same default as the OpenShell 
 RELAY_PORT=38219                              # inside the container; Docker publishes it as DASH_PORT
 _cfg="${XDG_CONFIG_HOME:-$HOME/.config}"
 SECRETS_FILE="${ASSISTANT_SECRETS_FILE:-$_cfg/assistant/secrets.env}"
-# The file lived in kyverno-assistant/ before the rename: keep using it if that is where yours is.
-if [ -z "${ASSISTANT_SECRETS_FILE:-}" ] && [ ! -f "$SECRETS_FILE" ] && [ -f "$_cfg/kyverno-assistant/secrets.env" ]; then
-  SECRETS_FILE="$_cfg/kyverno-assistant/secrets.env"
-fi
 BUILD=0
 RESET=0
 UPGRADE=0
@@ -84,7 +77,7 @@ done
 
 # shellcheck source=container/lib.sh
 . "$HERE/lib.sh"
-choose_profile "$(docker ps -a --format '{{.Names}}' 2>/dev/null)" assistant-maint-docker kyverno-assistant-docker assistant-contrib-docker kyverno-contributor-docker
+choose_profile "$(docker ps -a --format '{{.Names}}' 2>/dev/null)" assistant-maint-docker assistant-contrib-docker
 select_profile "$KIND"
 NAME="${NAME:-$DEFAULT_NAME}"
 
@@ -140,7 +133,7 @@ inject_secrets() {
 save_state() {
   local dest="$1"
   docker exec "$NAME" sh -c \
-    "cd /opt/hermes-home/.hermes/profiles/$INSTANCE_PROFILE && tar -cf - \$(ls -d $STATE_FILES 2>/dev/null)" \
+    "cd /opt/hermes-home/.hermes/profiles/$HERMES_PROFILE && tar -cf - \$(ls -d $STATE_FILES 2>/dev/null)" \
     > "$dest/kyverno-state.tar" 2>/dev/null || return 1
   [ -s "$dest/kyverno-state.tar" ]
 }
@@ -205,7 +198,6 @@ container_running && ALREADY_RUNNING=1
 if [ "$UPGRADE" = 1 ] && container_exists; then
   container_running || docker start "$NAME" >/dev/null 2>&1
   BACKUP_DIR="$(mktemp -d)"; chmod 700 "$BACKUP_DIR"
-  instance_profile
   info "saving your state from '$NAME' before recreating it..."
   save_state "$BACKUP_DIR" || { fail "could not save the state, so the container was left alone"; rm -rf "$BACKUP_DIR"; exit 1; }
   pass "state saved"
@@ -276,7 +268,6 @@ step "5. Assistant"
 ARGS=()
 [ -n "$REPO" ] && ARGS+=(--repo "$REPO")
 [ -n "$LOGIN" ] && ARGS+=(--login "$LOGIN")
-instance_profile
-[ "$KIND" = maintainer ] && info "dashboard: http://127.0.0.1:$DASH_PORT/maintainer?profile=$INSTANCE_PROFILE"
+[ "$KIND" = maintainer ] && info "dashboard: http://127.0.0.1:$DASH_PORT/maintainer?profile=$HERMES_PROFILE"
 [ "$NO_ATTACH" = 1 ] && { pass "ready (not opening the chat: --no-attach)"; exit 0; }
 exec docker exec -it "$NAME" kyverno-start --profile "$KIND" "${ARGS[@]+"${ARGS[@]}"}"

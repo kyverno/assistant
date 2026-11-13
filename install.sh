@@ -10,7 +10,7 @@
 set -eu
 
 main() {
-  image="${ASSISTANT_IMAGE:-${KYVERNO_IMAGE:-ghcr.io/kyverno/assistant:latest}}"
+  image="${ASSISTANT_IMAGE:-ghcr.io/kyverno/assistant:latest}"
   prev=""
   for a in "$@"; do
     [ "$prev" = "--image" ] && image="$a"
@@ -30,10 +30,7 @@ main() {
   trap 'rm -rf "$dir"' EXIT INT TERM
   docker run --rm "$image" tar -C /opt/kyverno -c launcher | tar -x -C "$dir"
 
-  # An image from before the rename has the launcher under its old name.
-  launcher="$dir/launcher/assistant"
-  [ -x "$launcher" ] || launcher="$dir/launcher/kyverno"
-  ASSISTANT_IMAGE="$image" KYVERNO_IMAGE="$image" "$launcher" "$@"    # an older launcher reads KYVERNO_IMAGE
+  ASSISTANT_IMAGE="$image" "$dir/launcher/assistant" "$@"
 }
 
 main "$@"

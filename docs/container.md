@@ -162,7 +162,7 @@ container from the new image and restores it, as with OpenShell. Removing the co
 This loses the container's state.
 
 **Choosing between them later.** The two modes use different names (`assistant-maint` sandbox, `assistant-maint-docker`
-container; instances made before the rename keep their `kyverno-` names), so they do not interfere. State is not shared between them.
+container), so they do not interfere. State is not shared between them.
 
 ## Choosing a model
 

@@ -2,18 +2,18 @@
 
 > **Running in the OpenShell sandbox?** That is now the recommended way, and it has its own instructions: see the [README](../README.md) and [`container.md`](container.md). This runbook covers the host install.
 
-kyverno-assistant is a Hermes profile distribution — there's no server to stand
+The assistant is a Hermes profile distribution — there's no server to stand
 up, no webhook receiver, no GitHub App to register. Install flow only.
 
 ## Install
 
 ```bash
-hermes profile install github.com/kyverno/kyverno-assistant --name kyverno --alias -y
+hermes profile install github.com/kyverno/assistant --name maintainer --alias -y
 ```
 
 `--alias` takes no value — it creates a shell wrapper command named after
 `--name` (or the manifest's own name if `--name` is omitted). `--alias
-kyverno` is a common-looking but wrong invocation; it parses `kyverno` as a
+maintainer` is a common-looking but wrong invocation; it parses `kyverno` as a
 second, unexpected positional argument and fails with "unrecognized
 arguments."
 
@@ -59,7 +59,7 @@ committed) and fill in these yourself:
 - `SLACK_ALLOWED_USERS` — the installing maintainer's Slack member ID (keeps
   this instance answering only them).
 - `SLACK_HOME_CHANNEL` — the maintainers channel to read priority signals from
-  and post the queue in. Invite the bot to it (`/invite @kyverno-assistant`).
+  and post the queue in. Invite the bot to it (`/invite @<your bot>`).
 - `ASSISTANT_REPO` — `owner/repo` this instance manages. Required: there is no default.
 - `ANTHROPIC_API_KEY`, `COPILOT_GITHUB_TOKEN` or another provider key — optional.
   The model is chosen in Hermes (`hermes -p maintainer model`, or `/model` in a

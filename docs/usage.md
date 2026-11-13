@@ -17,7 +17,7 @@ install; `container/assistant` if you work from a clone, which you do not need t
 | See whether it is running | `openshell sandbox list` |
 | See what it contacted, and what was blocked | `openshell logs assistant-maint` |
 | Update to a new version | `assistant --upgrade` (from a clone: `git pull`, then `container/assistant --build --upgrade`). Keeps your memory, history, sign-in and model |
-| Replace your GitHub token | `bash -c 'read -rs -p "New GitHub token: " REPO_GITHUB_TOKEN; echo; export REPO_GITHUB_TOKEN; openshell provider update kyverno-repo-github --credential REPO_GITHUB_TOKEN'`, then open a new chat. Chats already open keep the old token |
+| Replace your GitHub token | `bash -c 'read -rs -p "New GitHub token: " REPO_GITHUB_TOKEN; echo; export REPO_GITHUB_TOKEN; openshell provider update assistant-repo-github --credential REPO_GITHUB_TOKEN'`, then open a new chat. Chats already open keep the old token |
 | Use another model provider | `assistant --provider anthropic` (or `openai`, `nvidia`) |
 | Set up without opening the chat | `assistant --no-attach` |
 
@@ -109,7 +109,7 @@ These are not available in the sandbox yet. They work in the [host install](host
 | The chat looks frozen right after start | Give it 30 seconds. If it stays blank, press Enter once. If it still does nothing, run `assistant --upgrade` |
 | `could not pull ...` | No network to the registry, or a version that does not exist. Check the tag, or use `assistant --image` with a tag that exists. A pull that crawls is usually your route to GitHub's download servers: try another network, the finished layers are kept |
 | The sandbox goes to `Error`, "UID or GID zero" | The image's default user must be 1000, not root. Rebuild with `--build` |
-| `could not register the provider profile` | OpenShell holds an older copy of this project's profile from an earlier run. Start clean (nothing is rebuilt): `openshell sandbox delete assistant-maint`, `openshell provider delete kyverno-repo-github`, `openshell profile delete kyverno-repo-github`, then `assistant --image assistant:dev` (or without `--image` once an image is published). The launcher asks for your GitHub token again |
+| `could not register the provider profile` | OpenShell holds an older copy of this project's profile from an earlier run. Start clean (nothing is rebuilt): `openshell sandbox delete assistant-maint`, `openshell provider delete assistant-repo-github`, `openshell profile delete assistant-repo-github`, then `assistant --image assistant:dev` (or without `--image` once an image is published). The launcher asks for your GitHub token again |
 | `sandbox ... did not become Ready` | The launcher prints the sandbox's state and the last lines of its log. Retry from scratch: `openshell sandbox delete assistant-maint`, then run the launcher again |
 | The build is very slow or runs out of memory | Docker Desktop's VM memory. Raise it in Settings → Resources (at least 4 GB) |
 | `Docker Desktop ... is older than 4.60` | The sandbox needs a newer Docker Desktop. Update it |
@@ -119,10 +119,10 @@ These are not available in the sandbox yet. They work in the [host install](host
 
 ```bash
 openshell sandbox delete assistant-maint          # the sandbox and everything in it (memory, history, sign-in)
-openshell provider delete kyverno-repo-github       # your stored GitHub token
-openshell provider delete kyverno-anthropic         # model keys you added, if any (also kyverno-openai, kyverno-nvidia)
+openshell provider delete assistant-repo-github       # your stored GitHub token
+openshell provider delete assistant-anthropic         # model keys you added, if any (also assistant-openai, assistant-nvidia)
 docker rmi assistant:dev                    # the image, if you built it yourself
 ```
 
-If you used `--push-to-fork`, also `openshell provider delete kyverno-git-push` (or run the launcher with `--no-push`). With `--no-openshell`, the clones and toolchains live in a Docker volume that outlives the container:
+If you used `--push-to-fork`, also `openshell provider delete assistant-git-push` (or run the launcher with `--no-push`). With `--no-openshell`, the clones and toolchains live in a Docker volume that outlives the container:
 `docker volume rm assistant-maint-docker-workspace` (the name follows the container's).

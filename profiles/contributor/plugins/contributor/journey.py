@@ -24,21 +24,8 @@ MAX_TEXT = 300
 
 
 def base_dir() -> Path:
-    explicit = os.environ.get("ASSISTANT_CONTRIBUTOR_HOME") or os.environ.get("KYVERNO_CONTRIBUTOR_HOME")
-    if explicit:
-        return Path(explicit)
-    home = hermes_home()
-    new, old = home / "contributor-state", home / "kyverno-contributor"
-    if old.is_dir() and not new.exists():
-        home.mkdir(parents=True, exist_ok=True)
-        with open(home / ".journey-migrate.lock", "w") as lock:    # one lock for every caller, so none can split the state
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            if old.is_dir() and not new.exists():
-                try:
-                    old.rename(new)    # the folder from before the rename: same files, new name
-                except OSError:
-                    pass
-    return old if old.is_dir() and not new.exists() else new
+    explicit = os.environ.get("ASSISTANT_CONTRIBUTOR_HOME")
+    return Path(explicit) if explicit else hermes_home() / "contributor-state"
 
 
 def path() -> Path:

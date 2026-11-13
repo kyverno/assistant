@@ -2,7 +2,7 @@
 # placeholder in REPO_GITHUB_TOKEN; the gateway's proxy swaps in the real value on requests to the
 # endpoints below, and only from the binaries listed. Import with:
 #   openshell profile import -f container/providers/repo-github-contributor.yaml
-id: kyverno-contributor-github
+id: assistant-contributor-github
 display_name: Kyverno contributor GitHub token
 description: The contributor's own GitHub PAT for the Kyverno contributor assistant (read APIs plus the GitHub MCP server)
 category: source_control

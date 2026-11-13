@@ -1,4 +1,4 @@
-name: kyverno-contributor
+name: contributor-assistant
 version: 0.1.0
 description: "A coach for people contributing to an open-source project: finds work worth doing, explains how the code fits together, prepares evidence-backed PRs, makes review feedback understandable, and tracks the path from first PR to reviewer"
 hermes_requires: ">=0.12.0"

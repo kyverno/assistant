@@ -1,4 +1,4 @@
-# What kyverno-assistant can do
+# What the assistant can do
 
 A tour of the assistant's skills with real example prompts. Everything shown
 here maps directly to a skill's actual procedure — see the linked

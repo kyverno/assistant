@@ -10,7 +10,7 @@
 set -euo pipefail
 cat > /dev/null
 if [ -d /run/openshell-supervisor-ca ] \
-   || { [ "${ASSISTANT_RUNTIME:-${KYVERNO_RUNTIME:-}}" = docker ] && [ "${ASSISTANT_ALLOW_TERMINAL:-${KYVERNO_ALLOW_TERMINAL:-}}" = 1 ]; }; then
+   || { [ "${ASSISTANT_RUNTIME:-}" = docker ] && [ "${ASSISTANT_ALLOW_TERMINAL:-}" = 1 ]; }; then
   echo '{}'
 else
   echo '{"action":"block","message":"terminal and file tools are only allowed inside the OpenShell sandbox (or with container/assistant --no-openshell --allow-terminal)"}'

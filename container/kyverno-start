@@ -8,8 +8,6 @@
 #   ASSISTANT_SETUP_ONLY=1    stop after setup (no sign-in, no chat)
 #   ASSISTANT_SKIP_COPILOT=1  don't offer the Copilot sign-in
 set -uo pipefail
-# These settings used to start with KYVERNO_; the old names still work.
-for _v in $(compgen -v KYVERNO_); do _n="ASSISTANT_${_v#KYVERNO_}"; [ -n "${!_n:-}" ] || export "$_n=${!_v}"; done; unset _v _n
 
 export HERMES_HOME=/opt/hermes-home/.hermes
 export PATH="/opt/hermes-home/.local/bin:$PATH"
@@ -86,18 +84,16 @@ fi
 
 # --- helpers on the .env file (plain text, no YAML needed) ---
 env_get() {
-  # An ASSISTANT_ key also finds its KYVERNO_ spelling, for a profile made before the rename.
   ENV_FILE="$ENV_FILE" KEY="$1" python3 -c "
 import os
 key = os.environ['KEY']
-keys = [key] + (['KYVERNO_' + key[len('ASSISTANT_'):]] if key.startswith('ASSISTANT_') else [])
 values = {}
 for line in open(os.environ['ENV_FILE']):
     line = line.strip()
     if line and not line.startswith('#') and '=' in line:
         k, _, v = line.partition('=')
         values[k.strip()] = v.strip()
-print(next((values[k] for k in keys if values.get(k)), ''))
+print(values.get(key, ''))
 " 2>/dev/null
 }
 env_set() {
@@ -157,8 +153,6 @@ for line in open(os.environ["ENV_FILE"]):
     if line and not line.startswith("#") and "=" in line:
         k, _, v = line.partition("=")
         values[k.strip()] = v.strip()
-if not values.get("ASSISTANT_REPO") and values.get("KYVERNO_REPO"):
-    values["ASSISTANT_REPO"] = values["KYVERNO_REPO"]    # a profile made before the rename
 for var in ("ASSISTANT_REPO", "MAINTAINER_GITHUB_LOGIN", "CONTRIBUTOR_GITHUB_LOGIN"):
     val = values.get(var)
     if not val:

@@ -55,8 +55,8 @@ IMAGE_PACK = Path("/opt/kyverno/profiles/maintainer/org/org.yaml")
 
 def candidate_paths() -> list[Path]:
     paths = [IMAGE_PACK]
-    if os.environ.get("ASSISTANT_ORG_FILE") or os.environ.get("KYVERNO_ORG_FILE"):
-        paths.append(Path(os.environ.get("ASSISTANT_ORG_FILE") or os.environ["KYVERNO_ORG_FILE"]))
+    if os.environ.get("ASSISTANT_ORG_FILE"):
+        paths.append(Path(os.environ["ASSISTANT_ORG_FILE"]))
     paths.append(_home() / "org" / "org.yaml")
     return paths
 

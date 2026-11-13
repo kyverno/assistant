@@ -26,7 +26,7 @@ IMAGE_PACK = Path("/opt/kyverno/profiles/contributor/org/org.yaml")
 
 def candidate_paths() -> list:
     paths = [IMAGE_PACK]
-    explicit = os.environ.get("ASSISTANT_ORG_FILE") or os.environ.get("KYVERNO_ORG_FILE")
+    explicit = os.environ.get("ASSISTANT_ORG_FILE")
     if explicit:
         paths.append(Path(explicit))
     paths.append(hermes_home() / "org" / "org.yaml")

@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
 
 API = "https://api.github.com"
-USER_AGENT = "kyverno-contributor-assistant"
+USER_AGENT = "contributor-assistant"
 HEAD_TTL = 60                                    # seconds the default branch's head is remembered
 
 _HEAD: Dict[str, Tuple[float, str, str]] = {}    # repo -> (when, branch, sha)
@@ -51,10 +51,10 @@ def secret(name: str) -> Optional[str]:
 
 
 def default_repo(args: Optional[Dict[str, Any]] = None) -> Optional[str]:
-    """`repo` argument, else the profile's ASSISTANT_REPO (KYVERNO_REPO in profiles made before the rename)."""
+    """`repo` argument, else the profile's ASSISTANT_REPO."""
     if args and args.get("repo"):
         return args["repo"]
-    return secret("ASSISTANT_REPO") or secret("KYVERNO_REPO")
+    return secret("ASSISTANT_REPO")
 
 
 # transport(method, url, headers, body) -> (status, response_headers, body_bytes)

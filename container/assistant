@@ -14,8 +14,7 @@
 #   --build        build the image from this checkout (container/Dockerfile) instead of pulling one
 #   --org NAME     with --build: bake the organisation pack container/org/NAME/ into the image (default: kyverno)
 #   --image IMAGE  use this image (default: $ASSISTANT_IMAGE, else ghcr.io/kyverno/assistant:latest)
-#   --name NAME    sandbox name (default: assistant-maint, or assistant-contrib; an existing kyverno-assistant or
-#                  kyverno-contributor sandbox keeps its name)
+#   --name NAME    sandbox name (default: assistant-maint, or assistant-contrib)
 #   --provider P   also use model provider P (anthropic, openai or nvidia): its API key is asked once and
 #                  kept in OpenShell like the GitHub token. Without it, the assistant uses GitHub Copilot.
 #   --upgrade      recreate the sandbox from the (new) image and keep your state: memory, chat history,
@@ -29,8 +28,6 @@
 #                  to main. A second credential, kept in OpenShell, asked once.
 #   --no-push      remove that again
 set -uo pipefail
-# These settings used to start with KYVERNO_; the old names still work.
-for _v in $(compgen -v KYVERNO_); do _n="ASSISTANT_${_v#KYVERNO_}"; [ -n "${!_n:-}" ] || export "$_n=${!_v}"; done; unset _v _n
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/.." && pwd)"
@@ -75,7 +72,7 @@ done
 # shellcheck source=container/lib.sh
 . "$HERE/lib.sh"
 
-choose_profile "$(openshell sandbox list 2>/dev/null | awk 'NR>1{print $1}')" assistant-maint kyverno-assistant assistant-contrib kyverno-contributor
+choose_profile "$(openshell sandbox list 2>/dev/null | awk 'NR>1{print $1}')" assistant-maint assistant-contrib
 select_profile "$KIND"
 SANDBOX="${SANDBOX:-$DEFAULT_NAME}"
 # OpenShell limits a sandbox name to 19 characters.
@@ -118,7 +115,7 @@ instance_exec() { openshell sandbox exec -n "$SANDBOX" --no-tty -- "$@"; }
 save_state() {
   local dest="$1"
   openshell sandbox exec -n "$SANDBOX" --no-tty -- sh -c \
-    "cd /opt/hermes-home/.hermes/profiles/$INSTANCE_PROFILE && tar -cf /sandbox/kyverno-state.tar \$(ls -d $STATE_FILES 2>/dev/null)" \
+    "cd /opt/hermes-home/.hermes/profiles/$HERMES_PROFILE && tar -cf /sandbox/kyverno-state.tar \$(ls -d $STATE_FILES 2>/dev/null)" \
     >/dev/null 2>&1 || return 1
   openshell sandbox download "$SANDBOX" /sandbox/kyverno-state.tar "$dest/" >/dev/null 2>&1 || return 1
   [ -s "$dest/kyverno-state.tar" ] || return 1
@@ -131,9 +128,9 @@ save_workspace() {
   local dest="$1" skip="--exclude=.toolchains"
   [ "$KEEP_CACHES" = 1 ] && skip=""
   if openshell sandbox exec -n "$SANDBOX" --no-tty -- sh -c \
-      "tar -cf /sandbox/kyverno-workspace.tar -C /sandbox $skip --exclude=./kyverno-workspace.tar --exclude=./kyverno-state.tar --exclude=./restore-state.sh ." \
-      >/dev/null 2>&1 && openshell sandbox download "$SANDBOX" /sandbox/kyverno-workspace.tar "$dest/" >/dev/null 2>&1; then
-    info "workspace saved ($(du -sh "$dest/kyverno-workspace.tar" 2>/dev/null | cut -f1))"
+      "tar -cf /sandbox/assistant-workspace.tar -C /sandbox $skip --exclude=./assistant-workspace.tar --exclude=./kyverno-state.tar --exclude=./restore-state.sh ." \
+      >/dev/null 2>&1 && openshell sandbox download "$SANDBOX" /sandbox/assistant-workspace.tar "$dest/" >/dev/null 2>&1; then
+    info "workspace saved ($(du -sh "$dest/assistant-workspace.tar" 2>/dev/null | cut -f1))"
   fi
   return 0
 }
@@ -143,9 +140,9 @@ restore_state() {
   openshell sandbox upload "$SANDBOX" "$src/kyverno-state.tar" /sandbox/ >/dev/null 2>&1 || return 1
   openshell sandbox upload "$SANDBOX" "$HERE/restore-state.sh" /sandbox/ >/dev/null 2>&1 || return 1
   openshell sandbox exec -n "$SANDBOX" --no-tty -- bash /sandbox/restore-state.sh "$HERMES_PROFILE" || return 1
-  if [ -s "$src/kyverno-workspace.tar" ]; then
-    openshell sandbox upload "$SANDBOX" "$src/kyverno-workspace.tar" /sandbox/ >/dev/null 2>&1 \
-      && openshell sandbox exec -n "$SANDBOX" --no-tty -- sh -c 'cd /sandbox && tar -xf kyverno-workspace.tar && rm -f kyverno-workspace.tar' \
+  if [ -s "$src/assistant-workspace.tar" ]; then
+    openshell sandbox upload "$SANDBOX" "$src/assistant-workspace.tar" /sandbox/ >/dev/null 2>&1 \
+      && openshell sandbox exec -n "$SANDBOX" --no-tty -- sh -c 'cd /sandbox && tar -xf assistant-workspace.tar && rm -f assistant-workspace.tar' \
       && info "workspace restored"
   fi
   return 0
@@ -240,7 +237,7 @@ else
 fi
 
 # Pushing to your own fork, if you asked for it. Off by default: the assistant otherwise only reads GitHub.
-PUSH_PROVIDER=kyverno-git-push
+PUSH_PROVIDER=assistant-git-push
 if [ "$NO_PUSH" = 1 ]; then
   sandbox_listed && openshell sandbox provider detach "$SANDBOX" "$PUSH_PROVIDER" >/dev/null 2>&1
   openshell provider delete "$PUSH_PROVIDER" >/dev/null 2>&1
@@ -296,9 +293,9 @@ fi
 # Model providers: each key is stored in OpenShell, and the sandbox only holds a placeholder.
 for P in "${WANT_PROVIDERS[@]+"${WANT_PROVIDERS[@]}"}"; do
   VAR=$(provider_env_var "$P") || { fail "unknown model provider '$P' (use anthropic, openai or nvidia)"; exit 1; }
-  sync_profile "$HERE/providers/$P.yaml" "kyverno-$P" \
+  sync_profile "$HERE/providers/$P.yaml" "assistant-$P" \
     || { fail "could not register the $P provider profile"; exit 1; }
-  if openshell provider get "kyverno-$P" >/dev/null 2>&1; then
+  if openshell provider get "assistant-$P" >/dev/null 2>&1; then
     pass "$P key already stored in OpenShell"
   else
     KEY=""
@@ -306,7 +303,7 @@ for P in "${WANT_PROVIDERS[@]+"${WANT_PROVIDERS[@]}"}"; do
     echo
     [ -z "$KEY" ] && { fail "no $P key entered (this step needs a terminal to ask for it)"; exit 1; }
     # Exported in a subshell, not passed through env(1): an argument would show in the process list.
-    ( export "$VAR=$KEY"; openshell provider create --name "kyverno-$P" --type "kyverno-$P" --credential "$VAR" >/dev/null 2>&1 ) \
+    ( export "$VAR=$KEY"; openshell provider create --name "assistant-$P" --type "assistant-$P" --credential "$VAR" >/dev/null 2>&1 ) \
       || { fail "could not store the $P key in OpenShell"; exit 1; }
     unset KEY
     pass "$P key stored in OpenShell"
@@ -320,7 +317,6 @@ if [ "$UPGRADE" = 1 ] && sandbox_listed; then
     for _ in $(seq 1 60); do openshell sandbox list 2>/dev/null | awk -v n="$SANDBOX" '$1==n && $NF=="Ready"{f=1} END{exit !f}' && break; sleep 2; done
   fi
   BACKUP_DIR="$(mktemp -d)"; chmod 700 "$BACKUP_DIR"
-  instance_profile
   info "saving your state from '$SANDBOX' before recreating it..."
   save_state "$BACKUP_DIR" || { fail "could not save the state, so the sandbox was left alone"; rm -rf "$BACKUP_DIR"; exit 1; }
   pass "state saved"
@@ -338,7 +334,7 @@ else
   PROVIDER_ARGS=(--provider "$PROVIDER")
   [ "$PUSH" = 1 ] && PROVIDER_ARGS+=(--provider "$PUSH_PROVIDER")
   for P in anthropic openai nvidia; do
-    openshell provider get "kyverno-$P" >/dev/null 2>&1 && PROVIDER_ARGS+=(--provider "kyverno-$P")
+    openshell provider get "assistant-$P" >/dev/null 2>&1 && PROVIDER_ARGS+=(--provider "assistant-$P")
   done
   openshell sandbox create --name "$SANDBOX" --from "$IMAGE" "${PROVIDER_ARGS[@]}" \
     --policy "$HERE/policy.yaml" --no-auto-providers -- kyverno-main "$KIND" >"$LOG" 2>&1 &
@@ -362,7 +358,7 @@ else
   info "could not re-apply the policy; the one from creation stays in force"
 fi
 for P in "${WANT_PROVIDERS[@]+"${WANT_PROVIDERS[@]}"}"; do
-  openshell sandbox provider attach "$SANDBOX" "kyverno-$P" >/dev/null 2>&1
+  openshell sandbox provider attach "$SANDBOX" "assistant-$P" >/dev/null 2>&1
 done
 [ "$PUSH" = 1 ] && openshell sandbox provider attach "$SANDBOX" "$PUSH_PROVIDER" >/dev/null 2>&1
 pass "sandbox '$SANDBOX' is ready"
@@ -373,8 +369,7 @@ if [ "$KIND" = maintainer ]; then
     if ! openshell forward list 2>/dev/null | awk -v n="$SANDBOX" -v p="$DASH_PORT" '$2==n && $4==p{f=1} END{exit !f}'; then
       openshell forward start "127.0.0.1:$DASH_PORT" "$SANDBOX" -d >/dev/null 2>&1 || info "could not forward port $DASH_PORT (is it in use?); set ASSISTANT_DASHBOARD_PORT to another one"
     fi
-    instance_profile
-    info "dashboard: http://127.0.0.1:$DASH_PORT/maintainer?profile=$INSTANCE_PROFILE"
+    info "dashboard: http://127.0.0.1:$DASH_PORT/maintainer?profile=$HERMES_PROFILE"
   else
     info "note: this sandbox was made before the dashboard existed; run with --upgrade to get it"
   fi
