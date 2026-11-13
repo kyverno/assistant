@@ -129,6 +129,10 @@ stale-PR, issue-triage or Discussions request.
 The board is read-only (confirming and acting happen in the chat) and reachable only from your own laptop. Details and the
 port setting: [`docs/usage.md`](docs/usage.md#the-dashboard).
 
+![The Maintainer dashboard, filled by the agent for the Kyverno repository](public/dashboard_example.png)
+
+*An example board filled by the agent for a Kyverno maintainer.*
+
 ## Get started
 
 ### What you need
