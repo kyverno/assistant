@@ -7,13 +7,10 @@ A **maintainer assistant** works your pull-request queue and issue backlog and e
 **contributor assistant** gives you the context to work on a project without being blind to its code, its history and how
 its repository works, and tells you what to focus on. **Shared CI actions** keep the labels both of them rely on. All of it
 is built on [Hermes](https://hermes-agent.nousresearch.com) and runs inside an [OpenShell](https://github.com/NVIDIA/OpenShell)
-sandbox, under policies that OpenShell enforces from outside it. Kyverno is the first project to use it.
+sandbox. Kyverno is the first project to use it.
 
-> 🔒 **Safe to run on the laptop you also use for work.** The agent lives in its own sandbox. Nothing from your computer is
-> mounted into it: not your home folder, your documents, your other projects, your employer's code, your SSH keys or your
-> browser sessions. It can reach only a short list of GitHub and model hosts, and your GitHub token never enters the
-> sandbox. You can contribute to open source without worrying about the private work on the same machine.
-> [How OpenShell protects you](#protected-by-openshell).
+> 🔒 **Safe to run on the laptop you also use for work.** The agent lives in its own sandbox: nothing from your computer is
+> mounted into it, and your GitHub token never enters it. [How OpenShell protects you](#protected-by-openshell).
 
 > 🚀 **You do not clone this repository.** It ships as a signed container image on GHCR, and one command takes the launcher
 > from that image and runs it. **First, [prepare your repository](#prepare-your-repository)**: a few minutes to adopt the
@@ -27,11 +24,12 @@ sandbox, under policies that OpenShell enforces from outside it. Kyverno is the 
 
 ## Contents
 
-[What this is](#what-this-is) · [Protected by OpenShell](#protected-by-openshell) · [Get started](#get-started) ·
-[The maintainer assistant](#the-maintainer-assistant) · [The contributor assistant](#the-contributor-assistant) ·
-[Shared CI actions](#shared-ci-actions) · [Prepare your repository](#prepare-your-repository) · [Built on Hermes](#built-on-hermes) ·
-[Capabilities](#capabilities) · [What is verified, and the limits](#what-is-verified-and-the-limits) · [Roadmap](#roadmap) ·
-[Documentation](#documentation)
+[What this is](#what-this-is) · [Key features](#key-features) · [The two assistants](#the-two-assistants) ·
+[The dashboard](#the-dashboard) · [Get started](#get-started) · [The maintainer assistant](#the-maintainer-assistant) ·
+[The contributor assistant](#the-contributor-assistant) · [Shared CI actions](#shared-ci-actions) ·
+[Prepare your repository](#prepare-your-repository) · [Built on Hermes](#built-on-hermes) ·
+[Protected by OpenShell](#protected-by-openshell) · [Capabilities](#capabilities) ·
+[What is verified, and the limits](#what-is-verified-and-the-limits) · [Roadmap](#roadmap) · [Documentation](#documentation)
 
 ## What this is
 
@@ -62,68 +60,74 @@ recomputing them. A repository that runs the actions gives the maintainer assist
                   GitHub (read APIs, the GitHub MCP server) · GitHub Copilot or your model
 ```
 
-## Protected by OpenShell
+## Key features
 
-An assistant that reads strangers' issues and PRs will, sooner or later, read text written to manipulate it, and it also
-runs on a machine that holds things that are not yours to share. The design answer to both is the same: **the agent runs in
-a sandbox where a tricked agent still has nothing to steal and nowhere to send it.** [OpenShell](https://github.com/NVIDIA/OpenShell)
-provides that, and its strongest limits sit **outside the sandbox, where the agent cannot edit them.**
+**For maintainers**
+- 📋 **An ordered merge queue with a reason for every position:** stacked branches, generated-file order, "depends on #N"
+  references, competing PRs, same-file and same-package overlaps, rebase flags, and the branch gate, all computed, none guessed
+- 🔍 **PR briefs**, short by default and deep on request: what it changes, why, review threads, risk, a suggested action
+- 🤖 **Dependabot verdicts** (merge now, fix first, your review, wait, close) based on who actually calls the dependency
+- 🏷️ **Issue triage grounded in the real code**, with duplicates, competing PRs and how far along each fix is
+- 🧹 **Stale and abandoned PR decisions:** close, reassign, or take over the branch, with the reason from the linked issue
+- 💬 **GitHub Discussions:** reads the thread and drafts a reply, posted only when you say so
+- ✅ **Actions with your own token** (labels, comments, change requests, approvals, branch updates), on your request
 
-### What the agent cannot see or reach
+**For contributors**
+- 🧭 **Project context for you and the AI:** the docs that govern a path, how the code fits together, who imports it, what
+  earlier PRs in the area decided and why, and each issue's full story
+- 🎯 **What to work on, how to contribute, and how the code works,** ending with you explaining it back
+- 🧪 **Evidence-backed changes:** reproduce, change and test in the sandbox, with a ledger of what was really run
+- 📈 **Review feedback explained,** and your path from a first PR toward reviewer
 
-| Not available to it | Why |
+**For both**
+- 🖥️ **A dashboard** that shows what the agent just told you, linked and grouped ([below](#the-dashboard))
+- 🧠 **Long-term memory:** past incidents, decisions, rejected PRs, your working style and your progress
+- 💻 **A coding environment in the sandbox:** clone, install the toolchains a repository declares (Go, Node, the Kyverno CLI
+  and Chainsaw), build and test, then get a patch, or a push to your own fork if you turn that on
+- 🔌 **Your choice of model:** GitHub Copilot by default, or Anthropic, OpenAI or NVIDIA with your own key
+- 🏢 **Built to be adopted:** one organisation pack for your file rules and merge gate, and an organisation policy for which
+  repositories and token types are allowed
+- 🔄 **Upgrades that keep your state:** memory, history, sign-in, model and cloned repositories
+- 📡 **Slack digests and scheduled jobs** in the [host install](docs/host-install.md)
+
+## The two assistants
+
+One image holds both. Each has its own sandbox, its own GitHub token and its own memory, and you can run both.
+
+| | **Maintainer** (`--profile maintainer`) | **Contributor** (`--profile contributor`) |
+|---|---|---|
+| For | People who review and merge a repository's pull requests | People contributing to a repository (configured for Kyverno today) |
+| It does | Builds your PR queue, triages issues and Discussions, drafts reviews and follow-ups, proposes a merge order | Finds issues worth doing, explains the code and what earlier PRs decided, helps prepare PRs, explains review feedback |
+| Writes to GitHub | Labels, comments, reviews and branch updates with your token, on your request; drafted text shown first | A comment, and a pull request from your own fork, after you have seen the exact text |
+| Skills | `pr-queue`, `issue-triage`, `dependabot-queue`, `pr-actions`, `issue-actions`, `author-followup`, `discussions`, `dashboard-sync`, `repo-context` | `find-work`, `understand-code`, `make-the-change`, `review-loop`, `grow` |
+| Token | Fine-grained, scoped to the repository, or your `gh` sign-in | Your own account's fine-grained token (read-only is enough to read), or your `gh` sign-in |
+| Dashboard | Yes | No |
+| Sandbox | `assistant-maint` | `assistant-contrib` |
+
+If you start the launcher without `--profile`, it picks the one you already have a sandbox for, and otherwise asks.
+
+## The dashboard
+
+The maintainer assistant writes what it just told you onto a browser board, so you read the queue there instead of scrolling
+the chat or copying links by hand. It runs inside the sandbox; the launcher forwards a port on your laptop and prints the
+address:
+
+```
+http://127.0.0.1:9219/maintainer?profile=maintainer
+```
+
+Pick **Maintainer** in the sidebar under Plugins. It refreshes every 15 seconds and fills whenever the agent answers a queue,
+stale-PR, issue-triage or Discussions request.
+
+| Tab | Shows |
 |---|---|
-| **Your files**: home folder, documents, downloads, your other projects and repositories, your employer's code | The sandbox is a separate container with its own filesystem. Nothing from your computer is mounted into it |
-| **Your credentials**: SSH keys, cloud credentials, password manager, browser sessions | They are not in the sandbox, so there is nothing to read |
-| **Your GitHub token** | OpenShell holds it. The sandbox holds only a placeholder, and the real token is swapped in on the way out to GitHub |
-| **Your network**: the office network, VPN-only services, anything on localhost | The network is deny-by-default: the sandbox reaches only the hosts on an allowlist |
-| **Other repositories**, if you choose | Use a fine-grained token scoped to one repository, and an organisation can require it ([below](#for-organisations-publish-an-assistant-policy)) |
+| **Overview** | What is waiting on you, grouped by verdict (rescue, decide, review, close, triage...), the milestone and due date, the gate status, recent actions |
+| **PRs / Issues / Discussions** | One row per item with a GitHub link, its state (CI, merge state, size, labels) and the agent's verdict and reason. Switch views, filter, search, sort |
+| **Detail panel** | A summary, unresolved threads, a graph of related PRs and issues, and any drafted comment waiting for your confirmation, with a copy button |
+| **Activity** | Every action you confirmed (approvals, comments, nudges, closes, deferrals), with a timestamp and a link |
 
-What it *can* reach, and only these: GitHub's read APIs and the GitHub MCP server (a fixed list of tools), the model host
-(GitHub Copilot, or the provider you chose), read-only GitHub for cloning in its terminal, the language-toolchain download hosts
-(GET only, every download checked against the vendor's checksum), and a read-only model list. Plus one forwarded port on your
-own loopback for the dashboard. Nothing else.
-
-### The policies OpenShell enforces
-
-| Policy | What it does |
-|---|---|
-| **Filesystem** (Landlock, a hard requirement) | Read-only: the system, Hermes' code and the baked profile (the safety hooks and the organisation pack). Writable: `/sandbox` (the clones and work), `/tmp`, and Hermes' home (memory and state). Fixed when the sandbox is created |
-| **Network**, deny by default | Named allow-blocks, each limited by host, port, path, HTTP method **and the program allowed to call**: read-only GitHub for `git` and `curl`; toolchain hosts, GET only, for `curl`, Go and Node; the two Copilot login paths for Hermes' own Python; the model's inference paths by name; a read-only model catalog. It can be reloaded on a live sandbox |
-| **Your GitHub token** | Kept in OpenShell, swapped in only for the listed endpoints and the listed programs. REST is read-only, and GraphQL mutations (including `mergePullRequest`) are refused by the proxy |
-| **GitHub MCP tools**, checked per call | The proxy allows only the tools on the list and refuses everything else, plus anything named like `*merge*`, `*delete*` or `*force_push*`, even hidden in a batched request. The list must equal the one in the profile or the image build fails |
-| **Asking, not widening** | If a task needs a blocked host, the agent can *propose* the narrowest rule. You approve it on your own computer with `openshell rule approve`; it cannot approve it itself |
-| **A full audit trail** | `openshell logs assistant-maint` (or `assistant-contrib`) shows every request the sandbox made and whether it was allowed or denied |
-| **Pushes only if you opt in** | `--push-to-fork` adds a separate credential for your own fork. Only `git` can use it, only for your fork, and a hook still refuses force pushes, deletes and pushes to main or release branches |
-| **Your organisation's policy** | The launcher enforces which repositories the assistant may be started on and which token types it accepts ([below](#for-organisations-publish-an-assistant-policy)) |
-
-On top of that sit safety hooks, defence in depth: one blocks any tool whose name looks like merge, delete or force-push,
-one guards `git push`, one keeps the terminal inside the sandbox. They run from the read-only copy, so the agent cannot edit
-them. There is no merge tool at all, and merging stays your decision.
-
-### If the agent is tricked
-
-Text in an issue says "ignore your instructions and...". What happens:
-
-| It is told to | What stops it |
-|---|---|
-| Read your files, SSH keys or other projects | They are not in the sandbox |
-| Print or leak your GitHub token | It holds only a placeholder |
-| Send data to a host it picked, or reach your office network | The network is deny-by-default: the request is blocked and logged |
-| Reach GitHub with the token through another program | The token is only swapped in for the listed programs |
-| Merge a PR, delete the repository, force-push | No such tool exists; the proxy refuses the tool names and GraphQL mutations; the token has no merge permission |
-| Rewrite its own safety hooks | They are read-only to it |
-
-### Honest limits
-
-Layers that live inside the sandbox (the tool list in `config.yaml`, the hook that blocks merge-like names) can be edited by
-a manipulated agent, because it has a terminal and file tools. The ones that matter (the token, the proxy, the network
-allowlist, the read-only files) do not depend on anything it can write. The one credential inside the sandbox is the Copilot
-sign-in token, which Hermes needs to call the model; the network allowlist is what stops it going anywhere else. The sandbox
-limits what the agent can reach, not whether what it *says* is right, so check the links it cites before you act. What was
-tested, and how: [`docs/container.md`](docs/container.md); the design: [`docs/openshell-architecture.md`](docs/openshell-architecture.md),
-[`docs/openshell.md`](docs/openshell.md) and [`SECURITY.md`](SECURITY.md). Without OpenShell (`assistant --no-openshell`, for an
-Intel Mac or Docker only) the protection is much weaker, and the docs say exactly how.
+The board is read-only (confirming and acting happen in the chat) and reachable only from your own laptop. Details and the
+port setting: [`docs/usage.md`](docs/usage.md#the-dashboard).
 
 ## Get started
 
@@ -273,11 +277,10 @@ Gate: main is red (issue #18121). Every PR above is blocked on merge until it cl
 | "Which stale PRs should I close?" | Close, reassign or take over, each with the issue state behind it |
 | "Label #1234 area/cli and ask the author to fix DCO" | Applies the label you asked for, and shows you the comment before posting it |
 
-Results also land on a read-only **Maintainer tab** at `http://127.0.0.1:9219/maintainer?profile=maintainer` (the launcher
-prints it). What you ask for explicitly (a label, an approval) it does and reports; anything with words in it (a comment, a
-review, a nudge, a Discussion reply) it drafts and shows you first. Merging stays yours (there is no merge tool), and so does a
-gate bypass: it explains why a PR looks unrelated to the failure and names the label, and you apply it. It orders by what it can prove (files, branches, references), not by whether one change semantically breaks
-another, and it says so when asked.
+What you ask for explicitly (a label, an approval) it does and reports; anything with words in it (a comment, a review, a
+nudge, a Discussion reply) it drafts and shows you first. Merging stays yours (there is no merge tool), and so does a gate
+bypass: it explains why a PR looks unrelated to the failure and names the label, and you apply it. It orders by what it can
+prove (files, branches, references), not by whether one change semantically breaks another, and it says so when asked.
 
 ## The contributor assistant
 
@@ -431,6 +434,28 @@ repository, fork names, no limit on repositories).
 Plugins hold the facts, skills hold the method, the model holds the judgment. See [`docs/how-it-works.md`](docs/how-it-works.md)
 and [`docs/architecture.md`](docs/architecture.md).
 
+## Protected by OpenShell
+
+The agent runs in an [OpenShell](https://github.com/NVIDIA/OpenShell) sandbox, and OpenShell enforces its limits **from
+outside it, where the agent cannot edit them.** That is what lets you run it next to private work, and what makes a tricked
+agent harmless: it has nothing to steal and nowhere to send it.
+
+- **It cannot see your computer.** Nothing is mounted into the sandbox: not your files, your other projects, your employer's
+  code, your SSH keys or your browser sessions.
+- **Your GitHub token never enters it.** The sandbox holds a placeholder; OpenShell swaps in the real token on the way out, only
+  to GitHub, only from the listed programs.
+- **The network is deny-by-default.** It reaches only an allowlist of GitHub, model and toolchain hosts, limited by path,
+  method and program. Your office network is not on it.
+- **GitHub is read-only at the proxy.** Merges and GraphQL mutations are refused, and every GitHub tool call is checked by name.
+- **The code and safety hooks are read-only** (Landlock), so the agent cannot rewrite its own rules.
+- **You see everything it does:** `openshell logs assistant-maint` lists every request, allowed or denied. A blocked host can only
+  be opened by a rule you approve on your own computer.
+- **Organisations can limit which repositories and token types** the launcher accepts ([above](#for-organisations-publish-an-assistant-policy)).
+
+Honest limit: the sandbox limits what the agent can reach, not whether what it *says* is right, so check the links it cites.
+The full list of policies, what happens when the agent is tricked, and the limits:
+[`docs/sandbox-security.md`](docs/sandbox-security.md). What was tested: [`docs/container.md`](docs/container.md).
+
 ## Capabilities
 
 | | Maintainer | Contributor | CI actions |
@@ -449,7 +474,7 @@ and [`docs/architecture.md`](docs/architecture.md).
 | Review feedback explained; reviews of others' PRs drafted | | ✅ | |
 | Journey and ladder progress | | ✅ | |
 | Long-term memory | ✅ | ✅ | |
-| Dashboard tab | ✅ | | |
+| Dashboard | ✅ | | |
 | Coding in the sandbox: clone, toolchains, reproduce, change, test | ✅ | ✅ | |
 | Organisation policy on repositories and token types | ✅ | ✅ | |
 | Merging | stays yours (no merge tool) | stays yours (no merge tool) | stays yours |
@@ -500,7 +525,7 @@ what to do first. What is built is above. What is planned, in order, is not buil
 | Daily use, data, the dashboard, coding in the sandbox | [`docs/usage.md`](docs/usage.md), [`docs/setup.md`](docs/setup.md) |
 | Adopting the CI actions | [`docs/adopting-actions.md`](docs/adopting-actions.md), [`.github/actions/`](.github/actions/README.md) |
 | Writing your organisation pack | [`docs/organisation-pack.md`](docs/organisation-pack.md) |
-| Security: what was tested, and the design | [`docs/container.md`](docs/container.md), [`docs/openshell-architecture.md`](docs/openshell-architecture.md), [`SECURITY.md`](SECURITY.md) |
+| Security: the policies, what was tested, and the design | [`docs/sandbox-security.md`](docs/sandbox-security.md), [`docs/container.md`](docs/container.md), [`docs/openshell-architecture.md`](docs/openshell-architecture.md), [`SECURITY.md`](SECURITY.md) |
 | How it works and why | [`docs/how-it-works.md`](docs/how-it-works.md), [`docs/architecture.md`](docs/architecture.md) |
 | Everything each assistant can do | [`docs/capabilities.md`](docs/capabilities.md) |
 | The contributor assistant | [`docs/contributor.md`](docs/contributor.md) |
