@@ -2,27 +2,30 @@
 
 Running, upgrading and removing the assistant, where its data lives, the dashboard and the coding environment.
 
+In the commands below, `assistant` is the installer command from the [README](../README.md#run-it) (an alias for the one-line
+install; `container/assistant` if you work from a clone, which you do not need to).
+
 ## Everyday use
 
 | To | Run |
 |---|---|
-| Start, or come back later | `container/assistant` |
-| Open a second chat at the same time | `container/assistant` in another terminal |
+| Start, or come back later | `assistant` |
+| Open a second chat at the same time | `assistant` in another terminal |
 | Open the dashboard | http://127.0.0.1:9219/maintainer?profile=maintainer (the launcher prints it; see [the dashboard](#the-dashboard)) |
 | Leave | Close the chat. The sandbox keeps running, idle |
-| Stop the sandbox | `openshell sandbox stop assistant-maint` (`container/assistant` starts it again) |
+| Stop the sandbox | `openshell sandbox stop assistant-maint` (`assistant` starts it again) |
 | See whether it is running | `openshell sandbox list` |
 | See what it contacted, and what was blocked | `openshell logs assistant-maint` |
-| Update to a new version | `git pull`, then `container/assistant --build --upgrade` (or `container/assistant --upgrade` once images are published). Keeps your memory, history, sign-in and model |
+| Update to a new version | `assistant --upgrade` (from a clone: `git pull`, then `container/assistant --build --upgrade`). Keeps your memory, history, sign-in and model |
 | Replace your GitHub token | `bash -c 'read -rs -p "New GitHub token: " REPO_GITHUB_TOKEN; echo; export REPO_GITHUB_TOKEN; openshell provider update kyverno-repo-github --credential REPO_GITHUB_TOKEN'`, then open a new chat. Chats already open keep the old token |
-| Use another model provider | `container/assistant --provider anthropic` (or `openai`, `nvidia`) |
-| Set up without opening the chat | `container/assistant --no-attach` |
+| Use another model provider | `assistant --provider anthropic` (or `openai`, `nvidia`) |
+| Set up without opening the chat | `assistant --no-attach` |
 
 ## Where your data lives
 
 Your memory, chat history, notes, settings and the model sign-in live **inside the sandbox**, in the profile
 folder `/opt/hermes-home/.hermes/profiles/maintainer`. They survive stopping and starting it, and
-`container/assistant --upgrade` carries them to a new image. Deleting the sandbox deletes them.
+`assistant --upgrade` carries them to a new image. Deleting the sandbox deletes them.
 
 Your GitHub token is not in the sandbox: it lives in OpenShell, on your laptop. The Copilot sign-in token is in
 the sandbox (it only grants access to Copilot's models).
@@ -83,7 +86,7 @@ has, `assistant-workspace` says so with both numbers. Things that need a real cl
 The result comes back as a patch (`openshell sandbox download`), or as a pushed branch if you turn on pushing:
 
 ```bash
-container/assistant --push-to-fork      # off by default; --no-push removes it
+assistant --push-to-fork      # off by default; --no-push removes it
 ```
 
 That stores a second credential in OpenShell (your `gh` sign-in's token, or a token with write on your fork). OpenShell
@@ -103,10 +106,10 @@ These are not available in the sandbox yet. They work in the [host install](host
 |---|---|
 | `The requested model is not supported` | The model is not available on your Copilot plan. `/model gpt-4.1 --global` |
 | `No LLM provider configured ... openrouter` | You picked a mixture-of-agents option that needs an OpenRouter key. Pick a normal model with `/model` |
-| The chat looks frozen right after start | Give it 30 seconds. If it stays blank, press Enter once. If it still does nothing, run `container/assistant --build --upgrade` |
-| `could not pull ...` | No network to the registry, or a version that does not exist. Check the tag, or use `container/assistant --build`. A pull that crawls is usually your route to GitHub's download servers: try another network, the finished layers are kept |
+| The chat looks frozen right after start | Give it 30 seconds. If it stays blank, press Enter once. If it still does nothing, run `assistant --upgrade` |
+| `could not pull ...` | No network to the registry, or a version that does not exist. Check the tag, or use `assistant --image` with a tag that exists. A pull that crawls is usually your route to GitHub's download servers: try another network, the finished layers are kept |
 | The sandbox goes to `Error`, "UID or GID zero" | The image's default user must be 1000, not root. Rebuild with `--build` |
-| `could not register the provider profile` | OpenShell holds an older copy of this project's profile from an earlier run. Start clean (nothing is rebuilt): `openshell sandbox delete assistant-maint`, `openshell provider delete kyverno-repo-github`, `openshell profile delete kyverno-repo-github`, then `container/assistant --image assistant:dev` (or without `--image` once an image is published). The launcher asks for your GitHub token again |
+| `could not register the provider profile` | OpenShell holds an older copy of this project's profile from an earlier run. Start clean (nothing is rebuilt): `openshell sandbox delete assistant-maint`, `openshell provider delete kyverno-repo-github`, `openshell profile delete kyverno-repo-github`, then `assistant --image assistant:dev` (or without `--image` once an image is published). The launcher asks for your GitHub token again |
 | `sandbox ... did not become Ready` | The launcher prints the sandbox's state and the last lines of its log. Retry from scratch: `openshell sandbox delete assistant-maint`, then run the launcher again |
 | The build is very slow or runs out of memory | Docker Desktop's VM memory. Raise it in Settings → Resources (at least 4 GB) |
 | `Docker Desktop ... is older than 4.60` | The sandbox needs a newer Docker Desktop. Update it |

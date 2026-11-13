@@ -1,12 +1,15 @@
 # Getting started
 
-Pick the case that matches you. Each one lists the exact commands, what the launcher asks, and what you should see.
-The [README](../README.md) explains how the assistant works and why it is safe; this page is only about getting it
-running.
+**You do not clone this repository.** The assistants ship as a signed container image on GHCR
+(`ghcr.io/kyverno/assistant`). One command downloads the launcher from that image, runs it, and removes the copy, so the
+launcher and the image it starts always come from the same release. You need Docker, a GitHub account, and a model
+(GitHub Copilot by default). Everything else, including OpenShell, is installed or pulled for you.
 
-In the commands below, `assistant` means the launcher: what the install command starts, or
-`container/assistant` in a clone. Give the options after `sh -s --`.
+The [README](../README.md) explains what the assistants do and why they are safe; this page is about getting one running,
+and keeping it running.
 
+- [The installer, step by step](#the-installer-step-by-step)
+- [Signing in: GitHub and Copilot](#signing-in-github-and-copilot)
 - [Which assistant do I want?](#which-assistant-do-i-want)
 - [Case 1: a Mac with Apple Silicon (recommended)](#case-1-a-mac-with-apple-silicon-recommended)
 - [Case 2: Linux](#case-2-linux)
@@ -19,13 +22,82 @@ In the commands below, `assistant` means the launcher: what the install command 
 - [Starting over and removing everything](#starting-over-and-removing-everything)
 - [Troubleshooting](#troubleshooting)
 
+## The installer, step by step
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kyverno/assistant/main/install.sh | sh
+```
+
+Give options after `sh -s --`, for example `... | sh -s -- --profile contributor`. To make it a command, put this in your
+shell profile:
+
+```bash
+alias assistant='curl -fsSL https://raw.githubusercontent.com/kyverno/assistant/main/install.sh | sh -s --'
+```
+
+Then type `assistant`, `assistant --profile contributor`, `assistant --upgrade`. **In the rest of the docs, `assistant`
+means this** (or `container/assistant` if you work from a clone, which you do not need to).
+
+**Before you start:** Docker running; a GitHub account that can read the repository; a Copilot subscription or another model
+key. The script needs a terminal, because it asks questions.
+
+It prints five numbered steps. This is what each one does, and what you do:
+
+| Step | What happens | You |
+|---|---|---|
+| **1. Docker and OpenShell** | Checks that Docker runs. Installs [OpenShell](https://github.com/NVIDIA/OpenShell) (its CLI and a background gateway) if it is missing | Nothing, unless Docker is not running |
+| **2. Image** | Pulls `ghcr.io/kyverno/assistant` the first time, about 1.2 GB compressed. Later runs reuse it | Wait a few minutes |
+| **3. GitHub token** | Asks which assistant you want if you did not say (**1 maintainer**, **2 contributor**). Asks which repository, as `owner/repo`: there is no default. Asks how to authorize GitHub (see below). Checks the token against the repository, then stores it **in OpenShell, outside the sandbox** | Type the repository, then sign in |
+| **4. Sandbox** | Creates the sandbox from the image and applies the network policy. The first time takes a minute or two | Wait |
+| **5. Assistant** | Starts inside the sandbox. It reads your GitHub username from the token, then starts the **GitHub Copilot sign-in**, which prints a code and a page. Then you pick a model | Open <https://github.com/login/device>, enter the code, approve, pick a model |
+
+The chat opens after about 30 seconds (`cpuinfo` and `onnxruntime` lines before it are harmless). **Only the first run asks
+questions.** Next time, `assistant` takes you straight back in, and `assistant --upgrade` moves to a newer image while
+keeping your memory, chat history, model choice, Copilot sign-in and cloned repositories.
+
+## Signing in: GitHub and Copilot
+
+There are two sign-ins, both in your browser, and they do different jobs.
+
+**1. GitHub, so the assistant can read your repository (step 3).** Pick one:
+
+- **Sign in with GitHub (`gh`)**: if the GitHub CLI is installed it opens a browser sign-in; if you are already signed in
+  it just uses that. Nothing to create. The catch: `gh` always asks for broad scopes, so the token can act on every
+  repository you can reach, private ones included. The assistant still cannot merge.
+- **Paste a fine-grained token**, scoped to the one repository. It is hidden as you type. This is the tighter option;
+  [Tokens](#tokens) lists the permissions.
+
+Either way the token is stored in OpenShell on your machine. The sandbox only ever holds a placeholder, and OpenShell's
+proxy swaps the real token in on the way out to GitHub.
+
+**2. GitHub Copilot, so the assistant has a model to think with (step 5).** It is the standard device-code login:
+
+1. The launcher prints a **one-time code** and a link: <https://github.com/login/device>.
+2. Open the link in a browser on your laptop (the sandbox has no browser), enter the code, and approve.
+3. The launcher says `Copilot signed in`, then shows a model picker. Choose a model. Which ones appear depends on your plan.
+
+Hermes keeps that Copilot token in its own home inside the sandbox, and the network policy only lets it reach Copilot.
+Later runs do not ask again; `/model` inside the chat switches models.
+
+### Why Copilot
+
+The people this is built for already have it. **CNCF gives GitHub Copilot Enterprise to official CNCF project maintainers**
+(they request it through the CNCF Service Desk;
+[announced December 2025](https://contribute.cncf.io/blog/2025/12/16/github-copilot-enterprise-for-maintainers/)), and
+**GitHub gives Copilot Pro free to maintainers of popular open-source projects**
+([eligibility](https://docs.github.com/en/copilot/how-tos/manage-your-account/get-free-access-to-copilot-pro)). So there is
+no API key to buy, paste or leak: sign in once and go.
+
+**No Copilot?** Start with `assistant --provider anthropic` (or `openai`, `nvidia`). The launcher asks for that key once
+and stores it in OpenShell, like the GitHub token. See [Choosing a model](#choosing-a-model).
+
 ## Which assistant do I want?
 
 One image holds two assistants. Each has its own sandbox, its own GitHub token and its own memory.
 
 | | **Maintainer** (`--profile maintainer`) | **Contributor** (`--profile contributor`) |
 |---|---|---|
-| For | People who review and merge a repository's pull requests | People contributing to Kyverno |
+| For | People who review and merge a repository's pull requests | People contributing to a repository (configured for Kyverno today) |
 | Does | Builds your PR queue, triages issues, drafts reviews and follow-ups, proposes a merge order | Finds issues worth doing, explains the code and what earlier PRs decided, helps prepare PRs, explains review feedback |
 | Can write to GitHub | Comments, labels, reviews, after you confirm each one | A comment on an issue or PR, and a pull request from your own fork, after you confirm the text |
 | Never | Merges (refused by the proxy, whatever the token can do) | Merges, approves, submits a formal review |
@@ -47,29 +119,10 @@ memory (Settings → Resources); about 20 GB of free disk; a way to authorize Gi
 ([Choosing a model](#choosing-a-model)). You do not install Hermes, Python or OpenShell: the launcher installs
 OpenShell if it is missing.
 
-**1. Run it.** No clone and no folder: the script takes the launcher from the image and runs it.
+**1. Run it.** Follow [The installer, step by step](#the-installer-step-by-step) and [Signing in](#signing-in-github-and-copilot).
+To use a fixed version instead of `latest`, add `--image ghcr.io/kyverno/assistant:v0.1.0` after `-s --`.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/kyverno/assistant/main/install.sh | sh -s -- --profile contributor      # or --profile maintainer
-```
-
-The first run downloads the image, about 1.2 GB compressed, so give it a few minutes. To use a fixed version instead
-of `latest`, add `--image ghcr.io/kyverno/assistant:v0.1.0` after `-s --`.
-
-It prints five numbered steps:
-
-| Step | What happens | You do |
-|---|---|---|
-| 1. Docker and OpenShell | Checks Docker; installs OpenShell if missing | Nothing, unless Docker is not running |
-| 2. Image | Pulls it (or uses the one you have) | Wait |
-| 3. GitHub token | Asks which repo (`owner/repo`; there is no default), then how to authorize: `gh` sign-in, or a pasted token. Checks it against the repo and stores it in OpenShell, not in the sandbox | Type the repo, then sign in or paste |
-| 4. Sandbox | Creates the sandbox and applies the network policy (a minute or two the first time) | Wait |
-| 5. Assistant | Reads your GitHub username from the token, then starts the GitHub Copilot sign-in: a page and a code | Open https://github.com/login/device, enter the code, approve, then pick a model |
-
-The chat opens after about 30 seconds; `cpuinfo` and `onnxruntime` lines before it are harmless. Only the first run
-asks questions: later, the same command takes you straight back in.
-
-**3. Check it works.** A good first question for the contributor is *"Use find_issues to list 3 open issues I could
+**2. Check it works.** A good first question for the contributor is *"Use find_issues to list 3 open issues I could
 work on."*; for the maintainer, *"what's my PR queue"*. In the start banner, the `github` server should be listed and
 many tools should show.
 

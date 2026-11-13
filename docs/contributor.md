@@ -13,7 +13,7 @@ merge, approve, submit a formal
 review; hooks enforce that. It can push to your own fork only if you start the launcher with `--push-to-fork`.
 
 ```bash
-container/assistant --profile contributor     # or just container/assistant, which asks which assistant you want
+assistant --profile contributor     # or just `assistant`, which asks which assistant you want
 ```
 
 It has its own sandbox (`assistant-contrib`) and its own GitHub token, apart from the maintainer's. It needs a GitHub

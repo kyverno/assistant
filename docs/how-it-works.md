@@ -8,8 +8,8 @@ The pieces, the safety layers in full, and why it is built this way.
  your laptop
  ┌────────────────────────────────────────────────────────────────────────────┐
  │                                                                            │
- │   you ──► container/assistant ──► OpenShell gateway                          │
- │           (the launcher)         • keeps your GitHub token (and any model  │
+ │   you ──► the launcher ──► OpenShell gateway                               │
+ │           (from the image)       • keeps your GitHub token (and any model  │
  │                                    API key) so the sandbox never holds it  │
  │                                  • a proxy that allows only listed hosts   │
  │                                    and adds the token on the way out       │
@@ -36,7 +36,7 @@ Three pieces, and each one has a job:
   credentials, it would print a meaningless placeholder. The gateway also refuses everything not on an allowlist,
   including merging.
 
-The launcher, `container/assistant`, ties them together. Each run it checks Docker, installs OpenShell if needed,
+The launcher (the `assistant` command, taken from the image by the installer) ties them together. Each run it checks Docker, installs OpenShell if needed,
 stores your token, creates or starts the sandbox, and opens the chat.
 
 ## How it stays safe
