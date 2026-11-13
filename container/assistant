@@ -270,6 +270,7 @@ if [ "$PUSH" = 1 ]; then
   [ -z "$PUSH_LOGIN" ] && [ -t 0 ] && read -r -p "  Your GitHub username (whose forks it may push to): " PUSH_LOGIN </dev/tty
   [ -z "$PUSH_LOGIN" ] && { fail "could not tell whose forks to allow: set ASSISTANT_PUSH_LOGIN to your GitHub username"; exit 1; }
   PUSH_REPOS=()
+  repo_from_instance    # on a later run the repository is in the sandbox's profile, not in your environment
   # Forks it may push to: the names in ASSISTANT_PUSH_REPOS, else the repository you named (ASSISTANT_REPO).
   [ -z "${ASSISTANT_PUSH_REPOS:-}" ] && [ -z "$REPO" ] \
     && { fail "do not know which forks to allow: set ASSISTANT_REPO (owner/repo) or ASSISTANT_PUSH_REPOS (repository names, space-separated)"; exit 1; }

@@ -84,6 +84,7 @@ select_profile() {
 # The Hermes profile folder an existing instance really has. One made before the rename calls it kyverno or
 # kyverno-contributor, and an --upgrade has to read the state from there; the new image's own name is HERMES_PROFILE.
 # The launcher defines instance_exec (run a command inside the instance). Sets INSTANCE_PROFILE.
+# shellcheck disable=SC2034  # INSTANCE_PROFILE is read by the launchers that source this file
 instance_profile() {
   local old have
   case "$KIND" in maintainer) old=kyverno ;; *) old=kyverno-contributor ;; esac
@@ -91,6 +92,18 @@ instance_profile() {
   instance_exists || return 0
   have="$(instance_exec ls /opt/hermes-home/.hermes/profiles 2>/dev/null)" || return 0
   if ! grep -qx "$HERMES_PROFILE" <<<"$have" && grep -qx "$old" <<<"$have"; then INSTANCE_PROFILE="$old"; fi
+  return 0
+}
+
+# The repository an existing instance is set up for. On later runs the host does not know it: it is in the instance's
+# profile .env (ASSISTANT_REPO, or KYVERNO_REPO from before the rename). Fills REPO if it is empty; leaves it empty if it
+# cannot be read. Needs instance_exec and instance_exists.
+repo_from_instance() {
+  [ -z "${REPO:-}" ] || return 0
+  instance_exists || return 0
+  instance_profile
+  REPO="$(instance_exec sh -c "grep -E '^(ASSISTANT|KYVERNO)_REPO=' /opt/hermes-home/.hermes/profiles/$INSTANCE_PROFILE/.env 2>/dev/null | head -n 1 | cut -d= -f2-" 2>/dev/null)" || REPO=""
+  valid_repo "$REPO" 2>/dev/null || REPO=""
   return 0
 }
 

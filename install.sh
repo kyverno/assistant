@@ -33,7 +33,7 @@ main() {
   # An image from before the rename has the launcher under its old name.
   launcher="$dir/launcher/assistant"
   [ -x "$launcher" ] || launcher="$dir/launcher/kyverno"
-  ASSISTANT_IMAGE="$image" "$launcher" "$@"
+  ASSISTANT_IMAGE="$image" KYVERNO_IMAGE="$image" "$launcher" "$@"    # an older launcher reads KYVERNO_IMAGE
 }
 
 main "$@"

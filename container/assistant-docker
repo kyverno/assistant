@@ -27,7 +27,7 @@
 #   --no-attach       set everything up but do not open the chat
 #   --reset           forget the stored GitHub token and ask for it again
 #
-# The dashboard works as with OpenShell: http://127.0.0.1:9219/maintainer?profile=kyverno (ASSISTANT_DASHBOARD_PORT changes
+# The dashboard works as with OpenShell: http://127.0.0.1:9219/maintainer?profile=maintainer (ASSISTANT_DASHBOARD_PORT changes
 # the port). It listens on 127.0.0.1 in the container; a small relay passes it to a port Docker publishes on 127.0.0.1
 # of this machine, on a network only this container joins.
 #
