@@ -60,8 +60,7 @@ committed) and fill in these yourself:
   this instance answering only them).
 - `SLACK_HOME_CHANNEL` — the maintainers channel to read priority signals from
   and post the queue in. Invite the bot to it (`/invite @kyverno-assistant`).
-- `ASSISTANT_REPO` — `owner/repo` this instance manages. Defaults to
-  `kyverno/kyverno`.
+- `ASSISTANT_REPO` — `owner/repo` this instance manages. Required: there is no default.
 - `ANTHROPIC_API_KEY`, `COPILOT_GITHUB_TOKEN` or another provider key — optional.
   The model is chosen in Hermes (`hermes -p maintainer model`, or `/model` in a
   chat), and the installer never changes it. `COPILOT_GITHUB_TOKEN` is separate

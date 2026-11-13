@@ -62,7 +62,7 @@ It prints five numbered steps:
 |---|---|---|
 | 1. Docker and OpenShell | Checks Docker; installs OpenShell if missing | Nothing, unless Docker is not running |
 | 2. Image | Pulls it (or uses the one you have) | Wait |
-| 3. GitHub token | Asks which repo (default `kyverno/kyverno`), then how to authorize: `gh` sign-in, or a pasted token. Checks it against the repo and stores it in OpenShell, not in the sandbox | Type the repo, then sign in or paste |
+| 3. GitHub token | Asks which repo (`owner/repo`; there is no default), then how to authorize: `gh` sign-in, or a pasted token. Checks it against the repo and stores it in OpenShell, not in the sandbox | Type the repo, then sign in or paste |
 | 4. Sandbox | Creates the sandbox and applies the network policy (a minute or two the first time) | Wait |
 | 5. Assistant | Reads your GitHub username from the token, then starts the GitHub Copilot sign-in: a page and a code | Open https://github.com/login/device, enter the code, approve, then pick a model |
 

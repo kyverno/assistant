@@ -1,6 +1,6 @@
 # repo-intel
 
-A bundled Hermes plugin, not a skill. Registers six tools: five fetch tools (`fetch.py`, `fetch_tools.py`) and the sequencer (`sequencer.py`, `sequence_tools.py`).
+A bundled Hermes plugin, not a skill. Registers seven tools: five fetch tools (`fetch.py`, `fetch_tools.py`), the sequencer (`sequencer.py`, `sequence_tools.py`) and `repo_pack` (`pack_tools.py`), which returns the organisation pack's rules and facts.
 
 ## Fetch
 

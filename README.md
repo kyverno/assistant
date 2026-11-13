@@ -196,7 +196,9 @@ to a model (a GitHub Copilot device-code login, or `--provider anthropic|openai|
 container/assistant --build --org your-org
 ```
 
-The pack is baked into the image read-only. First builds take 15 to 30 minutes.
+The pack is baked into the image read-only, and the assistant reads that copy first. First builds take 15 to 30 minutes.
+On a host install (`scripts/install.sh`), the installer copies `container/org/$ASSISTANT_ORG`, or the pack named after your
+repository's owner, into the profile.
 
 | To | Run |
 |---|---|

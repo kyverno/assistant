@@ -18,7 +18,7 @@ container/assistant --profile contributor     # or just container/assistant, whi
 
 It has its own sandbox (`assistant-contrib`) and its own GitHub token, apart from the maintainer's. It needs a GitHub
 token of your own account (a fine-grained PAT; "Public repositories (read-only)" is enough to read everything, or sign in
-with `gh`), your GitHub username (read from the token), and the repo (default `kyverno/kyverno`). The coding environment
+with `gh`), your GitHub username (read from the token), and the repo (`owner/repo`, no default). The coding environment
 below lets it clone the repo, build and test in the sandbox, which holds no real tokens. It runs only in the
 sandbox: the host install (`scripts/install.sh`) sets up the maintainer profile only. Background updates (new reviews,
 failing checks, merged PRs) need the messaging gateway, so they are not available in the sandbox yet.

@@ -49,7 +49,7 @@ prints the address:
 http://127.0.0.1:9219/maintainer?profile=maintainer
 ```
 
-Pick **Kyverno** in the sidebar under Plugins. It refreshes every 15 seconds. Keep it open next to the chat: it fills
+Pick **Maintainer** in the sidebar under Plugins. It refreshes every 15 seconds. Keep it open next to the chat: it fills
 when the agent answers a queue, stale-PR, issue-triage or Discussions request, not in the background.
 
 | Tab | Shows |

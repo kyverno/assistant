@@ -90,7 +90,10 @@ The script is idempotent: re-run it as often as you like and it only does what i
 1. **Install and prompts:** installs the profile, then asks for each missing credential (GitHub
    token, username, repo) and whether to set up Slack and the sandboxed terminal. Values are saved to
    `~/.hermes/profiles/maintainer/.env`. Press Enter at any prompt to skip it.
-2. **Checks:** installs the messaging gateway (only if Slack is configured), checks that the GitHub
+2. **Organisation pack:** copies your pack from `container/org/` into the profile (see
+   [`organisation-pack.md`](organisation-pack.md)): `ASSISTANT_ORG=<name>` if you set it, otherwise the one named after the owner
+   of your repository. Without one the assistant still runs, but knows no file classes or merge gate, and the installer says so.
+3. **Checks:** installs the messaging gateway (only if Slack is configured), checks that the GitHub
    and Slack tools are reachable and the hooks are approved, and prints ✓ or ✗ for each check.
 
 If you skipped a prompt, the script stops and lists what is missing. Fill it in at the `.env`
@@ -101,7 +104,7 @@ skips the prompts and works this way from the start.
 |---|---|---|
 | `REPO_GITHUB_TOKEN` | yes | Token from step 2 |
 | `MAINTAINER_GITHUB_LOGIN` | yes | Your GitHub username |
-| `ASSISTANT_REPO` | yes | `owner/repo` the assistant manages (default `kyverno/kyverno`) |
+| `ASSISTANT_REPO` | yes | `owner/repo` the assistant manages (no default: the installer asks) |
 | `ANTHROPIC_API_KEY`, `COPILOT_GITHUB_TOKEN`, … | no | Optional model keys; Hermes can also sign in to a provider for you (step 5) |
 | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN` | Slack only | Bot and app-level tokens |
 | `SLACK_ALLOWED_USERS` | Slack only | Your Slack member ID |
@@ -164,7 +167,7 @@ scroll the chat or copy links by hand. (The sandbox runs it too; see the [README
 hermes -p maintainer dashboard
 ```
 
-Pick **Kyverno** in the sidebar under Plugins, or open
+Pick **Maintainer** in the sidebar under Plugins, or open
 `http://127.0.0.1:9119/maintainer?profile=maintainer`. It refreshes every 15 seconds. Keep it open next to
 the chat: it fills when the agent answers a queue, stale-PR, issue-triage or Discussions request,
 not in the background. The tabs are described in the [README](usage.md#the-dashboard). The Maintainer tab is

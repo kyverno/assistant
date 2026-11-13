@@ -13,12 +13,19 @@ container/org/acme/
 `container/org/kyverno/` is the worked example. Build your own image with it: `container/assistant --build --org acme`.
 The pack is copied into the image, read-only, so a manipulated agent cannot rewrite its own rules.
 
+## Where the assistant reads it from
+
+| How you run it | Where the pack comes from |
+|---|---|
+| The sandbox or container image | The copy baked into the image at `/opt/kyverno/.../org/`, which the sandbox policy keeps read-only. It is read first; the copy in Hermes' writable home is never trusted over it. Choose it with `--org` when you build |
+| `scripts/install.sh` on your host | Copied into the profile on every run, from `container/org/$ASSISTANT_ORG`, or else `container/org/<owner of ASSISTANT_REPO>/`. Edit it there: the copy in the profile is overwritten. With neither, it installs with no pack and says so |
+
 ## What happens without one, or with a mistake
 
 | Situation | Result |
 |---|---|
 | No pack | The tools still run. Every file reads `STANDARD`, no PR is gate-blocked, no label means "ready". `repo_pack` says `pack: none`, and the assistant tells you which signals it is therefore missing. |
-| A key it does not know (a typo) | An error that names the key, from `repo_pack` and the tools that need it. It never ignores it silently. |
+| A key it does not know (a typo), a wrong type, or a file that is not a mapping | An error that names the key, from `repo_pack` and the tools that need it. It never ignores it silently and never crashes. |
 | A bad gate (no bypass label, a marker regex without a `(?P<branch>...)` group) | An error that names the gate and the problem. |
 | A rule that matches nothing | Nothing happens. Check with `repo_pack`, which returns exactly what was loaded. |
 
@@ -46,6 +53,7 @@ maintainer:
 | `readiness.ready_labels` | Labels that mean "ready for a maintainer". The queue fetches one set of PRs per label. Without them the assistant says so and works from the focus you give it. |
 | `readiness.attention_labels` | Labels that mean "waiting on the author". |
 | `readiness.infra_checks` | Check names whose failure is not the author's to fix. Keep this in step with `.github/pr-readiness-checks.yml`, which the shared CI reads. |
+| `readiness.checks_file` | Path of that readiness-checks file. The contributor assistant reads it. Under `readiness:` only these four keys are accepted. |
 | `review_bots` | Logins of review bots (for example `copilot-pull-request-reviewer`). |
 | `agent_docs` | Globs for the files that describe your code (`**/AGENTS.md`, `ARCHITECTURE.md`, ...). |
 | `codeowners` | Path of your CODEOWNERS file. |
@@ -56,7 +64,7 @@ maintainer:
 |---|---|
 | `approval_bots` | Bots whose approval counts as one review signal in the queue order (`bot_approved` on each PR). A signal, not a substitute for a human. |
 | `branch_gates` | Branch-wide merge gates, if you have one: `name`, `status_context` (the commit status, kept out of a PR's own CI state), `failure_issue_label` (an open issue with this label means the gate is red), `branch_marker` (a regex with a `(?P<branch>...)` group that finds the branch in the issue body; leave it out and the gate blocks every branch), `bypass_label`. No gates listed means the assistant never mentions one. Only the first gate is used. |
-| `file_classes` | Globs for `generated`, `generated_exceptions` (hand-written files inside a generated directory), `api_surface`, `critical` (elevated risk after merge) and `test_only`. Highest tier wins: generated, then API surface, then critical, then test-only. |
+| `file_classes` | Globs for `generated`, `generated_exceptions` (globs for hand-written files inside a generated directory), `api_surface`, `critical` (elevated risk after merge) and `test_only`. Highest tier wins: generated, then API surface, then critical, then test-only. |
 | `generated_inputs` | What feeds the generated files: `paths` (globs) and `dependency_modules` (a bump of one of these also counts). A PR touching an input must merge before one touching the output. |
 | `dependency_bots` | `codegen_module_globs` (dependency bumps that need regenerated output in the same PR) and `codegen_kind_label`. |
 | `milestones` | `title_format` (how your milestones are named), `open_milestone_label`, `issue_urgency_labels` (set by hand on an issue to mark urgency toward a milestone). |
