@@ -8,26 +8,27 @@ The rules, configured in the repository's issue-management.json (every key is op
                        commented since the merge. Labels and comments; never closes.
   waiting-on-reporter  An issue with a needs-info label and no reply from its author. Warns with `stale-issue`,
                        then closes as not planned once that warning is `close_days` old. The only closing rule.
-  idle-untriaged       An untriaged issue with no priority and no human activity for a long time. Labels with
-                       `stale-issue` and comments; never closes. Off unless triage_label is set.
 
 How it works, in the order the code does it:
 
   1. Candidates come from searches, one per rule, not from a scan of every issue: the issues carrying a managed or
-     needs-info label, the idle untriaged ones, and the recently updated ones a merged PR mentions.
+     needs-info label, and the recently updated ones a merged PR mentions.
   2. Each candidate is read once. Comments and label events are paged backwards only as far as a decision needs.
   3. `decide` turns what was read into actions. It is pure and stores no state: labels, the timeline and hidden
      markers in the bot's own comments are the state. Only a Bot's comment counts as a marker.
   4. A single guard makes every write: in a dry run it prints and does nothing, otherwise it waits between writes.
      A close re-reads the live issue first and gives up if anything changed.
 
-A human comment after `stale-issue` or `possibly-resolved` removes it; a reply from the reporter removes the
-needs-info label, so a later request starts a fresh clock. An exempt label or a milestone means the issue is never
-labelled or closed and loses `stale-issue`, so lifting the exemption cannot close it on an old clock. One failing
-issue is counted and the rest continue; any failure makes the exit code 1.
+A human comment after `stale-issue` (and, unless resolved_clears_on_comment is false, `possibly-resolved`) removes
+it; a reply from the reporter removes the needs-info label, so a later request starts a fresh clock. An exempt label
+or a milestone means the issue is never labelled or closed and loses `stale-issue`, so lifting the exemption cannot
+close it on an old clock. An issue already in one of the repository's queue_labels is not given `possibly-resolved`:
+a person put it in that queue. One failing issue is counted and the rest continue; any failure makes the exit code 1.
 
-Dry-run unless DRY_RUN is the string false. With VALIDATE=true it only checks the config. Prints a Markdown report
-on stdout.
+With queue_labels set, the report ends with how many open issues sit in each queue, the least recently updated ones,
+and how many are in none.
+
+Dry-run unless DRY_RUN is the string false. Prints a Markdown report on stdout.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -44,19 +45,21 @@ DEFAULTS = {
     # Not `stale`: PR automation owns that label, and a PR and an issue should never share one.
     "stale_label": "stale-issue",
     "resolved_label": "possibly-resolved",
-    # Empty disables the idle-untriaged rule, so only repositories that triage with a label opt in.
-    "triage_label": "",
-    "priority_prefix": "",
+    # A repository that sorts issues into review queues names the labels here. An issue already in one is never
+    # given `possibly-resolved`, and the report counts each queue.
+    "queue_labels": [],
+    # False keeps `possibly-resolved` on an issue when someone comments, for a repository whose label is a queue
+    # that a person removes once reviewed.
+    "resolved_clears_on_comment": True,
     "needs_info_labels": ["needs-info"],
     "exempt_labels": ["no-stale", "hold", "security"],
     "warning_days": 14,
     "close_days": 14,
-    "idle_days": 180,
     "resolved_grace_days": 3,
     # A mention only makes an issue a candidate while the issue was updated this recently.
     "resolved_window_days": 30,
-    # Untriaged issues listed in the report, oldest update first; 0 turns the list off.
-    "digest_limit": 25,
+    # Issues listed per queue in the report, least recently updated first; 0 lists none.
+    "digest_limit": 10,
     "warning_comment": (
         "This issue is waiting on more information from the reporter and has had no reply. It will be closed in "
         "{days} days unless there is a response. Any comment removes the `{label}` label."
@@ -69,18 +72,13 @@ DEFAULTS = {
         "A merged PR (#{pr}) references this issue but did not close it, and nothing has been said since. Is this "
         "resolved? A maintainer or the reporter can close it, or comment to remove the `{label}` label."
     ),
-    "idle_comment": (
-        "This issue has had no activity for {days} days and has not been triaged. A maintainer should set a "
-        "priority or close it. Any comment removes the `{label}` label."
-    ),
 }
-LIST_KEYS = {"needs_info_labels", "exempt_labels"}
-DAY_KEYS = {"warning_days", "close_days", "idle_days", "resolved_grace_days", "resolved_window_days"}
+LIST_KEYS = {"needs_info_labels", "exempt_labels", "queue_labels"}
+DAY_KEYS = {"warning_days", "close_days", "resolved_grace_days", "resolved_window_days"}
 COMMENT_FIELDS = {
     "warning_comment": {"days", "label"},
     "close_comment": {"days"},
     "resolved_comment": {"pr", "label"},
-    "idle_comment": {"days", "label"},
 }
 LABEL_INFO = {
     "stale-issue": ("CFD3D7", "Issue with no activity, or waiting on the reporter"),
@@ -146,8 +144,8 @@ PAGES = {
 }
 
 SEARCH_QUERY = """
-query($q: String!, $after: String) {
-  search(query: $q, type: ISSUE, first: 100, after: $after) {
+query($q: String!, $first: Int!, $after: String) {
+  search(query: $q, type: ISSUE, first: $first, after: $after) {
     issueCount
     pageInfo { hasNextPage endCursor }
     nodes { %s }
@@ -164,11 +162,7 @@ MENTION_FRAGMENT = """... on Issue {
     nodes { ... on CrossReferencedEvent { willCloseTarget source { ... on PullRequest { state merged mergedAt } } } }
   }
 }"""
-DIGEST_FRAGMENT = """... on Issue {
-  number title createdAt updatedAt
-  labels(first: 100) { nodes { name } }
-  milestone { title }
-}"""
+QUEUE_FRAGMENT = "... on Issue { number title updatedAt }"
 
 
 def log(message):
@@ -252,7 +246,9 @@ def load_config(path):
     limit = config["digest_limit"]
     if isinstance(limit, bool) or not isinstance(limit, int) or not 0 <= limit <= 200:
         raise ValueError("digest_limit must be a whole number from 0 to 200")
-    for key in ("stale_label", "resolved_label", "triage_label", "priority_prefix"):
+    if not isinstance(config["resolved_clears_on_comment"], bool):
+        raise ValueError("resolved_clears_on_comment must be true or false")
+    for key in ("stale_label", "resolved_label"):
         if not isinstance(config[key], str) or '"' in config[key]:
             raise ValueError(f"{key} must be a string without double quotes")
     if not config["stale_label"] or not config["resolved_label"]:
@@ -276,7 +272,7 @@ def search_nodes(gh, query, fragment):
     """All nodes of a search, paged, plus whether results beyond the 1000 search allows were left out."""
     nodes, after = [], None
     for _ in range(SEARCH_CAP // 100):
-        data = gh.graphql(SEARCH_QUERY % fragment, q=query, after=after)["search"]
+        data = gh.graphql(SEARCH_QUERY % fragment, q=query, first=100, after=after)["search"]
         nodes += [n for n in data["nodes"] if n]
         if not data["pageInfo"]["hasNextPage"]:
             return nodes, False
@@ -432,8 +428,9 @@ def decide(issue, now, cfg):
     if not issue["labels_complete"]:
         return actions, [f"#{number}: more than 100 labels, skipped"]
 
-    # A human comment after a managed label removes it.
-    for name in sorted(labels & {stale, resolved}):
+    # A human comment after a managed label removes it. A queue a person reviews is the exception.
+    managed = {stale, resolved} if cfg["resolved_clears_on_comment"] else {stale}
+    for name in sorted(labels & managed):
         applied = label_time(issue, name)
         if applied is None:
             notes.append(f"#{number}: when `{name}` was applied is not known, left alone")
@@ -478,8 +475,8 @@ def decide(issue, now, cfg):
             actions.append(("close", text))
         return actions, notes
 
-    # Rule: possibly resolved. Never closes.
-    if resolved not in labels:
+    # Rule: possibly resolved. Never closes. An issue a person already put in a queue is left where they put it.
+    if resolved not in labels and not labels & set(cfg["queue_labels"]):
         if not issue["refs_complete"]:
             notes.append(f"#{number}: mentioned by more than 100 PRs, not checked for a fix")
         elif not any(r["state"] == "OPEN" for r in issue["refs"]):
@@ -495,18 +492,6 @@ def decide(issue, now, cfg):
                         actions.append(("label", resolved, with_marker(key, text)))
                     return actions, notes
 
-    # Rule: idle and untriaged. Never closes. Off unless the repository names its triage label.
-    key = f"idle {epoch(activity)}"
-    if (
-        cfg["triage_label"]
-        and cfg["triage_label"] in labels
-        and stale not in labels
-        and not (cfg["priority_prefix"] and any(n.startswith(cfg["priority_prefix"]) for n in labels))
-        and days(activity) >= cfg["idle_days"]
-        and marker_time(issue, key) is None
-    ):
-        text = cfg["idle_comment"].format(days=days(activity), label=stale)
-        actions.append(("label", stale, with_marker(key, text)))
     return actions, notes
 
 
@@ -540,13 +525,12 @@ def discover(gh, repo, cfg, now):
     """The issue numbers worth reading, one search per rule. Returns (numbers, failures)."""
     day = lambda n: (now - timedelta(days=n)).strftime("%Y-%m-%d")  # noqa: E731
     base = f"repo:{repo}"
-    searches = [(f'{base} is:issue is:open label:"{cfg["stale_label"]}"', NUMBER_FRAGMENT),
-                (f'{base} is:issue is:open label:"{cfg["resolved_label"]}"', NUMBER_FRAGMENT)]
+    searches = [(f'{base} is:issue is:open label:"{cfg["stale_label"]}"', NUMBER_FRAGMENT)]
+    if cfg["resolved_clears_on_comment"]:
+        # Only then does an issue already carrying the label ever need a second look.
+        searches.append((f'{base} is:issue is:open label:"{cfg["resolved_label"]}"', NUMBER_FRAGMENT))
     searches += [(f'{base} is:issue is:open label:"{name}"', NUMBER_FRAGMENT) for name in cfg["needs_info_labels"]]
     exempt = " ".join(exempt_terms(cfg))
-    if cfg["triage_label"]:
-        idle = f'{base} is:issue is:open label:"{cfg["triage_label"]}" updated:<{day(cfg["idle_days"])} {exempt}'
-        searches.append((idle, NUMBER_FRAGMENT))
     mentioned = (f'{base} is:issue is:open updated:>={day(cfg["resolved_window_days"])} '
                  f'-label:"{cfg["resolved_label"]}" {exempt}')
     numbers, failures = set(), 0
@@ -571,22 +555,20 @@ def discover(gh, repo, cfg, now):
     return numbers, failures
 
 
-def untriaged_queue(gh, repo, cfg, now):
-    """(number, title, days since update) for issues with the triage label and no priority label, least recently
-    updated first. The update time includes bot activity, which a search can give without reading each issue."""
-    query = f'repo:{repo} is:issue is:open label:"{cfg["triage_label"]}" sort:updated-asc'
-    nodes, capped = search_nodes(gh, query, DIGEST_FRAGMENT)
-    if capped:
-        log(f"::warning::more than {SEARCH_CAP} issues have `{cfg['triage_label']}`; the queue is the oldest {SEARCH_CAP}")
-    queue = []
-    for node in nodes:
-        labels = {n["name"] for n in node["labels"]["nodes"]}
-        if node["milestone"]:
-            continue
-        if cfg["priority_prefix"] and any(n.startswith(cfg["priority_prefix"]) for n in labels):
-            continue
-        queue.append((node["number"], node["title"], (now - parse_time(node["updatedAt"])).days))
-    return queue
+def queue_report(gh, repo, cfg, now):
+    """For each queue label: its open count and its least recently updated issues. Also how many open issues are
+    in none of the queues. Each is one search; the update time includes bot activity, which a search can give
+    without reading each issue."""
+    queues = []
+    for label in cfg["queue_labels"]:
+        query = f'repo:{repo} is:issue is:open label:"{label}" sort:updated-asc'
+        data = gh.graphql(SEARCH_QUERY % QUEUE_FRAGMENT, q=query, first=max(cfg["digest_limit"], 1))["search"]
+        oldest = [(n["number"], n["title"], (now - parse_time(n["updatedAt"])).days)
+                  for n in data["nodes"][: cfg["digest_limit"]] if n]
+        queues.append((label, data["issueCount"], oldest))
+    none_of = " ".join(f'-label:"{label}"' for label in cfg["queue_labels"])
+    unqueued = gh.graphql(SEARCH_QUERY % NUMBER_FRAGMENT, q=f"repo:{repo} is:issue is:open {none_of}", first=1)
+    return queues, unqueued["search"]["issueCount"]
 
 
 def ensure_label(gh, repo, name, known):
@@ -643,15 +625,6 @@ def short(title):
 
 
 def main():
-    if os.environ.get("VALIDATE") == "true":
-        # Parses the config only: no API call and no token, so it is safe on a pull request from a fork.
-        try:
-            load_config(Path(os.environ.get("ISSUE_CONFIG", ".github/issue-management.json")))
-        except (ValueError, OSError) as err:
-            print(f"::error title=Invalid issue-management config::{type(err).__name__}: {err}")
-            return 1
-        print("issue-management config is valid")
-        return 0
     dry_run = os.environ.get("DRY_RUN", "true")
     if dry_run not in ("true", "false"):
         log("DRY_RUN must be true or false")
@@ -711,19 +684,24 @@ def sweep(gh, repo, cfg, max_actions, now):
         if len(comments) > 30:
             print(f"…and {len(comments) - 30} more.\n")
         print("</details>")
-    if cfg["triage_label"] and cfg["digest_limit"]:
+    if cfg["queue_labels"]:
         try:
-            queue = untriaged_queue(gh, repo, cfg, now)
+            queues, unqueued = queue_report(gh, repo, cfg, now)
         except GhError as err:
-            log(f"::error::untriaged queue failed: {err}")
+            log(f"::error::queue report failed: {err}")
             failed += 1
-            queue = []
-        print(f"\n## Untriaged queue\n\n{len(queue)} issues have `{cfg['triage_label']}` and no priority.\n")
-        if queue:
-            print(f"Least recently updated {min(len(queue), cfg['digest_limit'])} first:\n")
-            print("| Issue | Days since update | Title |\n|---|---|---|")
-            for number, title, idle in queue[: cfg["digest_limit"]]:
-                print(f"| #{number} | {idle} | {short(title)} |")
+        else:
+            print("\n## Queues\n\n| Queue | Open | Least recently updated (days) |\n|---|---|---|")
+            for label, count, oldest in queues:
+                print(f"| `{label}` | {count} | {oldest[0][2] if oldest else '-'} |")
+            print(f"\n{unqueued} open issues are in none of these queues.")
+            if cfg["digest_limit"]:
+                print("\n<details><summary>Least recently updated, per queue</summary>\n")
+                for label, _, oldest in queues:
+                    print(f"**`{label}`**\n")
+                    print("\n".join(f"- #{n} ({days} days) {short(title)}" for n, title, days in oldest) or "- none")
+                    print()
+                print("</details>")
     if failed:
         log(f"::error::{failed} operation(s) failed")
     return 1 if failed else 0

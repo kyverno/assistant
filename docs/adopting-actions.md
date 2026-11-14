@@ -98,8 +98,8 @@ automation:
 scripts/adopt-ci.sh --issues your-org/repo-a your-org/repo-b
 ```
 
-It adds `.github/workflows/issue-management.yaml` (daily, preview), `.github/workflows/check-issue-management.yaml`
-(validates the config on every PR, no token) and `.github/issue-management.json`, and never overwrites a file.
+It adds `.github/workflows/issue-management.yaml` (daily, preview) and `.github/issue-management.json`, and never
+overwrites a file.
 `--reviewers` is not needed: its comments mention no team. It opens the PR from `ci/adopt-issue-management`, warns about
 an existing `actions/stale` or similar workflow, and supports `--dry-run`. `--update-pin` moves the pins of both
 automations in a repository.

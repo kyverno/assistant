@@ -7,15 +7,15 @@ Python 3.9+ and `gh`; no packages. The script is loaded from `GITHUB_ACTION_PATH
 
 | Rule | When | Action |
 | --- | --- | --- |
-| possibly resolved | A merged PR mentions the issue without closing it, `resolved_grace_days` passed, no human commented since the merge, and no open PR mentions it either | Adds `possibly-resolved` and comments. Never closes. |
+| possibly resolved | A merged PR mentions the issue without closing it, `resolved_grace_days` passed, no human commented since the merge, no open PR mentions it either, and the issue is in none of the `queue_labels` | Adds `possibly-resolved` and comments. Never closes. |
 | waiting on reporter | The issue has a `needs_info_labels` label and its author has not replied since it was applied | After `warning_days` of quiet, adds `stale-issue` and posts a warning. Once that warning is `close_days` old and the label is still there, closes as not planned. **The only rule that closes.** |
-| idle untriaged | The issue has `triage_label`, no label starting with `priority_prefix`, and no human activity for `idle_days` | Adds `stale-issue` and comments. Never closes. **Off unless `triage_label` is set.** |
 
-- A human comment after `stale-issue` or `possibly-resolved` removes it. A reply from the reporter removes the
-  needs-info label too, so a later request starts a fresh clock. A maintainer's comment is not a reply, but it does
-  restart the quiet period before a warning.
+- A human comment after `stale-issue` removes it. It removes `possibly-resolved` too, unless
+  `resolved_clears_on_comment` is `false`. A reply from the reporter removes the needs-info label, so a later request
+  starts a fresh clock. A maintainer's comment is not a reply, but it does restart the quiet period before a warning.
 - Issues with an `exempt_labels` label or a milestone are never labelled or closed, and lose `stale-issue`, so lifting
   the exemption later cannot close on an old clock.
+- An issue already in one of the `queue_labels` is not given `possibly-resolved`: a person put it in that queue.
 - **A close needs proof of a warning.** The action only closes if the bot's own warning comment for the current
   request exists and is `close_days` old. A `stale-issue` label set by hand is not enough, and a maintainer who removes
   the label after the warning is respected.
@@ -23,12 +23,18 @@ Python 3.9+ and `gh`; no packages. The script is loaded from `GITHUB_ACTION_PATH
   and stale, has become exempt, or has a comment the run did not see.
 - Bot comments never count as activity.
 
+## Queue report
+
+With `queue_labels` set, the report ends with a **Queues** section: for each queue label, how many open issues carry
+it and the `digest_limit` least recently updated, plus how many open issues are in none of the queues. It labels and
+comments on nothing. It is for whoever works the queues; the days are since the last update, which includes bot
+activity, because a search can give that without reading each issue.
+
 ## How it works
 
-1. **Candidates come from searches, not a scan of every issue**: issues carrying a managed or needs-info label;
-   untriaged issues not updated for `idle_days` (idle rule); and issues updated within `resolved_window_days` that a
-   merged PR mentions (a light first look rules most out, so they are not read at all). Exempt issues are left out of
-   the last two searches.
+1. **Candidates come from searches, not a scan of every issue**: issues carrying a managed or needs-info label, and
+   issues updated within `resolved_window_days` that a merged PR mentions (a light first look rules most out, so they
+   are not read at all). Exempt issues are left out of the second search.
 2. **Each candidate is read once.** Comments and label events arrive newest first, 100 at a time, and are paged
    backwards only as far as a decision needs: to the event that applied each relevant label, to the comments since
    then, and to the newest human comment. Paging stops at a cursor that does not move, and a malformed page is an
@@ -45,18 +51,12 @@ Python 3.9+ and `gh`; no packages. The script is loaded from `GITHUB_ACTION_PATH
 A preview lists the comments a live run would post. If something cannot be decided, such as a label whose event is no
 longer in the history, the issue is skipped and the report says why.
 
-With `triage_label` set, the report also ends with an **untriaged queue**: the `digest_limit` issues with the triage
-label, no priority label and no milestone that were updated least recently, with their days since update. It labels
-and comments on nothing; it gives whoever is on triage duty a list to work from. Its days count includes bot activity,
-which a search can give without reading each issue.
-
 ## Interface
 
 | Input | Default | Meaning |
 | --- | --- | --- |
 | `config` | `.github/issue-management.json` | Repository-specific JSON; the file and every key are optional |
 | `dry-run` | `'true'` | Exactly `'true'` or `'false'`; preview never mutates GitHub |
-| `validate` | `'false'` | `'true'` only checks the config, offline: no token, no API call. Safe on pull requests from forks |
 | `max-actions` | `'30'` | With `dry-run: 'false'`, the most issues one run changes; the rest are listed as skipped |
 
 Supply `GH_TOKEN` in the caller step's environment. It needs `issues: write` and `contents: read`. The report goes
@@ -70,22 +70,38 @@ with unknown `{fields}` fail the run.
 | Key | Default |
 | --- | --- |
 | `stale_label` / `resolved_label` | `stale-issue` / `possibly-resolved` (created if missing when live) |
-| `triage_label` / `priority_prefix` | empty: idle rule off |
+| `resolved_clears_on_comment` | `true`. `false` keeps `resolved_label` when someone comments, for a label that is a review queue a person clears |
+| `queue_labels` | `[]`. The repository's review-queue labels |
 | `needs_info_labels` | `["needs-info"]` |
 | `exempt_labels` | `["no-stale", "hold", "security"]` |
 | `warning_days` / `close_days` | `14` / `14` |
-| `idle_days` / `resolved_grace_days` | `180` / `3` |
-| `resolved_window_days` | `30`: a mention only makes an issue a candidate while the issue was updated this recently |
-| `digest_limit` | `25`; `0` turns the queue list off, and it is also off without `triage_label` |
-| `warning_comment`, `close_comment`, `resolved_comment`, `idle_comment` | generic text; `{days}`, `{pr}` and `{label}` allowed where they make sense |
+| `resolved_grace_days` / `resolved_window_days` | `3` / `30`. A mention only makes an issue a candidate while the issue was updated this recently |
+| `digest_limit` | `10` issues per queue in the report; `0` lists none |
+| `warning_comment`, `close_comment`, `resolved_comment` | generic text; `{days}`, `{pr}` and `{label}` allowed where they make sense |
+
+### Example: a repository that sorts issues into review queues by label
+
+```json
+{
+  "resolved_label": "triage:verify-closure",
+  "resolved_clears_on_comment": false,
+  "queue_labels": [
+    "triage:critical-review", "triage:needs-repro", "triage:verify-closure",
+    "triage:scope-review", "triage:decision"
+  ],
+  "needs_info_labels": ["needs-info"],
+  "exempt_labels": ["no-stale", "hold", "security", "release-critical", "release-high"]
+}
+```
+
+New issues that a merged PR mentions get `triage:verify-closure`. Issues a person already queued are left alone, and
+no comment ever removes a queue label.
 
 ## Limits
 
 - Search returns at most 1000 issues; the run warns when a search hits that.
 - `possibly-resolved` only sees mentions on issues updated within `resolved_window_days`, and an issue mentioned by
   more than 100 PRs is skipped with a note.
-- The idle rule only looks at issues whose last update is older than `idle_days`, so an issue that only had label or
-  bot activity recently is not flagged until that too is old.
 - Search results can lag a little behind recent changes.
 
 `stale-issue` is deliberately not `stale`: the PR automation owns `stale`, and an issue and a PR should not share a

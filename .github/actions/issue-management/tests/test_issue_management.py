@@ -6,7 +6,6 @@ import contextlib
 import importlib.util
 import io
 import json
-import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -15,10 +14,11 @@ spec = importlib.util.spec_from_file_location("run", Path(__file__).resolve().pa
 run = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(run)
 
-# A repository that triages with labels, as Kyverno does. The defaults leave the idle rule off.
+# A repository that sorts issues into review queues by label, as Kyverno does.
+QUEUES = ["triage:critical-review", "triage:needs-repro", "triage:verify-closure", "triage:scope-review",
+          "triage:decision"]
 KYVERNO = {
-    "triage_label": "triage",
-    "priority_prefix": "release-",
+    "queue_labels": QUEUES,
     "needs_info_labels": ["needs-info", "cannot reproduce", "waiting for status update"],
     "exempt_labels": ["no-stale", "hold", "security", "good first issue", "release-critical", "release-high"],
 }
@@ -190,6 +190,18 @@ class PossiblyResolved(unittest.TestCase):
         i = issue(["possibly-resolved"], comments=[(2, "reporter")], events=[("possibly-resolved", 5)])
         self.assertEqual(kinds(i), [("unlabel", "possibly-resolved")])
 
+    def test_an_issue_already_in_a_queue_is_left_there(self):
+        self.assertEqual(kinds(issue(["triage:needs-repro"], refs=[(99, "MERGED", 10)], created=30)), [])
+
+    def test_a_queue_label_is_kept_when_someone_comments_if_so_configured(self):
+        cfg = {**CFG, "resolved_label": "triage:verify-closure", "resolved_clears_on_comment": False}
+        i = issue(["triage:verify-closure"], comments=[(2, "reporter")], events=[("triage:verify-closure", 5)])
+        self.assertEqual(kinds(i, cfg), [])
+
+    def test_the_label_is_removed_on_a_comment_by_default(self):
+        i = issue(["possibly-resolved"], comments=[(2, "reporter")], events=[("possibly-resolved", 5)])
+        self.assertEqual(kinds(i), [("unlabel", "possibly-resolved")])
+
     def test_more_than_100_mentions_is_skipped_with_a_note(self):
         acts, notes = decide(issue(refs=[(99, "MERGED", 10)], created=30, refs_complete=False))
         self.assertEqual(acts, [])
@@ -197,30 +209,6 @@ class PossiblyResolved(unittest.TestCase):
 
     def test_never_closes(self):
         acts, _ = decide(issue(refs=[(99, "MERGED", 400)], created=500))
-        self.assertTrue(all(a[0] != "close" for a in acts))
-
-
-class IdleUntriaged(unittest.TestCase):
-    def test_labels_idle_untriaged(self):
-        acts, _ = decide(issue(["triage"], created=200))
-        self.assertEqual([(a[0], a[1]) for a in acts], [("label", "stale-issue")])
-        self.assertIn("`stale-issue`", acts[0][2])
-
-    def test_recent_activity(self):
-        self.assertEqual(kinds(issue(["triage"], created=200, comments=[(10, "maint")])), [])
-
-    def test_priority_label_skips(self):
-        self.assertEqual(kinds(issue(["triage", "release-low"], created=400)), [])
-
-    def test_milestone_skips(self):
-        self.assertEqual(kinds(issue(["triage"], created=400, milestone=True)), [])
-
-    def test_not_repeated_once_marked(self):
-        i = issue(["triage"], created=200, comments=[bot_marker(f"idle {run.epoch(at(200))}", 5)])
-        self.assertEqual(kinds(i), [])
-
-    def test_never_closes(self):
-        acts, _ = decide(issue(["triage", "stale-issue"], created=900, events=[("stale-issue", 400)]))
         self.assertTrue(all(a[0] != "close" for a in acts))
 
 
@@ -268,8 +256,8 @@ class Config(unittest.TestCase):
         self.assertEqual(self.load(), run.DEFAULTS)
 
     def test_overrides_merge_over_defaults(self):
-        cfg = self.load({"idle_days": 90})
-        self.assertEqual((cfg["idle_days"], cfg["close_days"]), (90, 14))
+        cfg = self.load({"warning_days": 7})
+        self.assertEqual((cfg["warning_days"], cfg["close_days"]), (7, 14))
 
     def test_rejects_unknown_key(self):
         with self.assertRaisesRegex(ValueError, "unknown config keys: idel_days"):
@@ -295,46 +283,26 @@ class Config(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.load({"stale_label": ""})
 
+    def test_resolved_clears_on_comment_must_be_a_boolean(self):
+        with self.assertRaises(ValueError):
+            self.load({"resolved_clears_on_comment": "no"})
+        self.assertFalse(self.load({"resolved_clears_on_comment": False})["resolved_clears_on_comment"])
+
+    def test_the_idle_rule_and_its_keys_are_gone(self):
+        for key in ("triage_label", "priority_prefix", "idle_days", "idle_comment"):
+            with self.assertRaisesRegex(ValueError, "unknown config keys"):
+                self.load({key: "x"})
+
     def test_rejects_double_quotes_in_labels_because_they_go_into_searches(self):
         with self.assertRaises(ValueError):
             self.load({"exempt_labels": ['bad"label']})
 
 
 class OptIn(unittest.TestCase):
-    def test_idle_rule_off_by_default(self):
-        self.assertEqual(kinds(issue(["triage"], created=400), run.DEFAULTS), [])
-
     def test_defaults_do_not_exempt_priority_labels(self):
         i = issue(["needs-info", "stale-issue", "release-high"], events=[("needs-info", 40), ("stale-issue", 15)],
                   comments=[bot_marker(f"warn {state(40)}", 15)])
         self.assertEqual(kinds(i, run.DEFAULTS), [("close",)])
-
-
-class Validate(unittest.TestCase):
-    def run_main(self, content):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "c.json"
-            path.write_text(content)
-            old = {k: os.environ.get(k) for k in ("VALIDATE", "ISSUE_CONFIG")}
-            os.environ.update(VALIDATE="true", ISSUE_CONFIG=str(path))
-            try:
-                with contextlib.redirect_stdout(io.StringIO()) as out:
-                    code = run.main()
-            finally:
-                for k, v in old.items():
-                    os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
-        return code, out.getvalue()
-
-    def test_valid_config(self):
-        self.assertEqual(self.run_main('{"idle_days": 90}')[0], 0)
-
-    def test_invalid_config_fails_without_api_access(self):
-        code, out = self.run_main('{"idle_days": 0}')
-        self.assertEqual(code, 1)
-        self.assertIn("::error", out)
-
-    def test_malformed_json_fails(self):
-        self.assertEqual(self.run_main("{")[0], 1)
 
 
 # --- the GitHub guard, paging, discovery and the sweep, against a fake GitHub ------------------------------------
@@ -556,19 +524,21 @@ class Discovery(unittest.TestCase):
         text = "\n".join(queries)
         self.assertEqual(failures, 0)
         for expected in ('label:"stale-issue"', 'label:"possibly-resolved"', 'label:"needs-info"',
-                         'label:"cannot reproduce"', 'label:"triage" updated:<2026-05-15', "updated:>=2026-10-12"):
+                         'label:"cannot reproduce"', "updated:>=2026-10-12"):
             self.assertIn(expected, text)
 
-    def test_exempt_issues_are_left_out_of_the_idle_and_mention_searches(self):
+    def test_exempt_issues_are_left_out_of_the_mention_search(self):
         _, _, queries = self.numbers(CFG, [])
         for q in queries:
             if "updated:" in q:
                 self.assertIn('-label:"security"', q)
                 self.assertIn("no:milestone", q)
 
-    def test_no_idle_search_without_a_triage_label(self):
-        _, _, queries = self.numbers(run.DEFAULTS, [])
-        self.assertFalse(any("updated:<" in q for q in queries))
+    def test_no_search_for_the_resolved_label_when_comments_do_not_clear_it(self):
+        cfg = {**CFG, "resolved_clears_on_comment": False}
+        _, _, queries = self.numbers(cfg, [])
+        self.assertFalse(any('label:"possibly-resolved"' in q and "-label" not in q for q in queries))
+        self.assertTrue(any('label:"stale-issue"' in q for q in queries))
 
     def test_only_issues_a_merged_mention_could_resolve_are_read(self):
         def mention(number, merged_days=10, closes=False, state="MERGED", created=30, newest=None):
@@ -616,11 +586,11 @@ class Sweep(unittest.TestCase):
         self.needs_info = []
         self.fake.searches.append(('label:"needs-info"', self.needs_info))
 
-    def go(self, dry_run, max_actions=30):
+    def go(self, dry_run, max_actions=30, cfg=CFG):
         gh, sleeps = make_gh(self.fake, dry_run)
         out = io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
-            code = run.sweep(gh, "o/r", CFG, max_actions, NOW)
+            code = run.sweep(gh, "o/r", cfg, max_actions, NOW)
         return code, out.getvalue(), sleeps
 
     def warn_case(self, number):
@@ -690,17 +660,39 @@ class Sweep(unittest.TestCase):
         self.go(dry_run=False, max_actions=1)
         self.assertEqual(len([c for c in self.fake.writes() if c[1] == "comment"]), 1)
 
-    def test_the_untriaged_queue_lists_the_least_recently_updated_first(self):
-        def node(number, labels, updated, milestone=None):
-            return {"number": number, "title": f"t{number}", "createdAt": iso(500), "updatedAt": iso(updated),
-                    "labels": {"nodes": [{"name": n} for n in labels]}, "milestone": milestone}
-        self.fake.searches.append(('sort:updated-asc', [
-            node(1, ["triage"], 300), node(2, ["triage", "release-low"], 250), node(3, ["triage"], 200),
-            node(4, ["triage"], 100, milestone={"title": "m"})]))
-        _, report, _ = self.go(dry_run=True)
-        self.assertIn("2 issues have `triage` and no priority", report)
-        self.assertLess(report.index("| #1 | 300 |"), report.index("| #3 | 200 |"))
-        self.assertNotIn("| #2 |", report)
+    def test_the_queue_report_counts_each_queue_and_the_issues_in_none(self):
+        def node(number, updated):
+            return {"number": number, "title": f"t{number}", "updatedAt": iso(updated)}
+        self.fake.searches[:0] = [
+            ('-label:"triage:critical-review"', [{"number": 1}, {"number": 2}, {"number": 3}]),
+            ('label:"triage:needs-repro"', [node(10, 300), node(11, 120)]),
+            ('label:"triage:critical-review"', [node(20, 40)]),
+        ]
+        code, report, _ = self.go(dry_run=True)
+        self.assertEqual(code, 0)
+        self.assertIn("| `triage:needs-repro` | 2 | 300 |", report)
+        self.assertIn("| `triage:critical-review` | 1 | 40 |", report)
+        self.assertIn("| `triage:decision` | 0 | - |", report)
+        self.assertIn("3 open issues are in none of these queues", report)
+        self.assertLess(report.index("#10 (300 days)"), report.index("#11 (120 days)"))
+
+    def test_no_queue_section_without_queue_labels(self):
+        self.warn_case(1)
+        _, report, _ = self.go(dry_run=True, cfg={**CFG, "queue_labels": []})
+        self.assertNotIn("## Queues", report)
+
+    def test_a_failed_queue_report_is_counted_but_the_actions_still_run(self):
+        self.warn_case(1)
+        real = self.fake.graphql
+
+        def flaky(query, v):
+            if "sort:updated-asc" in v.get("q", ""):
+                raise FakeError({"errors": [{"message": "x"}]})
+            return real(query, v)
+        self.fake.graphql = flaky
+        code, report, _ = self.go(dry_run=True)
+        self.assertEqual(code, 1)
+        self.assertIn("| #1 | label stale-issue |", report)
 
 
 if __name__ == "__main__":

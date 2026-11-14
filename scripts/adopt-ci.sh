@@ -92,7 +92,7 @@ fi
 
 templates="$here/adopt-ci-templates"
 workflows=(pr-management check-pr-management pr-labelling sync-labels)
-[[ "$issues" == "false" ]] || workflows=(issue-management check-issue-management)
+[[ "$issues" == "false" ]] || workflows=(issue-management)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
@@ -172,17 +172,15 @@ issue_body() {
 ## What this does
 
 Adds the shared issue management from [${source_repo}](https://github.com/${source_repo}/tree/${ref}/.github/actions/issue-management),
-pinned to commit \`${ref}\`. The two workflow files added here are short callers: they say when to run and what
-permissions to grant, and call the shared workflows \`issue-management.yml\` and \`issue-management-validate.yml\` in
-${source_repo}, which hold the logic, the trusted checkout and the token.
+pinned to commit \`${ref}\`. The workflow file added here is a short caller: it says when to run and what
+permissions to grant, and calls the shared workflow \`issue-management.yml\` in
+${source_repo}, which holds the logic, the trusted checkout and the token.
 
 - **Possibly resolved**: labels an issue \`possibly-resolved\` and asks for confirmation when a merged PR mentions it
   without closing it, no open PR mentions it, and nobody has commented since. Never closes.
 - **Waiting on the reporter**: for an issue with a needs-info label and no reply from its author, warns with
   \`stale-issue\` after 14 days and closes as not planned after 14 more. **This is the only rule that closes.** A reply
   from the reporter resets it.
-- **Idle and untriaged**: off until \`triage_label\` is set. Then labels \`stale-issue\` after 180 days without human
-  activity and lists the oldest untriaged issues in the run summary. Never closes.
 
 Issues with an exempt label or a milestone are never labelled or closed, and any human comment removes \`stale-issue\`
 and \`possibly-resolved\`. \`stale-issue\` is not \`stale\`, so it never mixes with PR stale handling.
@@ -196,8 +194,8 @@ admin turns it on afterwards.
 
 1. Run **Issue management** from the Actions tab with dry run on, and read the job summary.
 2. Edit \`.github/issue-management.json\` for the repository: the labels that mean "waiting on the reporter"
-   (\`needs_info_labels\`), the labels that exempt an issue (\`exempt_labels\`), and, if you triage with a label,
-   \`triage_label\` and \`priority_prefix\`. No label needs creating by hand.
+   (\`needs_info_labels\`), the labels that exempt an issue (\`exempt_labels\`), and, if you sort issues into review
+   queues with labels, \`queue_labels\`. No label needs creating by hand.
 3. If the organisation restricts which actions may run (Settings, Actions, General), allow \`${source_repo}@*\`.
 
 **The switch**: set the repository variable \`ISSUE_AUTOMATION_LIVE\` to \`true\` (Settings, Secrets and variables,
@@ -210,12 +208,12 @@ preview.
 ## Keeping it current
 
 The shared workflows are pinned to a full commit SHA so they never change under you. To update, change the SHA in the
-two workflow files (a Dependabot \`github-actions\` entry does this for you), or run
+workflow file (a Dependabot \`github-actions\` entry does this for you), or run
 \`scripts/adopt-ci.sh --update-pin ${repo}\` from ${source_repo}, which opens a PR that changes only those lines.
 
 $(overlap_section)
 
-Opened with \`scripts/adopt-ci.sh --issues\`. The config check runs on this PR without a token.
+Opened with \`scripts/adopt-ci.sh --issues\`.
 EOF
 }
 
