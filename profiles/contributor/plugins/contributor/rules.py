@@ -3,11 +3,15 @@ CODEOWNERS, Markdown headings. Computed by code so the model never guesses an ar
 
 from __future__ import annotations
 
+import base64
 import os
 import re
+import shutil
+import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from . import github
 from .github import hermes_home
 
 
@@ -19,13 +23,52 @@ class OrgFileError(RuntimeError):
     pass
 
 
+class OrgFileUnavailable(OrgFileError):
+    """The pack could not be fetched right now (network, GitHub 5xx, rate limit). Only this may fall back to the last good
+    copy: a 403 or an oversized file means the pack as it is now is unreadable, which is an error."""
+
+
+def _transient(message: str) -> bool:
+    return message.startswith("could not reach GitHub") or "rate limit hit" in message or message.startswith("GitHub 5")
+
+
 # The pack baked into the image: read-only to the agent (the sandbox policy keeps /opt/kyverno read-only), unlike the copy
-# in Hermes' writable home. It is read first; the home copy is for installs where nothing is baked.
+# in Hermes' writable home. It is read first, but only for the organisations its `repositories:` list names (one without
+# the list applies everywhere, as in an image you built for your own organisation); the home copy is for installs where
+# nothing is baked.
 IMAGE_PACK = Path("/opt/kyverno/profiles/contributor/org/org.yaml")
 
+# An organisation publishes its own pack as this file (and optionally the facts file) at the root of its `.github`
+# repository, so the published image works for every organisation without a clone or a build.
+REMOTE_PACK = "assistant-org.yaml"
+REMOTE_FACTS = "assistant-org-facts.md"
+_REMOTE_TTL = 600
+_remote_seen: Dict[str, float] = {}
 
-def candidate_paths() -> list:
-    paths = [IMAGE_PACK]
+
+def owner_of(repo: Optional[str] = None) -> Optional[str]:
+    repo = repo or github.secret("ASSISTANT_REPO") or ""
+    owner = repo.split("/", 1)[0].lower() if "/" in repo else ""
+    return owner or None
+
+
+def applies_to(path: Path, owner: Optional[str]) -> bool:
+    if owner is None:
+        return True
+    import yaml
+
+    try:
+        data = yaml.safe_load(path.read_text()) or {}
+    except Exception:
+        return True              # a broken pack is reported by load_org, not hidden here
+    repos = data.get("repositories") if isinstance(data, dict) else None
+    if not repos:
+        return True
+    return any(isinstance(r, dict) and str(r.get("repo", "")).split("/", 1)[0].lower() == owner for r in repos)
+
+
+def candidate_paths(owner: Optional[str] = None) -> list:
+    paths = [IMAGE_PACK] if not IMAGE_PACK.is_file() or applies_to(IMAGE_PACK, owner) else []
     explicit = os.environ.get("ASSISTANT_ORG_FILE")
     if explicit:
         paths.append(Path(explicit))
@@ -33,18 +76,81 @@ def candidate_paths() -> list:
     return paths
 
 
-def load_org(path: Optional[str] = None) -> Dict[str, Any]:
+def _remote_file(client: "github.Client", owner: str, name: str) -> Optional[bytes]:
+    try:
+        item = client.rest(f"repos/{owner}/.github/contents/{name}")
+    except github.GitHubError as exc:
+        if str(exc).startswith("GitHub 404"):
+            return None
+        cls = OrgFileUnavailable if _transient(str(exc)) else OrgFileError
+        raise cls(f"could not read {owner}/.github/{name}: {exc}") from exc
+    if not isinstance(item, dict) or item.get("encoding") != "base64" or item.get("size", 0) > 256 * 1024:
+        raise OrgFileError(f"{owner}/.github/{name} is not a file of a usable size")
+    return base64.b64decode(item.get("content", ""))
+
+
+def remote_path(owner: Optional[str], client: Optional["github.Client"] = None) -> Optional[Path]:
+    """The organisation's own pack from `<owner>/.github`, written under Hermes' home, or None when it publishes none.
+    A fetch that fails falls back to the last good copy; with none, it is an error rather than 'no pack'."""
+    if not owner or not re.fullmatch(r"[a-z0-9][a-z0-9-]*", owner):
+        return None
+    dest = hermes_home() / "org-cache" / owner
+    target = dest / "org.yaml"
+    if time.time() - _remote_seen.get(owner, 0) < _REMOTE_TTL:
+        return target if target.is_file() else None
+    client = client or github.Client()
+    try:
+        body = _remote_file(client, owner, REMOTE_PACK)
+        facts = _remote_file(client, owner, REMOTE_FACTS) if body is not None else None
+    except OrgFileUnavailable:
+        if target.is_file():
+            return target
+        raise
+    _remote_seen[owner] = time.time()
+    if body is None:
+        shutil.rmtree(dest, ignore_errors=True)
+        return None
+    dest.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(body)
+    if facts is not None:
+        (dest / "facts.md").write_bytes(facts)
+    else:
+        (dest / "facts.md").unlink(missing_ok=True)
+    return target
+
+
+def _read_org(p: Path) -> Dict[str, Any]:
     import yaml
 
-    paths = [Path(path)] if path else candidate_paths()
-    for p in paths:
+    data = yaml.safe_load(p.read_text()) or {}
+    missing = [k for k in REQUIRED if k not in data]
+    if missing:
+        raise OrgFileError(f"{p}: missing keys {missing}")
+    return data
+
+
+def load_org(path: Optional[str] = None, repo: Optional[str] = None) -> Dict[str, Any]:
+    """The organisation file for `repo` (default: ASSISTANT_REPO): the pack baked into the image if it covers that owner,
+    else the owner's `.github/assistant-org.yaml`, else the home copy."""
+    if path:
+        if Path(path).is_file():
+            return _read_org(Path(path))
+        raise OrgFileError(f"organisation file not found: {path}")
+    owner = owner_of(repo)
+    paths = candidate_paths(owner)
+    first = [p for p in paths if p == IMAGE_PACK or str(p) == os.environ.get("ASSISTANT_ORG_FILE")]
+    for p in first:
         if p.is_file():
-            data = yaml.safe_load(p.read_text()) or {}
-            missing = [k for k in REQUIRED if k not in data]
-            if missing:
-                raise OrgFileError(f"{p}: missing keys {missing}")
-            return data
-    raise OrgFileError("organisation file not found (looked in: %s)" % ", ".join(map(str, paths)))
+            return _read_org(p)
+    remote = remote_path(owner)
+    if remote is not None:
+        return _read_org(remote)
+    for p in paths:
+        if p not in first and p.is_file():
+            return _read_org(p)
+    raise OrgFileError(
+        f"no organisation pack for {owner or 'this repository'}: it publishes none at {owner or '<owner>'}/.github/{REMOTE_PACK} "
+        "(see docs/organisation-pack.md)")
 
 
 # -- globs, label rules, CODEOWNERS -----------------------------------------------------

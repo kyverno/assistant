@@ -1,30 +1,35 @@
 # The organisation pack
 
-Everything the assistant knows about **your** organisation comes from one directory, `container/org/<name>/`, and
-nothing about any organisation is written in code or in a skill. This page is the reference for what goes in it.
+Everything the assistant knows about **your** organisation comes from one pack, and nothing about any organisation is
+written in code or in a skill. You publish it as two files at the root of your organisation's `.github` repository
+(`<owner>/.github`), and the published image reads them at run time. This page is the reference for what goes in it.
 The [README](../README.md#2-write-your-organisation-pack) has the short version.
 
 ```
-container/org/acme/
-├── org.yaml     the rules: which files are generated or critical, your merge gate, which labels mean "ready"
-└── facts.md     optional prose the assistant should know (codegen, CI, label meanings), in your own words
+acme/.github/
+├── assistant-org.yaml          the rules: which files are generated or critical, your merge gate, which labels mean "ready"
+└── assistant-org-facts.md      optional prose the assistant should know (codegen, CI, label meanings), in your own words
 ```
 
-`container/org/kyverno/` is the worked example. Build your own image with it: `container/assistant --build --org acme`.
-The pack is copied into the image, read-only, so a manipulated agent cannot rewrite its own rules.
+The file format is the one below; `container/org/kyverno/` is the worked example (its files are `org.yaml` and `facts.md`).
+Anyone who can push to your `.github` repository can change the rules, so protect it like the rest of your configuration.
+To bake a pack into an image you build instead, put it in `container/org/acme/` and run `container/assistant --build --org acme`;
+a baked pack is read-only to the agent.
 
 ## Where the assistant reads it from
 
 | How you run it | Where the pack comes from |
 |---|---|
-| The sandbox or container image | The copy baked into the image at `/opt/kyverno/.../org/`, which the sandbox policy keeps read-only. It is read first; the copy in Hermes' writable home is never trusted over it. Choose it with `--org` when you build |
+| The published image | `<owner>/.github/assistant-org.yaml`, for the owner of the repository you point it at, remembered for ten minutes, with the last good copy kept if GitHub cannot be reached. The image also bakes Kyverno's pack, used only for the owners its `repositories:` lists |
+| An image you build | The copy baked in at `/opt/kyverno/.../org/`, which the sandbox policy keeps read-only. It is read first, for the owners its `repositories:` lists (every owner when it lists none). Choose it with `--org` when you build |
 | `scripts/install.sh` on your host | Copied into the profile on every run, from `container/org/$ASSISTANT_ORG`, or else `container/org/<owner of ASSISTANT_REPO>/`. Edit it there: the copy in the profile is overwritten. With neither, it installs with no pack and says so, and removes a pack left in the profile by an earlier install for another repository |
 
 ## What happens without one, or with a mistake
 
 | Situation | Result |
 |---|---|
-| No pack | The tools still run. Every file reads `STANDARD`, no PR is gate-blocked, no label means "ready". `repo_pack` says `pack: none`, and the assistant tells you which signals it is therefore missing. |
+| No pack (nothing published at `<owner>/.github`) | The tools still run. Every file reads `STANDARD`, no PR is gate-blocked, no label means "ready". `repo_pack` says `pack: none`, and the assistant tells you which signals it is therefore missing. |
+| The published pack cannot be read (a private `.github` the token cannot see, a network error with no earlier copy) | An error that names the file and the HTTP status, not "no pack". |
 | A key it does not know (a typo), a wrong type, or a file that is not a mapping | An error that names the key, from `repo_pack` and the tools that need it. It never ignores it silently and never crashes. |
 | A bad gate (no bypass label, a marker regex without a `(?P<branch>...)` group) | An error that names the gate and the problem. |
 | A rule that matches nothing | Nothing happens. Check with `repo_pack`, which returns exactly what was loaded. |

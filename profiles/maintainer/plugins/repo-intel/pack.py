@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -13,6 +15,11 @@ from typing import Any, Optional
 
 class PackError(RuntimeError):
     pass
+
+
+class PackUnavailable(PackError):
+    """The organisation's pack could not be fetched right now (network, GitHub 5xx, rate limit). Only this may fall back
+    to the last good copy: a 403 or an oversized file means the pack as it is now is unreadable, which is an error."""
 
 
 _FILE_CLASSES = ("generated", "generated_exceptions", "api_surface", "critical", "test_only")
@@ -48,17 +55,105 @@ def _home() -> Path:
 
 
 # The pack baked into the image. The sandbox policy keeps /opt/kyverno read-only, so the agent cannot rewrite it, unlike
-# the copy `hermes profile install` puts in Hermes' writable home. It is read first; the profile copy is for host
-# installs, where nothing is baked.
+# the copy `hermes profile install` puts in Hermes' writable home. It is read first, but only for the organisations its
+# `repositories:` list names (a pack with no such list applies everywhere, as in an image you built for your own
+# organisation); the profile copy is for host installs, where nothing is baked.
 IMAGE_PACK = Path("/opt/kyverno/profiles/maintainer/org/org.yaml")
 
+# An organisation publishes its own pack as these two files at the root of its `.github` repository, so the published
+# image works for every organisation without a clone or a build.
+REMOTE_PACK = "assistant-org.yaml"
+REMOTE_FACTS = "assistant-org-facts.md"
+_REMOTE_TTL = 600           # seconds a fetched pack is reused before GitHub is asked again
+_REMOTE_MAX = 256 * 1024    # a pack is a few KB; refuse anything absurd
 
-def candidate_paths() -> list[Path]:
-    paths = [IMAGE_PACK]
+
+def owner_of(repo: Optional[str] = None) -> Optional[str]:
+    repo = repo or os.environ.get("ASSISTANT_REPO") or ""
+    owner = repo.split("/", 1)[0].lower() if "/" in repo else ""
+    return owner or None
+
+
+def applies_to(path: Path, owner: Optional[str]) -> bool:
+    """A pack that lists repositories applies only to their owners; one without the list applies to any."""
+    if owner is None:
+        return True
+    try:
+        import yaml
+
+        data = yaml.safe_load(path.read_text()) or {}
+    except Exception:
+        return True              # a broken pack is reported by load(), not hidden here
+    repos = data.get("repositories") if isinstance(data, dict) else None
+    if not repos:
+        return True
+    return any(isinstance(r, dict) and str(r.get("repo", "")).split("/", 1)[0].lower() == owner for r in repos)
+
+
+def candidate_paths(owner: Optional[str] = None) -> list[Path]:
+    paths = [IMAGE_PACK] if not IMAGE_PACK.is_file() or applies_to(IMAGE_PACK, owner) else []
     if os.environ.get("ASSISTANT_ORG_FILE"):
         paths.append(Path(os.environ["ASSISTANT_ORG_FILE"]))
     paths.append(_home() / "org" / "org.yaml")
     return paths
+
+
+_remote_seen: dict[str, float] = {}
+
+
+def _get(url: str) -> Optional[bytes]:
+    """The body, or None for a 404. Anything else that goes wrong is a PackError: a pack that exists but cannot be read
+    must not quietly turn into 'no pack', because that is how a gate gets missed."""
+    import urllib.error
+    import urllib.request
+
+    headers = {"Accept": "application/vnd.github.raw+json", "User-Agent": "assistant-pack"}
+    if os.environ.get("REPO_GITHUB_TOKEN"):
+        headers["Authorization"] = f"Bearer {os.environ['REPO_GITHUB_TOKEN']}"
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=15) as resp:
+            body = resp.read(_REMOTE_MAX + 1)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        limited = exc.code == 429 or (exc.code == 403 and exc.headers.get("x-ratelimit-remaining") == "0")
+        cls = PackUnavailable if exc.code >= 500 or limited else PackError
+        raise cls(f"could not read {url}: HTTP {exc.code}") from exc
+    except OSError as exc:
+        raise PackUnavailable(f"could not read {url}: {exc}") from exc
+    if len(body) > _REMOTE_MAX:
+        raise PackError(f"{url} is larger than {_REMOTE_MAX} bytes")
+    return body
+
+
+def remote_path(owner: Optional[str]) -> Optional[Path]:
+    """The organisation's own pack from `<owner>/.github`, written under Hermes' home, or None when it publishes none.
+    A fetch that fails falls back to the last good copy; with none, it is an error."""
+    if not owner or not re.fullmatch(r"[a-z0-9][a-z0-9-]*", owner):
+        return None
+    dest = _home() / "org-cache" / owner
+    target = dest / "org.yaml"
+    if time.time() - _remote_seen.get(owner, 0) < _REMOTE_TTL:
+        return target if target.is_file() else None
+    base = f"https://api.github.com/repos/{owner}/.github/contents/"
+    try:
+        body = _get(base + REMOTE_PACK)
+        facts = _get(base + REMOTE_FACTS) if body is not None else None
+    except PackUnavailable:
+        if target.is_file():
+            return target
+        raise
+    _remote_seen[owner] = time.time()
+    if body is None:
+        shutil.rmtree(dest, ignore_errors=True)
+        return None
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "org.yaml").write_bytes(body)
+    if facts is not None:
+        (dest / "facts.md").write_bytes(facts)
+    else:
+        (dest / "facts.md").unlink(missing_ok=True)
+    return target
 
 
 # -- globs ---------------------------------------------------------------------------------
@@ -265,24 +360,41 @@ def parse(data: Any, source: Optional[str] = None, facts: str = "") -> Rules:
 _cache: dict[tuple, Rules] = {}
 
 
-def load(path: Optional[str] = None) -> Rules:
-    """The rules from the pack, or empty rules when there is no pack. A pack that exists but is wrong is an error."""
-    for p in [Path(path)] if path else candidate_paths():
-        if not p.is_file():
-            continue
-        key = (str(p), p.stat().st_mtime, (p.parent / "facts.md").stat().st_mtime if (p.parent / "facts.md").is_file() else 0)
-        if key not in _cache:
-            try:
-                import yaml
-            except ImportError as exc:
-                raise PackError("PyYAML is not available to read the organisation pack") from exc
-            try:
-                facts_file = p.parent / "facts.md"
-                facts = facts_file.read_text() if facts_file.is_file() else ""
-                _cache[key] = parse(yaml.safe_load(p.read_text()), str(p), facts)
-            except yaml.YAMLError as exc:
-                raise PackError(f"{p}: {exc}") from exc
-            except PackError as exc:
-                raise PackError(f"{p}: {exc}") from exc
-        return _cache[key]
+def _read(p: Path) -> Rules:
+    key = (str(p), p.stat().st_mtime, (p.parent / "facts.md").stat().st_mtime if (p.parent / "facts.md").is_file() else 0)
+    if key not in _cache:
+        try:
+            import yaml
+        except ImportError as exc:
+            raise PackError("PyYAML is not available to read the organisation pack") from exc
+        try:
+            facts_file = p.parent / "facts.md"
+            facts = facts_file.read_text() if facts_file.is_file() else ""
+            _cache[key] = parse(yaml.safe_load(p.read_text()), str(p), facts)
+        except yaml.YAMLError as exc:
+            raise PackError(f"{p}: {exc}") from exc
+        except PackError as exc:
+            raise PackError(f"{p}: {exc}") from exc
+    return _cache[key]
+
+
+def load(path: Optional[str] = None, repo: Optional[str] = None) -> Rules:
+    """The rules for `repo` (default: ASSISTANT_REPO): the pack baked into the image if it covers that owner, else the
+    owner's own `.github/assistant-org.yaml`, else the home copy; empty rules when there is none. A pack that exists but
+    is wrong, or that cannot be read, is an error."""
+    if path:
+        return _read(Path(path)) if Path(path).is_file() else Rules()
+    owner = owner_of(repo)
+    paths = candidate_paths(owner)
+    # The baked pack (when it applies) and an explicit file come first; the organisation's published pack is next.
+    ordered = [p for p in paths if p == IMAGE_PACK or str(p) == os.environ.get("ASSISTANT_ORG_FILE")]
+    for p in ordered:
+        if p.is_file():
+            return _read(p)
+    remote = remote_path(owner)
+    if remote is not None:
+        return _read(remote)
+    for p in paths:
+        if p not in ordered and p.is_file():
+            return _read(p)
     return Rules()
