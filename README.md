@@ -380,8 +380,9 @@ on and says so. See [Shared CI actions](#shared-ci-actions) above.
 
 ### 2. Write your organisation pack
 
-Everything specific to your organisation lives in one small directory, never in code: `container/org/<your-org>/`.
-`org.yaml` says which paths are generated, API surface, critical or test-only, whether you have a merge gate, and which
+Everything specific to your organisation lives in one small file, never in code. You publish it as `assistant-org.yaml`
+(and optionally `assistant-org-facts.md`) at the root of your organisation's `.github` repository, and the published image reads
+it from there: no clone, no build. `org.yaml` says which paths are generated, API surface, critical or test-only, whether you have a merge gate, and which
 labels mean "ready". `facts.md` is optional prose in your own words. About ten lines get you started:
 
 ```yaml
@@ -398,11 +399,12 @@ maintainer:
 
 Without a pack the assistant still works: it reads every file as ordinary, mentions no gate, and tells you which signals it
 is missing. A mistake in the pack is an error that names the key. Reference: [`docs/organisation-pack.md`](docs/organisation-pack.md);
-Kyverno's is in [`container/org/kyverno/`](container/org/kyverno/).
+Kyverno's is in [`container/org/kyverno/`](container/org/kyverno/), as a worked example.
 
-> ⚠️ **Today the published image carries Kyverno's pack.** For your own pack you build your own image from a checkout of this
-> repository (`container/assistant --build --org your-org`), which is the one case that needs a clone. Reading the pack from
-> your own repository, so that the published image works for everyone, is the planned fix ([roadmap](#roadmap)).
+The assistant reads `<owner>/.github/assistant-org.yaml` for the repository you point it at (public, or private if its token can
+read it), remembers it for ten minutes, and keeps the last good copy if GitHub cannot be reached. A file it cannot read is an
+error, never a silent "no pack". The published image also carries Kyverno's pack, used only for the `kyverno` organisation. To
+bake your own into an image instead, see [`docs/organisation-pack.md`](docs/organisation-pack.md).
 
 ### 3. Keep your own knowledge files accurate
 
@@ -537,7 +539,6 @@ what to do first. What is built is above. What is planned, in order, is not buil
 
 | Next | Why |
 |---|---|
-| The organisation pack read from your own repository, next to the assistant policy (for example under `.github/`) | So the published image works for any project with no custom build and no clone |
 | Approval-aware context: review decision, who approved, requested reviewers, head commit, computed owners | Answer "which merge will wipe approvals on the others?" from data |
 | A fetch layer that retries and updates incrementally, plus a local git mirror for history, owners and conflicts | Faster, cheaper answers; code relations in milliseconds |
 | A merge-order planner that minimises rebases and re-approvals, tests merges, and orders by risk | Fewer rebases when a batch lands |

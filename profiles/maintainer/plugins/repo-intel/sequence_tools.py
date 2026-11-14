@@ -97,7 +97,7 @@ def handle_sequence_prs(args: Dict[str, Any], **_kw) -> str:
     if not isinstance(prs, list) or not prs:
         return json.dumps({"success": False, "error": "prs must be a non-empty array"})
     try:
-        rules = pack.load()
+        rules = pack.load(repo=_repo(args))
     except pack.PackError as exc:
         return json.dumps({"success": False, "error": f"organisation pack: {exc}"})
     try:
