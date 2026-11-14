@@ -23,6 +23,15 @@ class OrgFileError(RuntimeError):
     pass
 
 
+class OrgFileUnavailable(OrgFileError):
+    """The pack could not be fetched right now (network, GitHub 5xx, rate limit). Only this may fall back to the last good
+    copy: a 403 or an oversized file means the pack as it is now is unreadable, which is an error."""
+
+
+def _transient(message: str) -> bool:
+    return message.startswith("could not reach GitHub") or "rate limit hit" in message or message.startswith("GitHub 5")
+
+
 # The pack baked into the image: read-only to the agent (the sandbox policy keeps /opt/kyverno read-only), unlike the copy
 # in Hermes' writable home. It is read first, but only for the organisations its `repositories:` list names (one without
 # the list applies everywhere, as in an image you built for your own organisation); the home copy is for installs where
@@ -73,7 +82,8 @@ def _remote_file(client: "github.Client", owner: str, name: str) -> Optional[byt
     except github.GitHubError as exc:
         if str(exc).startswith("GitHub 404"):
             return None
-        raise OrgFileError(f"could not read {owner}/.github/{name}: {exc}") from exc
+        cls = OrgFileUnavailable if _transient(str(exc)) else OrgFileError
+        raise cls(f"could not read {owner}/.github/{name}: {exc}") from exc
     if not isinstance(item, dict) or item.get("encoding") != "base64" or item.get("size", 0) > 256 * 1024:
         raise OrgFileError(f"{owner}/.github/{name} is not a file of a usable size")
     return base64.b64decode(item.get("content", ""))
@@ -92,7 +102,7 @@ def remote_path(owner: Optional[str], client: Optional["github.Client"] = None) 
     try:
         body = _remote_file(client, owner, REMOTE_PACK)
         facts = _remote_file(client, owner, REMOTE_FACTS) if body is not None else None
-    except (OrgFileError, github.GitHubError):
+    except OrgFileUnavailable:
         if target.is_file():
             return target
         raise

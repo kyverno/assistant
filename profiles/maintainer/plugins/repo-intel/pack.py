@@ -17,6 +17,11 @@ class PackError(RuntimeError):
     pass
 
 
+class PackUnavailable(PackError):
+    """The organisation's pack could not be fetched right now (network, GitHub 5xx, rate limit). Only this may fall back
+    to the last good copy: a 403 or an oversized file means the pack as it is now is unreadable, which is an error."""
+
+
 _FILE_CLASSES = ("generated", "generated_exceptions", "api_surface", "critical", "test_only")
 _KNOWN: dict[str, Optional[tuple[str, ...]]] = {
     "approval_bots": None,
@@ -111,9 +116,11 @@ def _get(url: str) -> Optional[bytes]:
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
             return None
-        raise PackError(f"could not read {url}: HTTP {exc.code}") from exc
+        limited = exc.code == 429 or (exc.code == 403 and exc.headers.get("x-ratelimit-remaining") == "0")
+        cls = PackUnavailable if exc.code >= 500 or limited else PackError
+        raise cls(f"could not read {url}: HTTP {exc.code}") from exc
     except OSError as exc:
-        raise PackError(f"could not read {url}: {exc}") from exc
+        raise PackUnavailable(f"could not read {url}: {exc}") from exc
     if len(body) > _REMOTE_MAX:
         raise PackError(f"{url} is larger than {_REMOTE_MAX} bytes")
     return body
@@ -132,7 +139,7 @@ def remote_path(owner: Optional[str]) -> Optional[Path]:
     try:
         body = _get(base + REMOTE_PACK)
         facts = _get(base + REMOTE_FACTS) if body is not None else None
-    except PackError:
+    except PackUnavailable:
         if target.is_file():
             return target
         raise

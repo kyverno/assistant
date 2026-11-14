@@ -80,8 +80,16 @@ class Maintainer(Env):
         self.serve({"assistant-org.yaml": OTHER})
         pack.load(repo="acme/api")
         pack._remote_seen.clear()
-        self.serve({"assistant-org.yaml": pack.PackError("timed out")})
+        self.serve({"assistant-org.yaml": pack.PackUnavailable("timed out")})
         self.assertEqual(pack.load(repo="acme/api").gate.name, "release-gate")
+
+    def test_a_pack_that_is_now_forbidden_is_not_replaced_by_the_old_copy(self):
+        self.serve({"assistant-org.yaml": OTHER})
+        pack.load(repo="acme/api")
+        pack._remote_seen.clear()
+        self.serve({"assistant-org.yaml": pack.PackError("HTTP 403")})
+        with self.assertRaises(pack.PackError):
+            pack.load(repo="acme/api")
 
     def test_a_broken_published_pack_names_the_problem(self):
         self.serve({"assistant-org.yaml": b"maintainer:\n  nope: 1\n"})
@@ -143,6 +151,23 @@ class Contributor(Env):
         self.assertEqual(org["name"], "acme")
 
     def test_an_unreadable_pack_is_an_error_not_no_pack(self):
+        self.use({"assistant-org.yaml": github.GitHubError("GitHub 403 for contents: forbidden")})
+        with self.assertRaises(rules.OrgFileError):
+            rules.load_org(repo="acme/api")
+
+    def _with_cached(self):
+        text = KYVERNO.read_text().replace("name: kyverno", "name: acme").replace("repositories:", "x_unused:")
+        self.use({"assistant-org.yaml": text.encode()})
+        rules.load_org(repo="acme/api")
+        rules._remote_seen.clear()
+
+    def test_the_last_good_copy_is_used_only_when_github_cannot_be_reached(self):
+        self._with_cached()
+        self.use({"assistant-org.yaml": github.GitHubError("could not reach GitHub: timed out")})
+        self.assertEqual(rules.load_org(repo="acme/api")["name"], "acme")
+
+    def test_a_pack_that_is_now_forbidden_is_not_replaced_by_the_old_copy(self):
+        self._with_cached()
         self.use({"assistant-org.yaml": github.GitHubError("GitHub 403 for contents: forbidden")})
         with self.assertRaises(rules.OrgFileError):
             rules.load_org(repo="acme/api")
