@@ -110,6 +110,30 @@ creating by hand: the action creates `stale-issue` and `possibly-resolved` when 
 `stale-issue` rather than `stale`, which the PR automation owns. The rules and keys are in
 [`.github/actions/issue-management/README.md`](../.github/actions/issue-management/README.md).
 
+### Issue queue triage (agentic)
+
+`workflows/issue-queue-triage.md` is a [GitHub Agentic Workflow](https://github.github.com/gh-aw/): once a day it sorts
+open issues that are in no review queue into exactly one queue, by adding a label. It never closes, comments, edits or
+removes anything, and a person still reviews every queue. It is not a shared `uses:` workflow like the others: gh-aw
+copies it into your repository and compiles a lock file there, so each repository commits both files.
+
+```bash
+gh extension install github/gh-aw
+cd your-repo
+gh aw add kyverno/assistant/issue-queue-triage      # adds .github/workflows/issue-queue-triage.md and its .lock.yml
+```
+
+The queue names and their definitions in it are Kyverno's. Edit the `allowed` list, the `skip-if-no-match` query and the
+definitions in the prompt to match your queues, and create the labels first: a label that does not exist is rejected.
+Then run `gh aw compile` and commit both files. `gh aw update` later pulls upstream changes and keeps your edits.
+
+It runs on a daily schedule (scattered to a fixed time) and only when the `skip-if-no-match` search finds an issue in
+no queue. gh-aw also adds a manual trigger. The agent job holds `contents: read`, `issues: read` and
+`copilot-requests: write`, which lets it use the built-in token for Copilot, billed to the organization, so no secret
+is stored. The labels are applied by a separate job. If the organization's billing does not allow that, remove
+`copilot-requests: write` and set a `COPILOT_GITHUB_TOKEN` secret instead. Read the compiled lock file before relying on
+it, as with any generated workflow.
+
 ## Why a script, and what else was considered
 
 | Approach | Used by | Why not the main route |
