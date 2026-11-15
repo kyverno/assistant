@@ -36,13 +36,14 @@ only what exists:
 
 | Written to the pack | From |
 |---|---|
-| `maintainer.file_classes`: generated, API surface, test-only (pre-ticked) and critical (you choose; it is never guessed, because owning a folder is not how risky it is) | File names, `.gitattributes`, folder names |
+| `maintainer.file_classes`: generated, API surface, test-only (pre-ticked) and critical (you choose; it is never guessed, because owning a folder is not how risky it is) | File names, `.gitattributes`, folder names, and a code search for files that say `DO NOT EDIT` (a folder where at least 80% of the files do is offered whole, and the few hand-written files in it as exceptions) |
 | `agent_docs`, `instructions_dir`: the repository's own guides (`AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `RELEASING.md`, ...) | File names |
 | `codeowners`, `labels` (catalogue file, `area/` and `kind/` prefixes), `readiness.checks_file` | Where the repository keeps them |
 | `readiness` ready and waiting-on-the-author labels, `review_bots` | Label names, bots that reviewed recent PRs |
 
 Label meanings need no entry: the assistant reads each label's description from GitHub live, so write them there (or in
-`.github/labels.yml`). With `--facts` or when asked, it also adds `assistant-org-facts.md`, a short list of questions (how a release is
+`.github/labels.yml`). With `--facts` or when asked, it also adds `assistant-org-facts.md`: a **draft of how CI runs before and after merge**, read from the
+triggers in `.github/workflows` (check it), then a short list of questions (how a release is
 made, which branches matter, failures that are not the author's fault, what a reviewer looks for first) for you to fill in. It ends by
 listing what it **could not** work out: merge gates (`branch_gates` needs a check name, a label and a bypass label), critical code, and
 the release process and review norms. Put the last of those in `assistant-org-facts.md`, or in `CONTRIBUTING.md` or `RELEASING.md`

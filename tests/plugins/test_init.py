@@ -52,7 +52,7 @@ class Inference(unittest.TestCase):
         self.assertEqual([c.glob for c in p.api_surface], ["api/**"])
         self.assertEqual({c.glob for c in p.test_only}, {"**/*_test.go", "**/*.test.ts"})   # tests/a.test.ts is already covered
         self.assertEqual([(c.glob, c.picked) for c in p.critical], [("pkg/engine/**", False)])   # owning is not riskiness
-        self.assertEqual({c.glob for c in p.ready_labels}, {"ready-for-review", "lgtm"})
+        self.assertEqual({c.glob for c in p.ready_labels}, {"ready-for-review"})
         self.assertEqual([c.glob for c in p.attention_labels], ["needs-author-action"])
 
     def test_an_empty_repository_gives_an_empty_proposal(self):
@@ -97,7 +97,7 @@ class Context(unittest.TestCase):
         self.assertEqual((merged["codeowners"], merged["agent_docs"]), (None, ["A", "B"]))
 
     def test_the_facts_stub_names_the_repository_and_asks_the_questions(self):
-        text = init.FACTS_STUB.format(name="o/r")
+        text = init.FACTS_STUB.format(name="o/r", ci="")
         self.assertIn("o/r", text)
         for heading in ("release", "Branches", "not the author's fault", "reviewer"):
             self.assertIn(heading, text)

@@ -257,6 +257,7 @@ class Proposal:
     test_only: list[Candidate] = field(default_factory=list)
     ready_labels: list[Candidate] = field(default_factory=list)
     attention_labels: list[Candidate] = field(default_factory=list)
+    generated_exceptions: list[Candidate] = field(default_factory=list)
     agent_docs: list[Candidate] = field(default_factory=list)
     review_bots: list[Candidate] = field(default_factory=list)
     instructions_dir: Optional[str] = None
@@ -265,6 +266,7 @@ class Proposal:
     checks_file: Optional[str] = None
     area_prefixes: list[str] = field(default_factory=list)
     kind_prefixes: list[str] = field(default_factory=list)
+    ci_facts: str = ""
     has_pack: bool = False
     truncated: bool = False
 
@@ -319,9 +321,10 @@ _DOCS = [
     (".github/copilot-instructions.md", "Copilot instructions"), (".github/instructions/*.instructions.md", "path instructions"),
     ("docs/context/**", "agent context"),
 ]
-_READY = re.compile(r"ready|lgtm|approved|awaiting[- ]review|needs[- ]review|review[- ]requested", re.I)
+_READY = re.compile(r"ready[- ]for[- ]review|^ready$|awaiting[- ]review|needs[- ]review|review[- ]requested", re.I)
 _ATTENTION = re.compile(r"needs?[- ](author|changes|info|rebase|update)|author[- ]action|waiting[- ](on[- ])?author|"
-                        r"changes[- ]requested|awaiting[- ](author|response)", re.I)
+                        r"changes[- ]requested|awaiting[- ](author|response)|merge[- ]conflict|^stale$|^hold$|do[- ]not[- ]merge|"
+                        r"workflow[- ]approval", re.I)
 
 
 def attribute_globs(text: str) -> list[str]:
@@ -355,7 +358,87 @@ def codeowner_globs(text: str, dirs: set[str]) -> list[tuple[str, str]]:
     return found
 
 
-def propose(repo: str, paths: list[str], attributes: str, codeowners: str, labels: list[str]) -> Proposal:
+_BEFORE = {"pull_request", "pull_request_target", "merge_group"}
+_AFTER = {"push", "release"}
+
+
+def workflow_info(path: str, text: str) -> tuple[str, set[str]]:
+    """(display name, trigger names) of a workflow file, without a YAML parser: reads the `name:` and the `on:` block."""
+    name = next((m.group(1).strip().strip("'\"") for m in (re.match(r"name:\s*(.+)", ln) for ln in text.splitlines()) if m),
+                os.path.basename(path))
+    lines = text.splitlines()
+    triggers: set[str] = set()
+    for i, ln in enumerate(lines):
+        m = re.match(r"""["']?on["']?:\s*(.*)$""", ln)
+        if not m:
+            continue
+        rest = m.group(1).split("#", 1)[0].strip()
+        if rest:
+            triggers = set(re.findall(r"[a-z_]+", rest.strip("[]")))
+            break
+        indent = None
+        for nxt in lines[i + 1:]:
+            if not nxt.strip() or nxt.lstrip().startswith("#"):
+                continue
+            cur = len(nxt) - len(nxt.lstrip())
+            if cur == 0:
+                break
+            indent = cur if indent is None else indent
+            km = re.match(r"\s{%d}([a-z_]+):" % indent, nxt) if cur == indent else None
+            if km:
+                triggers.add(km.group(1))
+        break
+    return name, triggers
+
+
+def ci_facts(workflows: dict[str, str]) -> str:
+    """A draft 'CI before and after merge' section from what triggers each workflow. The user checks it."""
+    before, after, scheduled, reusable = [], [], [], []
+    for path in sorted(workflows):
+        name, trig = workflow_info(path, workflows[path])
+        label = name if name == os.path.basename(path) else f"{name} ({os.path.basename(path)})"
+        if trig & _BEFORE:
+            before.append(label)
+        elif "workflow_call" in trig and not trig & _AFTER:
+            reusable.append(label)
+        elif trig & _AFTER:
+            after.append(label)
+        elif "schedule" in trig:
+            scheduled.append(label)
+    if not (before or after or scheduled or reusable):
+        return ""
+    out = ["## CI before and after merge", "(Drafted by `assistant init` from the triggers in `.github/workflows`. Check it, and add what "
+           "a green PR still cannot show: for example a suite that only runs after merge.)", ""]
+    for title, names in (("Runs on a pull request (gates the PR)", before), ("Runs only after merge (push), never on a PR", after),
+                         ("Reusable workflows (called by the others)", reusable), ("Scheduled", scheduled)):
+        if names:
+            out.append(f"{title}: " + ", ".join(names) + ".")
+    return "\n".join(out) + "\n"
+
+
+def header_globs(paths: list[str], hits: list[str]) -> tuple[list[tuple[str, int, int]], list[str]]:
+    """From files that say 'DO NOT EDIT': the folders that are almost entirely generated (glob, hits, files) and the
+    hand-written files inside them. A folder qualifies when at least 80% of its files (and at least 3) are hits."""
+    hit_set = set(hits)
+    skip = ("vendor/", "node_modules/", "third_party/")
+    dirs = sorted({"/".join(h.split("/")[:i]) for h in hits for i in range(1, len(h.split("/")))}, key=lambda d: d.count("/"))
+    chosen: list[tuple[str, int, int]] = []
+    exceptions: list[str] = []
+    for d in dirs:
+        if d.startswith(skip) or any(d == c[0] or d.startswith(c[0] + "/") for c in chosen):
+            continue
+        files = [x for x in paths if x.startswith(d + "/")]
+        got = [x for x in files if x in hit_set]
+        if len(got) >= 3 and len(got) >= 0.8 * len(files):
+            chosen.append((d, len(got), len(files)))
+            miss = [x for x in files if x not in hit_set and x.endswith((".go", ".ts", ".js", ".py", ".java", ".rs"))]
+            if len(miss) <= 3:
+                exceptions += miss
+    return chosen, exceptions
+
+
+def propose(repo: str, paths: list[str], attributes: str, codeowners: str, labels: list[str],
+            hits: Optional[list[str]] = None, workflows: Optional[dict[str, str]] = None) -> Proposal:
     p = Proposal(repo)
     dirs = {"/".join(path.split("/")[:i]) for path in paths for i in range(1, len(path.split("/")))}
     covered: set[str] = set()
@@ -370,6 +453,11 @@ def propose(repo: str, paths: list[str], attributes: str, codeowners: str, label
 
     for glob in attribute_globs(attributes):
         add(p.generated, glob, ".gitattributes")
+    folders, exceptions = header_globs(paths, hits or [])
+    for d, n, total in folders:
+        add(p.generated, d + "/**", f"{n} of {total} files say DO NOT EDIT")
+    p.generated_exceptions = [Candidate(x, "hand-written inside a generated folder") for x in exceptions]
+    p.ci_facts = ci_facts(workflows or {})
     for glob, why in _GENERATED:
         add(p.generated, glob, why)
     covered.clear()
@@ -417,24 +505,58 @@ def recent_review_bots(repo: str) -> list[str]:
     return [k for k, _ in sorted(found.items(), key=lambda kv: -kv[1])]
 
 
-def load(repo: str) -> Proposal:
+def workflow_texts(repo: str, paths: list[str], branch: str) -> dict[str, str]:
+    """The text of every workflow file, in one GraphQL request."""
+    files = [x for x in paths if re.fullmatch(r"\.github/workflows/[^/]+\.ya?ml", x)][:100]
+    if not files:
+        return {}
+    owner, name = repo.split("/")
+    fields = " ".join(f'f{i}: object(expression: {json.dumps(branch + ":" + f)}) {{ ... on Blob {{ text }} }}' for i, f in enumerate(files))
+    query = f"query($o:String!,$n:String!){{repository(owner:$o,name:$n){{ {fields} }}}}"
+    try:
+        data = json.loads(gh("api", "graphql", "-f", f"query={query}", "-F", f"o={owner}", "-F", f"n={name}", check=False) or "{}")
+        repo_data = data["data"]["repository"]
+    except (ValueError, KeyError, TypeError):
+        return {}
+    return {f: (repo_data.get(f"f{i}") or {}).get("text") or "" for i, f in enumerate(files)}
+
+
+def header_hits(repo: str) -> list[str]:
+    """Paths of files that contain 'DO NOT EDIT', by GitHub code search (up to 300; empty if search is unavailable)."""
+    out = gh("api", "-X", "GET", "search/code", "-f", f'q="DO NOT EDIT" repo:{repo}', "-F", "per_page=100", "--paginate",
+             "--jq", ".items[].path", check=False)
+    docs = (".md", ".txt", ".rst", ".adoc")          # a guide that mentions the phrase is not generated code
+    return list(dict.fromkeys(x for x in out.split("\n") if x and not x.endswith(docs)))[:300]
+
+
+def snapshot(repo: str) -> dict:
+    """Everything the proposal is made from, read from GitHub. `--dump` saves it so a proposal can be reproduced offline."""
     meta = api(f"repos/{repo}")
     if not meta:
         raise GhError(f"{repo}: not found, or your gh login cannot see it")
     branch = meta["default_branch"]
     tree = api(f"repos/{repo}/git/trees/{branch}?recursive=1") or {}
     paths = [t["path"] for t in tree.get("tree", []) if t["type"] == "blob"]
-    owners_path = next((p for p in (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS") if p in paths), None)
+    owners_path = next((x for x in (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS") if x in paths), None)
     text = lambda name: (api(f"repos/{repo}/contents/{name}", raw=True) or "") if name in paths else ""   # noqa: E731
     labels = [n for n in gh("api", f"repos/{repo}/labels?per_page=100", "--paginate", "--jq", ".[].name", check=False).split("\n") if n]
-    p = propose(repo, paths, text(".gitattributes"), text(owners_path) if owners_path else "", labels)
-    p.has_pack = f".github/{PACK}" in paths
-    for login in recent_review_bots(repo):
-        p.review_bots.append(Candidate(login, "reviewed recent pull requests"))
-    p.truncated = bool(tree.get("truncated"))
-    p.all_labels = labels      # type: ignore[attr-defined]
-    p.top_dirs = sorted({path.split("/")[0] for path in paths if "/" in path})   # type: ignore[attr-defined]
+    return {"repo": repo, "paths": paths, "truncated": bool(tree.get("truncated")), "attributes": text(".gitattributes"),
+            "codeowners": text(owners_path) if owners_path else "", "labels": labels, "hits": header_hits(repo),
+            "workflows": workflow_texts(repo, paths, branch), "review_bots": recent_review_bots(repo)}
+
+
+def from_snapshot(snap: dict) -> Proposal:
+    p = propose(snap["repo"], snap["paths"], snap["attributes"], snap["codeowners"], snap["labels"], snap.get("hits"), snap.get("workflows"))
+    p.has_pack = f".github/{PACK}" in snap["paths"]
+    p.truncated = snap.get("truncated", False)
+    p.review_bots = [Candidate(login, "reviewed recent pull requests") for login in snap.get("review_bots", [])]
+    p.all_labels = snap["labels"]      # type: ignore[attr-defined]
+    p.top_dirs = sorted({x.split("/")[0] for x in snap["paths"] if "/" in x})   # type: ignore[attr-defined]
     return p
+
+
+def load(repo: str) -> Proposal:
+    return from_snapshot(snapshot(repo))
 
 
 # -- the pack ------------------------------------------------------------------------------------------------------
@@ -473,7 +595,7 @@ def render(name: str, chosen: dict) -> str:
             out.append(f"  checks_file: {quote(chosen['checks_file'])}")
         for k, v in readiness.items():
             out.append(f"  {k}: {flow(v)}")
-    classes = {k: chosen.get(k) for k in ("generated", "api_surface", "critical", "test_only") if chosen.get(k)}
+    classes = {k: chosen.get(k) for k in ("generated", "generated_exceptions", "api_surface", "critical", "test_only") if chosen.get(k)}
     if classes:
         out.append("\nmaintainer:\n  file_classes:")
         for k, v in classes.items():
@@ -484,7 +606,8 @@ def render(name: str, chosen: dict) -> str:
 
 def inferred(p: Proposal) -> dict:
     """What was inferred, taken as it is (--yes, or no terminal). Critical code is never guessed."""
-    return {"generated": [c.glob for c in p.generated if c.picked], "api_surface": [c.glob for c in p.api_surface if c.picked],
+    return {"generated": [c.glob for c in p.generated if c.picked], "generated_exceptions": [c.glob for c in p.generated_exceptions],
+            "api_surface": [c.glob for c in p.api_surface if c.picked],
             "test_only": [c.glob for c in p.test_only if c.picked], "ready_labels": [c.glob for c in p.ready_labels],
             "attention_labels": [c.glob for c in p.attention_labels], **context(p)}
 
@@ -504,6 +627,7 @@ def review(p: Proposal) -> dict:
     bots = [Option(c.glob, c.detail, checked=True) for c in p.review_bots]
     chosen["review_bots"] = [o.label for o in menu("Review bots (their comments are labelled as a bot's)", bots, multi=True)] if bots else []
     chosen.update({k: v for k, v in context(p).items() if k not in chosen})
+    chosen["generated_exceptions"] = [c.glob for c in p.generated_exceptions]
     sections = [
         ("generated", "Generated files (a change here without a change to its source is suspect)", p.generated),
         ("api_surface", "Public API surface (changing these changes the product)", p.api_surface),
@@ -584,7 +708,7 @@ FACTS_STUB = """# What the assistant should know about {name}
 The assistant already reads this repository's guides, CODEOWNERS, labels and its pull requests. Write here what none of
 those say. Short answers are enough; delete a heading you have nothing to say under.
 
-## How a release is made
+{ci}## How a release is made
 (Branches, who cuts it, anything that must not be merged near one.)
 
 ## Branches that matter
@@ -635,10 +759,18 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--location", choices=("repo", "org"), help="put the pack in each repository, or once in <owner>/.github")
     ap.add_argument("--yes", action="store_true", help="accept what was inferred, without asking")
     ap.add_argument("--dry-run", action="store_true", help="print the pack and stop; write nothing anywhere")
+    ap.add_argument("--dump", action="store_true", help=argparse.SUPPRESS)       # the inputs as JSON, for tests
     ap.add_argument("--facts", action="store_true", help="also add assistant-org-facts.md, a stub of questions to fill in")
     args = ap.parse_args(argv)
     use_terminal()
     plain = args.yes or not interactive()
+    if args.dump:
+        try:
+            print(json.dumps(snapshot(args.repos[0])))
+            return 0
+        except (GhError, IndexError) as exc:
+            print(red(str(exc) or "give a repository"), file=sys.stderr)
+            return 1
 
     try:
         print(bold("assistant init") + dim("  writes the pack that tells the assistant what is generated, critical and ready"))
@@ -701,7 +833,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             chosen = merge([inferred(p) if plain else review(p) for p in todo])
             files = {PACK: render(owner, chosen)}
             if facts_wanted:
-                files["assistant-org-facts.md"] = FACTS_STUB.format(name=owner)
+                files["assistant-org-facts.md"] = FACTS_STUB.format(name=owner, ci=''.join(p.ci_facts + chr(10) for p in todo[:1] if p.ci_facts))
             packs.append((f"{owner}/.github", files, owner))
         else:
             for p in todo:
@@ -712,7 +844,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                     chosen = review(p)
                 files = {f".github/{PACK}": render(p.repo.split("/")[0], chosen)}
                 if facts_wanted:
-                    files[".github/assistant-org-facts.md"] = FACTS_STUB.format(name=p.repo)
+                    files[".github/assistant-org-facts.md"] = FACTS_STUB.format(name=p.repo, ci=(p.ci_facts + chr(10)) if p.ci_facts else "")
                 packs.append((p.repo, files, p.repo))
 
         for target, files, _ in packs:
