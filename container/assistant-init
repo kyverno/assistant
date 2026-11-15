@@ -409,7 +409,7 @@ def ci_facts(workflows: dict[str, str]) -> str:
         return ""
     out = ["## CI before and after merge", "(Drafted by `assistant init` from the triggers in `.github/workflows`. Check it, and add what "
            "a green PR still cannot show: for example a suite that only runs after merge.)", ""]
-    for title, names in (("Runs on a pull request (gates the PR)", before), ("Runs only after merge (push), never on a PR", after),
+    for title, names in (("Runs on a pull request (some of these gate the merge, some only label or comment)", before), ("Runs only after merge (push), never on a PR", after),
                          ("Reusable workflows (called by the others)", reusable), ("Scheduled", scheduled)):
         if names:
             out.append(f"{title}: " + ", ".join(names) + ".")
