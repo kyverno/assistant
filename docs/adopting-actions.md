@@ -112,8 +112,8 @@ Labels work as they do for PRs: the adoption PR adds `needs-info`, `stale-issue`
 labels** by hand with dry run off to create them. The action itself never creates a label; a preview, and a live run,
 list any configured label the repository lacks, and a rule that needs a missing label does nothing until it exists.
 `needs-info` is applied by people, so the waiting-on-the-reporter rule only acts once someone uses it. To reuse labels
-you already have, set `stale_label`, `resolved_label` or `needs_info_labels` to them and delete the matching entries from
-`labels.yml`. `stale-issue` is used rather than `stale`, which the PR automation owns. The rules and keys are in
+you already have, write a config that names them and pass it with `--issue-config my-config.json`: it becomes
+`.github/issue-management.json`, and only the labels it leaves at their defaults are added to `labels.yml`. `stale-issue` is used rather than `stale`, which the PR automation owns. The rules and keys are in
 [`.github/actions/issue-management/README.md`](../.github/actions/issue-management/README.md).
 
 ### Issue queue triage (agentic)

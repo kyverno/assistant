@@ -203,7 +203,7 @@ admin turns it on afterwards.
 **Before the switch**
 
 1. Run **Sync labels** from the Actions tab with dry run off, so \`needs-info\`, \`stale-issue\` and \`possibly-resolved\` exist.
-   If you reuse labels you already have, set them in the config and delete those entries from \`.github/labels.yml\`.
+   Only labels the config leaves at their defaults were added to \`.github/labels.yml\`.
    The action never creates a label; its report lists any configured label that is missing.
 2. Run **Issue management** from the Actions tab with dry run on, and read the job summary.
 3. Edit \`.github/issue-management.json\` for the repository: the labels that mean "waiting on the reporter"
