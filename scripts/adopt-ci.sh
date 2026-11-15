@@ -18,6 +18,7 @@ dry_run=false
 branch=""
 update_pin=false
 issues=false
+issue_config=
 
 die() { echo "error: $*" >&2; exit 1; }
 
@@ -32,6 +33,9 @@ usage: adopt-ci.sh --reviewers @org/team [options] owner/repo [owner/repo ...]
   --issues               adopt the shared issue management (labels resolved issues, closes ones waiting on the
                          reporter) instead of the PR automation; needs no reviewers. Opens its own PR, so a repo can
                          take either one first
+  --issue-config FILE    with --issues: use this JSON as .github/issue-management.json instead of the starter, e.g. one
+                         that names the labels the repo already has. Only the labels it leaves at their defaults are
+                         added to .github/labels.yml
   --update-pin           for repos that already use pr-management or issue-management: rewrite only the pinned action
                          references in their workflows, wherever they point now; add nothing and leave all config alone
   --dry-run              show which files would change; push nothing, open nothing
@@ -49,6 +53,7 @@ while [[ $# -gt 0 ]]; do
     --dry-run) dry_run=true; shift ;;
     --update-pin) update_pin=true; shift ;;
     --issues) issues=true; shift ;;
+    --issue-config) issue_config="${2:?--issue-config needs a file}"; shift 2 ;;
     --source) source_repo="${2:?--source needs a value}"; shift 2 ;;
     --ref) ref="${2:?--ref needs a value}"; shift 2 ;;
     --branch) branch="${2:?--branch needs a value}"; shift 2 ;;
@@ -59,6 +64,11 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ ${#repos[@]} -gt 0 ]] || { usage >&2; die "name at least one owner/repo"; }
+[[ -z "$issue_config" || "$issues" == "true" ]] || die "--issue-config needs --issues"
+if [[ -n "$issue_config" ]]; then
+  [[ -f "$issue_config" ]] && jq -e 'type == "object"' "$issue_config" > /dev/null 2>&1 || die "--issue-config must be a JSON object file"
+  issue_config="$(cd "$(dirname "$issue_config")" && pwd)/$(basename "$issue_config")"
+fi
 [[ "$issues" == "false" || "$update_pin" == "false" ]] || die "--issues and --update-pin cannot be combined: --update-pin moves the pins of both"
 if [[ -z "$branch" ]]; then
   if [[ "$update_pin" == "true" ]]; then
@@ -359,20 +369,30 @@ adopt() {
         printf '%s\n' "$overlap" | sed 's/^/    /' >&2
       fi
       for name in "${workflows[@]}"; do add_file "$templates/workflows/$name.yaml" ".github/workflows/$name.yaml"; done
-      add_file "$templates/issue-management.json" .github/issue-management.json
+      add_file "${issue_config:-$templates/issue-management.json}" .github/issue-management.json
       # Same catalog and Sync labels workflow as the PR automation: an existing labels.yml keeps everything it has and
       # only the issue labels it lacks are appended.
-      add_file "$templates/workflows/sync-labels.yaml" .github/workflows/sync-labels.yaml
       [[ -e .github/labels.yml ]] || : > .github/labels.yml
       labels_appended=false
+      # Only a label the config leaves at its default needs a catalog entry; any other name is the repo's own label.
+      cfg=.github/issue-management.json
       for label in needs-info stale-issue possibly-resolved; do
+        case "$label" in
+          needs-info) jq -e '(.needs_info_labels // ["needs-info"]) | index("needs-info")' "$cfg" > /dev/null || continue ;;
+          stale-issue) jq -e '(.stale_label // "stale-issue") == "stale-issue"' "$cfg" > /dev/null || continue ;;
+          possibly-resolved) jq -e '(.resolved_label // "possibly-resolved") == "possibly-resolved"' "$cfg" > /dev/null || continue ;;
+        esac
         grep -qE "^[\"']?${label}[\"']?:" .github/labels.yml && continue
         [[ ! -s .github/labels.yml || -z "$(tail -c1 .github/labels.yml)" ]] || echo >> .github/labels.yml
         awk -v key="${label}:" '$0 == key { on = 1; print; next } on && /^[ \t]/ { print; next } { on = 0 }' "$templates/issue-labels.yml" >> .github/labels.yml
         echo "  append '${label}' to .github/labels.yml"
         labels_appended=true
       done
-      if [[ "$labels_appended" == "true" ]]; then added+=(.github/labels.yml); fi
+      if [[ "$labels_appended" == "true" ]]; then
+        added+=(.github/labels.yml)
+        add_file "$templates/workflows/sync-labels.yaml" .github/workflows/sync-labels.yaml
+      fi
+      [[ -s .github/labels.yml ]] || rm -f .github/labels.yml
       [[ ${#added[@]} -gt 0 ]] || { echo "  already adopted, nothing to add"; exit 0; }
       [[ "$dry_run" == "false" ]] || { echo "  dry run: nothing pushed"; exit 0; }
       git add -- "${added[@]}"
