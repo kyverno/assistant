@@ -1,18 +1,19 @@
 # The organisation pack
 
 Everything the assistant knows about **your** organisation comes from one pack, and nothing about any organisation is
-written in code or in a skill. You publish it as two files at the root of your organisation's `.github` repository
-(`<owner>/.github`), and the published image reads them at run time. This page is the reference for what goes in it.
-The [README](../README.md#2-write-your-organisation-pack) has the short version.
+written in code or in a skill. You publish it in one of two places, and the published image reads it at run time:
 
 ```
-acme/.github/
-├── assistant-org.yaml          the rules: which files are generated or critical, your merge gate, which labels mean "ready"
-└── assistant-org-facts.md      optional prose for the maintainer assistant (codegen, CI, label meanings), in your own words
+acme/api/.github/assistant-org.yaml            this repository only
+acme/.github/assistant-org.yaml                every repository of the owner without its own
 ```
+
+A repository's own file replaces the shared one; they are not merged. Each can have `assistant-org-facts.md` next to it,
+optional prose for the maintainer assistant (codegen, CI, label meanings), in your own words.
 
 The file format is the one below; `container/org/kyverno/` is the worked example (its files are `org.yaml` and `facts.md`).
-Anyone who can push to your `.github` repository can change the rules, so protect it like the rest of your configuration.
+Whoever can push to the default branch of either place can change the rules, so protect it like the rest of your configuration.
+Both are read from the default branch, so a pull request cannot change its own rules.
 To bake a pack into an image you build instead, put it in `container/org/acme/` and run `container/assistant --build --org acme`;
 a baked pack is read-only to the agent.
 
@@ -20,7 +21,7 @@ a baked pack is read-only to the agent.
 
 | How you run it | Where the pack comes from |
 |---|---|
-| The published image | `<owner>/.github/assistant-org.yaml`, for the owner of the repository you point it at, remembered for ten minutes, with the last good copy kept if GitHub cannot be reached. The image also bakes Kyverno's pack, used only for the owners its `repositories:` lists |
+| The published image | The repository's own `.github/assistant-org.yaml`, else `<owner>/.github/assistant-org.yaml`, for the repository you point it at, remembered for ten minutes, with the last good copy kept if GitHub cannot be reached. The image also bakes Kyverno's pack, used only for the owners its `repositories:` lists |
 | An image you build | The copy baked in at `/opt/kyverno/.../org/`, which the sandbox policy keeps read-only. It is read first, for the owners its `repositories:` lists (every owner when it lists none). Choose it with `--org` when you build |
 | `scripts/install.sh` on your host | Copied into the profile on every run, from `container/org/$ASSISTANT_ORG`, or else `container/org/<owner of ASSISTANT_REPO>/`. Edit it there: the copy in the profile is overwritten. With neither, it installs with no pack and says so, and removes a pack left in the profile by an earlier install for another repository |
 
@@ -28,7 +29,7 @@ a baked pack is read-only to the agent.
 
 | Situation | Result |
 |---|---|
-| No pack (nothing published at `<owner>/.github`, or a private `.github` the token cannot see: GitHub answers "not found" for both, and `repo_pack` says so) | The tools still run. Every file reads `STANDARD`, no PR is gate-blocked, no label means "ready". `repo_pack` says `pack: none`, and the assistant tells you which signals it is therefore missing. |
+| No pack (nothing published in the repository or at `<owner>/.github`, or a private one the token cannot see: GitHub answers "not found" for both, and `repo_pack` says so) | The tools still run. Every file reads `STANDARD`, no PR is gate-blocked, no label means "ready". `repo_pack` says `pack: none`, and the assistant tells you which signals it is therefore missing. |
 | The published pack cannot be read (a private `.github` the token cannot see, a network error with no earlier copy) | An error that names the file and the HTTP status, not "no pack". |
 | A key it does not know (a typo), a wrong type, a malformed `repositories:` list, or a file that is not a mapping | An error that names the key, from `repo_pack` and the tools that need it. It never ignores it silently and never crashes. |
 | A bad gate (no bypass label, a marker regex without a `(?P<branch>...)` group) | An error that names the gate and the problem. |

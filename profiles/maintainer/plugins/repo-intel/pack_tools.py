@@ -33,7 +33,10 @@ def handle_repo_pack(args: Dict[str, Any], **_kw) -> str:
         return json.dumps({"success": False, "error": f"organisation pack: {exc}"})
     out = {"success": True, **rules.summary(), "facts": rules.facts}
     if not rules.source:
-        owner = pack.owner_of(_repo(args)) or "<owner>"
-        out["looked_in"] = (f"{owner}/.github/{pack.REMOTE_PACK}: not found. GitHub also answers 'not found' when the token "
-                            "cannot see a private .github repository, so if the organisation has one, check the token's access")
+        repo = _repo(args) or ""
+        owner = pack.owner_of(repo) or "<owner>"
+        name = pack.name_of(repo) or "<repo>"
+        out["looked_in"] = (f"{owner}/{name}/.github/{pack.REMOTE_PACK} and {owner}/.github/{pack.REMOTE_PACK}: not found. "
+                            "GitHub also answers 'not found' when the token cannot see a private repository, so if one is "
+                            "private, check the token's access")
     return json.dumps(out)

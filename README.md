@@ -380,9 +380,9 @@ on and says so. See [Shared CI actions](#shared-ci-actions) above.
 
 ### 2. Write your organisation pack
 
-Everything specific to your organisation lives in one small file, never in code. You publish it as `assistant-org.yaml`
-(and optionally `assistant-org-facts.md`) at the root of your organisation's `.github` repository, and the published image reads
-it from there: no clone, no build. `org.yaml` says which paths are generated, API surface, critical or test-only, whether you have a merge gate, and which
+Everything specific to your organisation lives in one small file, never in code. Publish it as `.github/assistant-org.yaml`
+in the repository itself (and optionally `.github/assistant-org-facts.md`), or once for all your repositories as
+`assistant-org.yaml` at the root of `<owner>/.github`. The published image reads it from there: no clone, no build. `org.yaml` says which paths are generated, API surface, critical or test-only, whether you have a merge gate, and which
 labels mean "ready". `facts.md` is optional prose in your own words. About ten lines get you started:
 
 ```yaml
@@ -401,10 +401,12 @@ Without a pack the assistant still works: it reads every file as ordinary, menti
 is missing. A mistake in the pack is an error that names the key. Reference: [`docs/organisation-pack.md`](docs/organisation-pack.md);
 Kyverno's is in [`container/org/kyverno/`](container/org/kyverno/), as a worked example.
 
-The assistant reads `<owner>/.github/assistant-org.yaml` for the repository you point it at (public, or private if its token can
-read it), remembers it for ten minutes, and keeps the last good copy if GitHub cannot be reached. A file it cannot read is an
-error, never a silent "no pack". The published image also carries Kyverno's pack, used only for the `kyverno` organisation. To
-bake your own into an image instead, see [`docs/organisation-pack.md`](docs/organisation-pack.md).
+For the repository you point it at, the assistant reads `<owner>/<repo>/.github/assistant-org.yaml` first and, if there is none,
+`<owner>/.github/assistant-org.yaml`. The repository's own file replaces the shared one: nothing is merged. Both are read from the
+default branch, so a pull request cannot change its own rules. It remembers a pack for ten minutes and keeps the last good copy if
+GitHub cannot be reached. A file it cannot read is an error, never a silent "no pack". The published image also carries Kyverno's
+pack, used only for the `kyverno` organisation. To bake your own into an image instead, see
+[`docs/organisation-pack.md`](docs/organisation-pack.md).
 
 ### 3. Keep your own knowledge files accurate
 
