@@ -107,6 +107,14 @@ class WaitingOnReporter(unittest.TestCase):
         acts, _ = decide(i)
         self.assertEqual([a[0] for a in acts], ["label"])
 
+    def test_a_stale_label_put_back_after_the_warning_does_not_close(self):
+        # The warning is 20 days old, but a maintainer took `stale-issue` off and put it on again 2 days ago.
+        i = issue(["needs-info", "stale-issue"], events=[("needs-info", 40), ("stale-issue", 20), ("stale-issue", 2)],
+                  comments=[bot_marker(f"warn {state(40)}", 20)])
+        acts, notes = decide(i)
+        self.assertEqual(acts, [])
+        self.assertIn("applied again after the warning", notes[0])
+
     def test_a_warning_for_an_earlier_request_does_not_count(self):
         i = issue(["needs-info", "stale-issue"], events=[("needs-info", 20), ("stale-issue", 100)],
                   comments=[bot_marker(f"warn {state(90)}", 100)])
@@ -274,7 +282,7 @@ class Config(unittest.TestCase):
             self.load({"warning_comment": "closes in {when}"})
 
     def test_rejects_bad_digest_limit(self):
-        for bad in (-1, 201, "25", True):
+        for bad in (-1, 101, "25", True):
             with self.assertRaises(ValueError, msg=bad):
                 self.load({"digest_limit": bad})
         self.assertEqual(self.load({"digest_limit": 0})["digest_limit"], 0)
@@ -329,7 +337,7 @@ def gql_comment(days, who="bot", body=""):
 
 def gql_issue(number, labels, comments=(), label_events=(), refs=(), created=400, total=None, **extra):
     node = {
-        "number": number, "title": f"issue {number}", "createdAt": iso(created),
+        "number": number, "title": f"issue {number}", "createdAt": iso(created), "updatedAt": iso(0),
         "author": {"login": "reporter", "__typename": "User"},
         "labels": {"pageInfo": {"hasNextPage": False}, "nodes": [{"name": n} for n in labels]},
         "milestone": None,
@@ -638,13 +646,13 @@ class Sweep(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("| #2 |", report)
 
-    def close_case(self, live_comments=2, live_labels=("needs-info", "stale-issue")):
+    def close_case(self, live_comments=2, live_labels=("needs-info", "stale-issue"), live_updated=0):
         self.needs_info.append({"number": 5})
         comments = [gql_comment(15, "bot", run.with_marker(f"warn {state(40)}", "text")), gql_comment(14, "bot")]
         self.fake.issues[5] = gql_issue(5, ["needs-info", "stale-issue"], comments,
                                         [("needs-info", 40), ("stale-issue", 15)])
         self.fake.live[5] = {"state": "open", "labels": [{"name": n} for n in live_labels], "milestone": None,
-                             "comments": live_comments}
+                             "comments": live_comments, "updated_at": iso(live_updated)}
 
     def test_a_close_rereads_the_issue_and_closes_with_a_comment(self):
         self.close_case()
@@ -655,6 +663,12 @@ class Sweep(unittest.TestCase):
     def test_a_close_is_abandoned_when_a_comment_arrived_after_the_read(self):
         self.close_case(live_comments=3)
         code, report, _ = self.go(dry_run=False)
+        self.assertEqual(self.fake.writes(), [])
+        self.assertIn("(abandoned)", report)
+
+    def test_a_close_is_abandoned_when_the_issue_changed_after_the_read(self):
+        self.close_case(live_updated=-1)  # a day after the read: e.g. a label taken off and put back
+        _, report, _ = self.go(dry_run=False)
         self.assertEqual(self.fake.writes(), [])
         self.assertIn("(abandoned)", report)
 

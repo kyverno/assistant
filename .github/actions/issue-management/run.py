@@ -94,6 +94,7 @@ query($owner: String!, $name: String!, $number: Int!) {
       number
       title
       createdAt
+      updatedAt
       author { login __typename }
       labels(first: 100) { pageInfo { hasNextPage } nodes { name } }
       milestone { title }
@@ -155,7 +156,7 @@ MENTION_FRAGMENT = """... on Issue {
   number
   createdAt
   comments(last: 1) { nodes { createdAt author { login __typename } } }
-  timelineItems(last: 30, itemTypes: [CROSS_REFERENCED_EVENT]) {
+  timelineItems(last: 100, itemTypes: [CROSS_REFERENCED_EVENT]) {
     nodes { ... on CrossReferencedEvent { willCloseTarget source { ... on PullRequest { state merged mergedAt } } } }
   }
 }"""
@@ -241,8 +242,8 @@ def load_config(path):
         if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 3650:
             raise ValueError(f"{key} must be a whole number of days from 1 to 3650")
     limit = config["digest_limit"]
-    if isinstance(limit, bool) or not isinstance(limit, int) or not 0 <= limit <= 200:
-        raise ValueError("digest_limit must be a whole number from 0 to 200")
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 0 <= limit <= 100:
+        raise ValueError("digest_limit must be a whole number from 0 to 100")
     if not isinstance(config["resolved_clears_on_comment"], bool):
         raise ValueError("resolved_clears_on_comment must be true or false")
     for key in ("stale_label", "resolved_label"):
@@ -360,6 +361,7 @@ def normalize(data):
         "number": node["number"],
         "title": node["title"],
         "created": parse_time(node["createdAt"]),
+        "updated": parse_time(node["updatedAt"]),
         "author": node["author"]["login"] if node["author"] else None,
         "labels": {n["name"] for n in node["labels"]["nodes"]},
         "labels_complete": not node["labels"]["pageInfo"]["hasNextPage"],
@@ -466,10 +468,16 @@ def decide(issue, now, cfg):
                 text = cfg["warning_comment"].format(days=cfg["close_days"], label=stale)
                 actions.append(("label", stale, with_marker(f"warn {state}", text)))
         elif stale in labels and days(warned_at) >= cfg["close_days"]:
-            text = None
-            if marker_time(issue, f"close {state}") is None:
-                text = with_marker(f"close {state}", cfg["close_comment"].format(days=days(asked)))
-            actions.append(("close", text))
+            stale_at = label_time(issue, stale)
+            if stale_at is None:
+                notes.append(f"#{number}: when `{stale}` was applied is not known, not closing")
+            elif stale_at > warned_at:
+                notes.append(f"#{number}: `{stale}` was applied again after the warning, not closing")
+            else:
+                text = None
+                if marker_time(issue, f"close {state}") is None:
+                    text = with_marker(f"close {state}", cfg["close_comment"].format(days=days(asked)))
+                actions.append(("close", text))
         return actions, notes
 
     # Rule: possibly resolved. Never closes. An issue a person already put in a queue is left where they put it.
@@ -575,14 +583,15 @@ def missing_labels(gh, repo, cfg):
     if not isinstance(pages, list) or not pages or any(not isinstance(p, list) for p in pages):
         raise GhError("incomplete labels response")
     have = {label["name"].lower() for page in pages for label in page}
-    wanted = [cfg["stale_label"], cfg["resolved_label"], *cfg["needs_info_labels"], *cfg["queue_labels"],
-              *cfg["exempt_labels"]]
-    return [name for name in dict.fromkeys(wanted) if name.lower() not in have]
+    wanted = [cfg["stale_label"], cfg["resolved_label"], *cfg["needs_info_labels"], *cfg["queue_labels"]]
+    # An exempt label nobody has applied yet is harmless, so it is reported apart.
+    return ([n for n in dict.fromkeys(wanted) if n.lower() not in have],
+            [n for n in dict.fromkeys(cfg["exempt_labels"]) if n.lower() not in have])
 
 
 def still_closable(gh, repo, issue, cfg):
     """Re-reads the live issue just before a close: it must still be open, still waiting and marked stale, not
-    exempt, and nobody may have commented since it was read."""
+    exempt, and nothing may have changed since it was read (a comment, or a label taken off and put back)."""
     live = json.loads(gh.read("api", f"repos/{repo}/issues/{issue['number']}"))
     names = {label["name"] for label in live["labels"]}
     return (
@@ -592,6 +601,7 @@ def still_closable(gh, repo, issue, cfg):
         and not names & set(cfg["exempt_labels"])
         and live["milestone"] is None
         and live["comments"] == issue["comment_total"]
+        and parse_time(live["updated_at"]) <= issue["updated"]
     )
 
 
@@ -639,10 +649,10 @@ def main():
 def sweep(gh, repo, cfg, max_actions, now):
     numbers, failed = discover(gh, repo, cfg, now)
     try:
-        missing = missing_labels(gh, repo, cfg)
+        missing, missing_exempt = missing_labels(gh, repo, cfg)
     except GhError as err:
         log(f"::error::could not list the repository's labels: {err}")
-        missing, failed = [], failed + 1
+        missing, missing_exempt, failed = [], [], failed + 1
     rows, comments, notes, changed, read = [], [], [], 0, 0
     for number in sorted(numbers):
         try:
@@ -684,6 +694,9 @@ def sweep(gh, repo, cfg, max_actions, now):
     if missing:
         print("\nThese labels do not exist in this repository; run **Sync labels** so they are created. Until then "
               "any rule that depends on one cannot act:\n\n" + "\n".join(f"- `{name}`" for name in missing))
+    if missing_exempt:
+        print("\nNo issue has these exempt labels yet, or they are misspelled (harmless until you use them):\n\n"
+              + "\n".join(f"- `{name}`" for name in missing_exempt))
     if notes:
         print("\nSkipped:\n\n" + "\n".join(f"- {n}" for n in notes))
     if comments:

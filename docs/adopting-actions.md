@@ -119,7 +119,7 @@ you already have, write a config that names them and pass it with `--issue-confi
 ### Issue queue triage (agentic)
 
 `workflows/issue-queue-triage.md` is a [GitHub Agentic Workflow](https://github.github.com/gh-aw/): once a day it sorts
-open issues that are in no review queue into exactly one queue, by adding a label. It never closes, comments, edits or
+open issues that are in no review queue into one queue each, by adding a label. It never closes, comments, edits or
 removes anything, and a person still reviews every queue. It is not a shared `uses:` workflow like the others: gh-aw
 copies it into your repository and compiles a lock file there, so each repository commits both files.
 

@@ -17,10 +17,10 @@ Python 3.9+ and `gh`; no packages. The script is loaded from `GITHUB_ACTION_PATH
   the exemption later cannot close on an old clock.
 - An issue already in one of the `queue_labels` is not given `possibly-resolved`: a person put it in that queue.
 - **A close needs proof of a warning.** The action only closes if the bot's own warning comment for the current
-  request exists and is `close_days` old. A `stale-issue` label set by hand is not enough, and a maintainer who removes
-  the label after the warning is respected.
+  request exists and is `close_days` old. A `stale-issue` label set by hand is not enough, one put back after the warning
+  does not count, and a maintainer who removes the label after the warning is respected.
 - **A close re-reads the live issue first** and is abandoned (and logged) if it is no longer open, no longer waiting
-  and stale, has become exempt, or has a comment the run did not see.
+  and stale, has become exempt, or has changed in any way since the run read it.
 - Bot comments never count as activity.
 
 ## Queue report

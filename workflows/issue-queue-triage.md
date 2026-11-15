@@ -1,6 +1,6 @@
 ---
 description: |
-  Sorts open issues that sit in no review queue into exactly one queue each. It only adds a queue label: it never
+  Sorts open issues that sit in no review queue into one queue each. It only adds a queue label: it never
   closes, comments, edits or removes anything. A person still reviews every queue.
 
 # The five queue names and their definitions below are Kyverno's. A repository that adopts this workflow edits the
@@ -30,10 +30,13 @@ safe-outputs:
       - "triage:verify-closure"
       - "triage:scope-review"
       - "triage:decision"
-    # One queue per issue, and at most this many issues per run.
+    # One label per call and at most this many calls per run. gh-aw cannot stop two calls naming the same issue, so
+    # "one queue per issue" rests on the prompt; a doubled label is visible and a person corrects it.
     max-labels: 1
     max: 20
     target: "*"
+    # Issues only: a pull request can never be labelled, and the job that applies the labels needs no PR access.
+    pull-requests: false
 
 timeout-minutes: 15
 ---
@@ -55,7 +58,7 @@ Skip a pull request. If there are none, stop.
 
 ## The queues
 
-Give each issue exactly one of these labels:
+Give each issue one of these labels, in a single call per issue. Never label an issue twice:
 
 - `triage:critical-review`: assess reported security, enforcement, availability or data-loss risk. It means
   "investigate potential critical impact", not "already confirmed critical".

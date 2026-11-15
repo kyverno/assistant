@@ -94,10 +94,13 @@ fi
 gh api "repos/${source_repo}/commits/${ref}" --jq .sha > /dev/null 2>&1 \
   || die "commit ${ref} is not in ${source_repo}; push this checkout or pass --ref with a pushed commit"
 if [[ "$update_pin" == "false" ]]; then
-  shared=pr-management.yml
-  [[ "$issues" == "false" ]] || shared=issue-management.yml
-  gh api "repos/${source_repo}/contents/.github/workflows/${shared}?ref=${ref}" --jq .path > /dev/null 2>&1 \
-    || die "commit ${ref} has no .github/workflows/${shared}; use a commit that includes the shared workflows"
+  shared=(pr-management.yml)
+  # Issue adoption also adds Sync labels, whose caller uses the shared pr-management workflow.
+  [[ "$issues" == "false" ]] || shared=(issue-management.yml pr-management.yml)
+  for file in "${shared[@]}"; do
+    gh api "repos/${source_repo}/contents/.github/workflows/${file}?ref=${ref}" --jq .path > /dev/null 2>&1 \
+      || die "commit ${ref} has no .github/workflows/${file}; use a commit that includes the shared workflows"
+  done
 fi
 
 templates="$here/adopt-ci-templates"
