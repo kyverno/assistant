@@ -289,7 +289,9 @@ adopt() {
     fi
     echo "  reviewers: ${reviewers} (from CODEOWNERS)"
   fi
-  [[ "$(gh api "repos/${repo}" --jq .archived)" == "false" ]] || { echo "  archived, skipped"; return 0; }
+  archived=$(gh api "repos/${repo}" --jq .archived 2> /dev/null) \
+    || { echo "  skipped: ${repo} was not found, or your gh login cannot see it" >&2; return 1; }
+  [[ "$archived" == "false" ]] || { echo "  archived, skipped"; return 0; }
   if [[ "$update_pin" == "false" ]]; then
     # The team must exist in the repository's own organisation: a mention of any other name notifies nobody.
     team_org=$(printf '%s' "${reviewers#@}" | cut -d/ -f1 | tr '[:upper:]' '[:lower:]')

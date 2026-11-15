@@ -791,6 +791,9 @@ def adopt_script() -> str:
 
 def setup(repo: str) -> int:
     """Say what `repo` lacks (an organisation pack, the PR automation) and, if asked, do it. Nothing runs without a yes."""
+    if api(f"repos/{repo}") is None:
+        print(red(f"{repo} was not found, or your gh login cannot see it."), file=sys.stderr)
+        return 1
     st = setup_status(repo)
     label = {"pack": "Organisation pack", "ci": "PR automation (labels, readiness, stale)"}
     for key in ("pack", "ci"):

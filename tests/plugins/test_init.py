@@ -166,7 +166,7 @@ class Setup(unittest.TestCase):
     def _with(self, files, prs=None, tty=False):
         calls = []
         saved = (init.api, init.open_pr, init.interactive, init.main, init.subprocess.run)
-        init.api = lambda path, raw=False: files.get(path)
+        init.api = lambda path, raw=False: files.get(path, {"name": "r"} if path == "repos/o/r" else None)
         init.open_pr = lambda repo, branch: (prs or {}).get(branch, "")
         init.interactive = lambda: tty
         init.main = lambda argv: calls.append(("pack", argv)) or 0
@@ -181,6 +181,15 @@ class Setup(unittest.TestCase):
         try:
             self.assertEqual(init.setup("o/r"), 0)
             self.assertEqual(init.setup_status("o/r"), {"pack": "", "ci": ""})
+        finally:
+            self._restore(saved)
+        self.assertEqual(calls, [])
+
+    def test_a_repository_that_does_not_exist_is_said_so_not_reported_as_unset_up(self):
+        calls, saved = self._with({}, tty=True)
+        init.api = lambda path, raw=False: None
+        try:
+            self.assertEqual(init.setup("o/missing"), 1)
         finally:
             self._restore(saved)
         self.assertEqual(calls, [])
