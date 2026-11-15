@@ -381,8 +381,7 @@ on and says so. See [Shared CI actions](#shared-ci-actions) above.
 ### 2. Write your organisation pack
 
 The easy way, with no clone and no Docker: `curl -fsSL https://raw.githubusercontent.com/kyverno/assistant/main/container/assistant-init | python3 - owner/repo` (or several repositories; with a checkout, `container/assistant init`). It reads each repository with your own `gh` login,
-proposes what is generated, API surface, test-only and "ready" in your files and labels, lets you change it with the arrow keys, space
-and enter, shows the file, and opens a pull request that adds it. For several repositories it asks whether to write one shared pack or
+proposes what is generated, API surface and test-only in your files, asks you to confirm those and to pick the critical code, takes guides, owners, labels and review bots as the repository states them, shows the file, and opens a pull request that adds it. For several repositories it asks whether to write one shared pack or
 one per repository. Nothing is written until you confirm, and `--dry-run` only prints. The written pack is yours to edit.
 To write it by hand instead:
 

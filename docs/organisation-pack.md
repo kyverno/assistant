@@ -32,7 +32,7 @@ curl -fsSL https://raw.githubusercontent.com/kyverno/assistant/main/container/as
 ```
 
 (Pin a release tag instead of `main` if you want to read the exact script first; with a checkout, `container/assistant init acme/api` does the same.) It reads the repository's file tree, `.gitattributes` (`linguist-generated`), `CODEOWNERS`, labels and recent reviews, and offers
-only what exists:
+only what exists. It asks little: the file classes (generated, API surface, critical, test-only), then what to do with the result. Guides, owners, labels, review bots and ready labels are taken as the repository states them, the pack goes in the repository itself (`--location org` for a shared `<owner>/.github`), and you correct anything in the pull request:
 
 | Written to the pack | From |
 |---|---|
@@ -42,7 +42,7 @@ only what exists:
 | `readiness` ready and waiting-on-the-author labels, `review_bots` | Label names, bots that reviewed recent PRs |
 
 Label meanings need no entry: the assistant reads each label's description from GitHub live, so write them there (or in
-`.github/labels.yml`). With `--facts` or when asked, it also adds `assistant-org-facts.md`: a **draft of how CI runs before and after merge**, read from the
+`.github/labels.yml`). It also adds `assistant-org-facts.md` (leave it out with `--no-facts`): a **draft of how CI runs before and after merge**, read from the
 triggers in `.github/workflows` (check it), then a short list of questions (how a release is
 made, which branches matter, failures that are not the author's fault, what a reviewer looks for first) for you to fill in. It ends by
 listing what it **could not** work out: merge gates (`branch_gates` needs a check name, a label and a bypass label), critical code, and

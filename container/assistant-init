@@ -622,11 +622,7 @@ def context(p: Proposal) -> dict:
 def review(p: Proposal) -> dict:
     """Walk the user through the proposal, one question per kind of rule."""
     chosen: dict = {}
-    docs = [Option(c.glob, c.detail, checked=c.picked) for c in p.agent_docs]
-    chosen["agent_docs"] = [o.label for o in menu("Guides the assistant should read (it reads them before judging a change)", docs, multi=True)] if docs else []
-    bots = [Option(c.glob, c.detail, checked=True) for c in p.review_bots]
-    chosen["review_bots"] = [o.label for o in menu("Review bots (their comments are labelled as a bot's)", bots, multi=True)] if bots else []
-    chosen.update({k: v for k, v in context(p).items() if k not in chosen})
+    chosen.update(context(p))             # guides, review bots, owners, label catalogue: taken as the repository states them
     chosen["generated_exceptions"] = [c.glob for c in p.generated_exceptions]
     sections = [
         ("generated", "Generated files (a change here without a change to its source is suspect)", p.generated),
@@ -640,16 +636,11 @@ def review(p: Proposal) -> dict:
             options = [Option(f"{d}/**") for d in p.top_dirs]          # nothing to suggest, so offer the folders
             title = "Critical code: which top-level folders? (nothing was inferred)"
         picked = [o.label for o in menu(title, options, multi=True)] if options else []
-        if key in ("critical", "generated"):
+        if key == "critical":
             extra = ask(f"  More {key.replace('_', ' ')} globs, comma-separated (Enter to skip)")
             picked += [g.strip() for g in extra.split(",") if g.strip()]
         chosen[key] = picked
-    names = getattr(p, "all_labels", [])
-    for key, title, cands in (("ready_labels", "Labels that mean ready for a maintainer", p.ready_labels),
-                              ("attention_labels", "Labels that mean waiting on the author", p.attention_labels)):
-        marked = {c.glob for c in cands}
-        options = [Option(n, "suggested" if n in marked else "", checked=n in marked) for n in sorted(names, key=lambda n: (n not in marked, n))]
-        chosen[key] = [o.label for o in menu(title, options, multi=True)] if options else []
+    chosen.update({"ready_labels": [c.glob for c in p.ready_labels], "attention_labels": [c.glob for c in p.attention_labels]})
     return chosen
 
 
@@ -762,7 +753,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--yes", action="store_true", help="accept what was inferred, without asking")
     ap.add_argument("--dry-run", action="store_true", help="print the pack and stop; write nothing anywhere")
     ap.add_argument("--dump", action="store_true", help=argparse.SUPPRESS)       # the inputs as JSON, for tests
-    ap.add_argument("--facts", action="store_true", help="also add assistant-org-facts.md, a stub of questions to fill in")
+    ap.add_argument("--no-facts", action="store_true", help="leave out assistant-org-facts.md, the stub of questions to fill in")
     args = ap.parse_args(argv)
     use_terminal()
     plain = args.yes or not interactive()
@@ -802,10 +793,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         location = args.location
         if not location:
             if len(todo) == 1 and len(owners) == 1:
-                one = choose("Where should the pack live?", [
-                    Option(f"In {todo[0].repo} itself (recommended)", f".github/{PACK}, nothing else to create", "repo"),
-                    Option(f"In {todo[0].repo.split('/')[0]}/.github", "shared with the owner's other repositories", "org")])
-                location = one.value
+                location = "repo"                 # the default; --location org for a shared pack
             elif len(owners) == 1:
                 one = choose(f"{len(todo)} repositories: one pack or one each?", [
                     Option("One shared pack", f"{next(iter(owners))}/.github, same rules for all {len(todo)}", "org"),
@@ -827,8 +815,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                     return 0 if not plain else 1
                 location = "repo"
 
-        facts_wanted = args.facts or (not plain and confirm("Also add assistant-org-facts.md, a short list of questions about your "
-                                                          "release process and review norms for you to fill in?", default=True))
+        facts_wanted = not args.no_facts
         packs: list[tuple[str, dict[str, str], str]] = []        # (target repo, files, name)
         if location == "org":
             owner = next(iter(owners))
