@@ -111,6 +111,18 @@ class Flow(unittest.TestCase):
             init.load, init.api, init.publish, init.interactive = saved
         return code, calls
 
+    def test_a_single_repository_is_told_about_the_shared_pack_it_would_override(self):
+        calls = []
+        saved = (init.load, init.api, init.publish)
+        init.load = lambda repo: init.propose(repo, ["src/x.ts"], "", "", [])
+        init.api = lambda path, raw=False: {"name": init.PACK} if path.endswith("/.github/contents/" + init.PACK) else None
+        init.publish = lambda *a, **k: calls.append(a)
+        try:
+            self.assertEqual(init.main(["o/r", "--yes"]), 1)
+        finally:
+            init.load, init.api, init.publish = saved
+        self.assertEqual(calls, [])
+
     def test_without_a_terminal_and_without_yes_nothing_is_published(self):
         self.assertEqual(self._run(["o/r"]), (0, []))
 

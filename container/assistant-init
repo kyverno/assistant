@@ -794,6 +794,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         if not location:
             if len(todo) == 1 and len(owners) == 1:
                 location = "repo"                 # the default; --location org for a shared pack
+                owner = next(iter(owners))
+                if api(f"repos/{owner}/.github/contents/{PACK}") is not None:
+                    print(yellow(f"{owner}/.github already has {PACK}; it covers every repository of {owner} that has no pack of its own."))
+                    if plain or not confirm(f"Write a pack for just {todo[0].repo} instead (it overrides the shared one)?"):
+                        print("Nothing was written. Edit the shared file, or run again with --location repo.")
+                        return 0 if not plain else 1
             elif len(owners) == 1:
                 one = choose(f"{len(todo)} repositories: one pack or one each?", [
                     Option("One shared pack", f"{next(iter(owners))}/.github, same rules for all {len(todo)}", "org"),
