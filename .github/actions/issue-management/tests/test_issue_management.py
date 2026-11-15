@@ -358,8 +358,10 @@ class FakeGitHub:
             return 0, json.dumps({"data": self.graphql(query, v)}), ""
         if args[0] == "api":
             path = args[1]
-            if "/labels/" in path:
-                return (0, "{}", "") if path.rsplit("/", 1)[1] in self.live.get("labels", []) else (1, "", "404")
+            if "/labels?" in path:
+                if self.live.get("labels") is None:
+                    return 1, "", "boom"
+                return 0, json.dumps([[{"name": n} for n in self.live.get("labels", [])]]), ""
             return 0, json.dumps(self.live[int(path.rsplit("/", 1)[1])]), ""
         return 0, "", ""
 
@@ -613,13 +615,20 @@ class Sweep(unittest.TestCase):
         self.assertEqual(len(writes), 2)  # the label exists; one edit and one comment
         self.assertEqual(sleeps, [1.0] * len(writes))
 
-    def test_a_missing_label_is_created_once(self):
-        self.fake.live["labels"] = []
+    def test_a_missing_label_is_reported_and_not_created(self):
+        self.fake.live["labels"] = ["possibly-resolved"]
         self.warn_case(1)
-        self.warn_case(2)
-        self.go(dry_run=False)
-        creates = [c for c in self.fake.calls if c[:2] == ["label", "create"]]
-        self.assertEqual(len(creates), 1)
+        code, report, _ = self.go(dry_run=False)
+        self.assertEqual((code, self.fake.writes()), (0, []))
+        self.assertIn("| #1 | skipped: label `stale-issue` does not exist |", report)
+        self.assertIn("- `stale-issue`", report)
+        self.assertIn("- `needs-info`", report)
+
+    def test_a_failed_label_listing_is_counted_but_the_actions_still_run(self):
+        self.fake.live["labels"] = None
+        self.warn_case(1)
+        code, _, _ = self.go(dry_run=True)
+        self.assertEqual(code, 1)
 
     def test_one_failing_issue_does_not_stop_the_rest(self):
         self.warn_case(1)

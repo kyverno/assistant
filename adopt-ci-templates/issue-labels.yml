@@ -1,0 +1,12 @@
+# Labels the shared issue management uses. `adopt-ci.sh --issues` appends the ones a repository lacks to
+# .github/labels.yml, and the Sync labels workflow creates them. If you point `stale_label`, `resolved_label` or
+# `needs_info_labels` at labels you already have, delete the matching entry here.
+needs-info:
+  color: d876e3
+  description: Waiting on the reporter for more information
+stale-issue:
+  color: cfd3d7
+  description: Issue with no activity, or waiting on the reporter
+possibly-resolved:
+  color: 0e8a16
+  description: A merged PR references this issue; needs confirmation that it is resolved

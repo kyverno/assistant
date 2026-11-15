@@ -105,9 +105,15 @@ an existing `actions/stale` or similar workflow, and supports `--dry-run`. `--up
 automations in a repository.
 
 Nothing happens until an admin sets the repository variable `ISSUE_AUTOMATION_LIVE` to `true`, separate from
-`PR_AUTOMATION_LIVE`. Until then every scheduled run writes what it would do to the job summary. No label needs
-creating by hand: the action creates `stale-issue` and `possibly-resolved` when it first runs live, and it uses
-`stale-issue` rather than `stale`, which the PR automation owns. The rules and keys are in
+`PR_AUTOMATION_LIVE`. Until then every scheduled run writes what it would do to the job summary.
+
+Labels work as they do for PRs: the adoption PR adds `needs-info`, `stale-issue` and `possibly-resolved` to
+`.github/labels.yml` (keeping any it already has) and adds the **Sync labels** workflow. After merging, run **Sync
+labels** by hand with dry run off to create them. The action itself never creates a label; a preview, and a live run,
+list any configured label the repository lacks, and a rule that needs a missing label does nothing until it exists.
+`needs-info` is applied by people, so the waiting-on-the-reporter rule only acts once someone uses it. To reuse labels
+you already have, set `stale_label`, `resolved_label` or `needs_info_labels` to them and delete the matching entries from
+`labels.yml`. `stale-issue` is used rather than `stale`, which the PR automation owns. The rules and keys are in
 [`.github/actions/issue-management/README.md`](../.github/actions/issue-management/README.md).
 
 ### Issue queue triage (agentic)

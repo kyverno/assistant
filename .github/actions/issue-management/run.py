@@ -81,10 +81,6 @@ COMMENT_FIELDS = {
     "close_comment": {"days"},
     "resolved_comment": {"pr", "label"},
 }
-LABEL_INFO = {
-    "stale-issue": ("CFD3D7", "Issue with no activity, or waiting on the reporter"),
-    "possibly-resolved": ("0E8A16", "A merged PR references this issue; needs confirmation that it is resolved"),
-}
 MARKER = "<!-- issue-management: {} -->"
 MARKER_RE = re.compile(r"<!-- issue-management: (.+?) -->")
 # Search stops at 1000 results; a connection is paged at most this many times.
@@ -572,15 +568,16 @@ def queue_report(gh, repo, cfg, now):
     return queues, unqueued["search"]["issueCount"]
 
 
-def ensure_label(gh, repo, name, known):
-    if name in known or gh.dry_run:
-        return
-    try:
-        gh.read("api", f"repos/{repo}/labels/{urllib.parse.quote(name, safe='')}")
-    except GhError:
-        color, description = LABEL_INFO.get(name, ("EDEDED", ""))
-        gh.write("label", "create", name, "-R", repo, "--color", color, "--description", description)
-    known.add(name)
+def missing_labels(gh, repo, cfg):
+    """The configured labels this repository does not have. Labels are created by the Sync labels workflow, as for
+    the PR automation; nothing here creates one."""
+    pages = json.loads(gh.read("api", f"repos/{repo}/labels?per_page=100", "--paginate", "--slurp"))
+    if not isinstance(pages, list) or not pages or any(not isinstance(p, list) for p in pages):
+        raise GhError("incomplete labels response")
+    have = {label["name"].lower() for page in pages for label in page}
+    wanted = [cfg["stale_label"], cfg["resolved_label"], *cfg["needs_info_labels"], *cfg["queue_labels"],
+              *cfg["exempt_labels"]]
+    return [name for name in dict.fromkeys(wanted) if name.lower() not in have]
 
 
 def still_closable(gh, repo, issue, cfg):
@@ -598,11 +595,10 @@ def still_closable(gh, repo, issue, cfg):
     )
 
 
-def apply(gh, repo, issue, action, cfg, known_labels):
+def apply(gh, repo, issue, action, cfg):
     """Carries out one action; returns False when a close was abandoned because the issue changed."""
     kind, number = action[0], str(issue["number"])
     if kind == "label":
-        ensure_label(gh, repo, action[1], known_labels)
         gh.write("issue", "edit", number, "-R", repo, "--add-label", action[1])
         gh.write("issue", "comment", number, "-R", repo, "--body", action[2])
     elif kind == "unlabel":
@@ -642,7 +638,12 @@ def main():
 
 def sweep(gh, repo, cfg, max_actions, now):
     numbers, failed = discover(gh, repo, cfg, now)
-    rows, comments, notes, known_labels, changed, read = [], [], [], set(), 0, 0
+    try:
+        missing = missing_labels(gh, repo, cfg)
+    except GhError as err:
+        log(f"::error::could not list the repository's labels: {err}")
+        missing, failed = [], failed + 1
+    rows, comments, notes, changed, read = [], [], [], 0, 0
     for number in sorted(numbers):
         try:
             owner, name = repo.split("/")
@@ -660,9 +661,13 @@ def sweep(gh, repo, cfg, max_actions, now):
             if not gh.dry_run and changed >= max_actions:
                 rows.append(f"| #{number} | skipped: max-actions reached | |")
                 continue
+            lacking = [a[1] for a in actions if a[0] == "label" and a[1] in missing]
+            if lacking and not gh.dry_run:
+                rows.append(f"| #{number} | skipped: label `{lacking[0]}` does not exist | |")
+                continue
             changed += 1
             for action in actions:
-                done = apply(gh, repo, issue, action, cfg, known_labels)
+                done = apply(gh, repo, issue, action, cfg)
                 rows.append(f"| #{number} | {describe(action)}{'' if done else ' (abandoned)'} | {short(issue['title'])} |")
                 body = action[2] if action[0] == "label" else (action[1] if action[0] == "close" else None)
                 if body and gh.dry_run:
@@ -676,6 +681,9 @@ def sweep(gh, repo, cfg, max_actions, now):
     if rows:
         print("| Issue | Action | Title |\n|---|---|---|")
         print("\n".join(rows))
+    if missing:
+        print("\nThese labels do not exist in this repository; run **Sync labels** so they are created. Until then "
+              "any rule that depends on one cannot act:\n\n" + "\n".join(f"- `{name}`" for name in missing))
     if notes:
         print("\nSkipped:\n\n" + "\n".join(f"- {n}" for n in notes))
     if comments:

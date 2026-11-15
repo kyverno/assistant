@@ -59,7 +59,8 @@ longer in the history, the issue is skipped and the report says why.
 | `dry-run` | `'true'` | Exactly `'true'` or `'false'`; preview never mutates GitHub |
 | `max-actions` | `'30'` | With `dry-run: 'false'`, the most issues one run changes; the rest are listed as skipped |
 
-Supply `GH_TOKEN` in the caller step's environment. It needs `issues: write` and `contents: read`. The report goes
+Labels must exist: the report lists any configured label the repository lacks, and a live run skips an issue whose
+label is missing. Supply `GH_TOKEN` in the caller step's environment. It needs `issues: write` and `contents: read`. The report goes
 to the job summary.
 
 ## Configuration
@@ -69,7 +70,7 @@ with unknown `{fields}` fail the run.
 
 | Key | Default |
 | --- | --- |
-| `stale_label` / `resolved_label` | `stale-issue` / `possibly-resolved` (created if missing when live) |
+| `stale_label` / `resolved_label` | `stale-issue` / `possibly-resolved`. Created by the Sync labels workflow, never by this action |
 | `resolved_clears_on_comment` | `true`. `false` keeps `resolved_label` when someone comments, for a label that is a review queue a person clears |
 | `queue_labels` | `[]`. The repository's review-queue labels |
 | `needs_info_labels` | `["needs-info"]` |

@@ -192,11 +192,14 @@ admin turns it on afterwards.
 
 **Before the switch**
 
-1. Run **Issue management** from the Actions tab with dry run on, and read the job summary.
-2. Edit \`.github/issue-management.json\` for the repository: the labels that mean "waiting on the reporter"
+1. Run **Sync labels** from the Actions tab with dry run off, so \`needs-info\`, \`stale-issue\` and \`possibly-resolved\` exist.
+   If you reuse labels you already have, set them in the config and delete those entries from \`.github/labels.yml\`.
+   The action never creates a label; its report lists any configured label that is missing.
+2. Run **Issue management** from the Actions tab with dry run on, and read the job summary.
+3. Edit \`.github/issue-management.json\` for the repository: the labels that mean "waiting on the reporter"
    (\`needs_info_labels\`), the labels that exempt an issue (\`exempt_labels\`), and, if you sort issues into review
-   queues with labels, \`queue_labels\`. No label needs creating by hand.
-3. If the organisation restricts which actions may run (Settings, Actions, General), allow \`${source_repo}@*\`.
+   queues with labels, \`queue_labels\`.
+4. If the organisation restricts which actions may run (Settings, Actions, General), allow \`${source_repo}@*\`.
 
 **The switch**: set the repository variable \`ISSUE_AUTOMATION_LIVE\` to \`true\` (Settings, Secrets and variables,
 Actions, Variables), or run \`gh variable set ISSUE_AUTOMATION_LIVE --body true --repo ${repo}\`. Creating a variable
@@ -357,6 +360,19 @@ adopt() {
       fi
       for name in "${workflows[@]}"; do add_file "$templates/workflows/$name.yaml" ".github/workflows/$name.yaml"; done
       add_file "$templates/issue-management.json" .github/issue-management.json
+      # Same catalog and Sync labels workflow as the PR automation: an existing labels.yml keeps everything it has and
+      # only the issue labels it lacks are appended.
+      add_file "$templates/workflows/sync-labels.yaml" .github/workflows/sync-labels.yaml
+      [[ -e .github/labels.yml ]] || : > .github/labels.yml
+      labels_appended=false
+      for label in needs-info stale-issue possibly-resolved; do
+        grep -qE "^[\"']?${label}[\"']?:" .github/labels.yml && continue
+        [[ ! -s .github/labels.yml || -z "$(tail -c1 .github/labels.yml)" ]] || echo >> .github/labels.yml
+        awk -v key="${label}:" '$0 == key { on = 1; print; next } on && /^[ \t]/ { print; next } { on = 0 }' "$templates/issue-labels.yml" >> .github/labels.yml
+        echo "  append '${label}' to .github/labels.yml"
+        labels_appended=true
+      done
+      if [[ "$labels_appended" == "true" ]]; then added+=(.github/labels.yml); fi
       [[ ${#added[@]} -gt 0 ]] || { echo "  already adopted, nothing to add"; exit 0; }
       [[ "$dry_run" == "false" ]] || { echo "  dry run: nothing pushed"; exit 0; }
       git add -- "${added[@]}"
