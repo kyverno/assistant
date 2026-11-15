@@ -1,0 +1,608 @@
+#!/usr/bin/env python3
+"""assistant init: write the organisation pack for your repositories, by asking instead of by hand.
+
+    container/assistant init [owner/repo ...] [--location repo|org] [--yes] [--dry-run]
+
+It reads each repository with your own `gh` login (its file tree, .gitattributes, CODEOWNERS and labels), proposes the
+pack, lets you change it (arrow keys, space, enter), shows the file, and opens a pull request that adds it. Nothing is
+written to a repository until you say so. Python 3 standard library only; the only other tool it needs is `gh`.
+"""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import json
+import os
+import re
+import select
+import shutil
+import subprocess
+import sys
+import tempfile
+from dataclasses import dataclass, field
+from typing import Iterator, Optional
+
+PACK = "assistant-org.yaml"
+USE_COLOR = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
+
+
+# -- terminal ------------------------------------------------------------------------------------------------------
+
+def style(text: str, code: str) -> str:
+    return f"\x1b[{code}m{text}\x1b[0m" if USE_COLOR else text
+
+
+def bold(t): return style(t, "1")
+def dim(t): return style(t, "2")
+def cyan(t): return style(t, "36")
+def green(t): return style(t, "32")
+def yellow(t): return style(t, "33")
+def red(t): return style(t, "31")
+
+
+def interactive() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+_ESC = {"[A": "up", "[B": "down", "[C": "right", "[D": "left", "OA": "up", "OB": "down", "[H": "home", "[F": "end",
+        "[5~": "pageup", "[6~": "pagedown", "[1~": "home", "[4~": "end"}
+
+
+def read_key(fd: int) -> str:
+    """One key press as a name: up, down, pageup, pagedown, home, end, enter, space, esc, backspace, or the character."""
+    ch = os.read(fd, 1)
+    if ch == b"\x1b":
+        seq = b""
+        while select.select([fd], [], [], 0.05)[0] and len(seq) < 4:
+            seq += os.read(fd, 1)
+            if len(seq) >= 2 and (seq[-1:].isalpha() or seq[-1:] == b"~"):
+                break
+        return _ESC.get(seq.decode("ascii", "ignore"), "esc")
+    if ch in (b"\r", b"\n"):
+        return "enter"
+    if ch == b" ":
+        return "space"
+    if ch == b"\x03":
+        raise KeyboardInterrupt
+    if ch in (b"\x7f", b"\x08"):
+        return "backspace"
+    return ch.decode("utf-8", "ignore")
+
+
+@contextlib.contextmanager
+def raw_keys() -> Iterator[int]:
+    import termios
+    import tty
+
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    sys.stdout.write("\x1b[?25l")
+    sys.stdout.flush()
+    try:
+        tty.setcbreak(fd)
+        yield fd
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        sys.stdout.write("\x1b[?25h")
+        sys.stdout.flush()
+
+
+@dataclass
+class Option:
+    label: str
+    detail: str = ""
+    value: object = None
+    checked: bool = False
+
+
+def _window(count: int, cursor: int, size: int) -> tuple[int, int]:
+    start = max(0, min(cursor - size // 2, count - size))
+    return start, min(count, start + size)
+
+
+def menu(title: str, options: list[Option], multi: bool = False, hint: str = "", rows: int = 12) -> list[Option]:
+    """Choose from a list. Single choice: up and down, enter. Several: space toggles, `a` selects all, `n` none, and `/`
+    filters a long list. Without a terminal it returns the preselected options (or the first, for a single choice)."""
+    if not options:
+        return []
+    if not interactive():
+        picked = [o for o in options if o.checked]
+        return picked if multi else (picked[:1] or options[:1])
+    cursor, flt, filtering, drawn = 0, "", False, 0
+    keys = ("up/down move · space select · a all · n none · / filter · enter confirm" if multi
+            else "up/down move · enter choose")
+    with raw_keys() as fd:
+        while True:
+            shown = [o for o in options if flt.lower() in (o.label + " " + o.detail).lower()] or []
+            cursor = max(0, min(cursor, len(shown) - 1))
+            lines = [bold(title)] + ([dim(hint)] if hint else [])
+            if filtering or flt:
+                lines.append(cyan("filter: ") + flt + ("▏" if filtering else ""))
+            lo, hi = _window(len(shown), cursor, rows)
+            if lo:
+                lines.append(dim(f"  ↑ {lo} more"))
+            for i in range(lo, hi):
+                o = shown[i]
+                box = ("[x] " if o.checked else "[ ] ") if multi else ""
+                row = f"{box}{o.label}" + (dim(f"  {o.detail}") if o.detail else "")
+                lines.append(cyan("❯ ") + bold(row) if i == cursor else "  " + row)
+            if hi < len(shown):
+                lines.append(dim(f"  ↓ {len(shown) - hi} more"))
+            if not shown:
+                lines.append(dim("  nothing matches"))
+            lines.append(dim(keys if not filtering else "type to filter · enter or esc to stop filtering"))
+            if drawn:
+                sys.stdout.write(f"\x1b[{drawn}A")
+            sys.stdout.write("\r\x1b[J" + "\n".join(lines) + "\n")
+            sys.stdout.flush()
+            drawn = len(lines)
+            key = read_key(fd)
+            if filtering:
+                if key in ("enter", "esc"):
+                    filtering = False
+                elif key == "backspace":
+                    flt = flt[:-1]
+                elif len(key) == 1 and key.isprintable():
+                    flt += key
+                continue
+            if key in ("up", "k"):
+                cursor = max(0, cursor - 1)
+            elif key in ("down", "j"):
+                cursor = min(len(shown) - 1, cursor + 1)
+            elif key == "pageup":
+                cursor = max(0, cursor - rows)
+            elif key == "pagedown":
+                cursor = min(len(shown) - 1, cursor + rows)
+            elif key == "home":
+                cursor = 0
+            elif key == "end":
+                cursor = len(shown) - 1
+            elif key == "/" and (multi or len(options) > rows):
+                filtering = True
+            elif key == "esc" and flt:
+                flt = ""
+            elif multi and key == "space" and shown:
+                shown[cursor].checked = not shown[cursor].checked
+            elif multi and key == "a":
+                for o in shown:
+                    o.checked = True
+            elif multi and key == "n":
+                for o in shown:
+                    o.checked = False
+            elif key == "enter":
+                chosen = [o for o in options if o.checked] if multi else ([shown[cursor]] if shown else [])
+                sys.stdout.write(f"\x1b[{drawn}A\r\x1b[J")
+                summary = ", ".join(o.label for o in chosen) if chosen else "none"
+                sys.stdout.write(f"{bold(title)} {green(summary if len(summary) < 100 else str(len(chosen)) + ' selected')}\n")
+                return chosen
+
+
+def choose(title: str, options: list[Option], hint: str = "") -> Option:
+    return menu(title, options, multi=False, hint=hint)[0]
+
+
+def confirm(question: str, default: bool = True) -> bool:
+    if not interactive():
+        return default
+    yes, no = Option("Yes", value=True), Option("No", value=False)
+    return bool(choose(question, [yes, no] if default else [no, yes]).value)
+
+
+def ask(prompt: str, default: str = "") -> str:
+    if not interactive():
+        return default
+    suffix = f" [{default}]" if default else ""
+    try:
+        return input(f"{bold(prompt)}{suffix}: ").strip() or default
+    except EOFError:
+        return default
+
+
+# -- GitHub, through the user's own gh login -----------------------------------------------------------------------
+
+class GhError(RuntimeError):
+    pass
+
+
+def gh(*args: str, check: bool = True) -> str:
+    try:
+        r = subprocess.run(["gh", *args], capture_output=True, text=True, timeout=120)
+    except FileNotFoundError:
+        raise GhError("the GitHub CLI (gh) is not installed: https://cli.github.com") from None
+    if r.returncode and check:
+        raise GhError((r.stderr or r.stdout).strip().splitlines()[-1] if (r.stderr or r.stdout).strip() else f"gh {args[0]} failed")
+    return r.stdout
+
+
+def api(path: str, raw: bool = False) -> Optional[object]:
+    """GET a GitHub API path. None for 404, so a missing file is an answer, not an error."""
+    args = ["api", path]
+    if raw:
+        args += ["-H", "Accept: application/vnd.github.raw"]
+    try:
+        out = gh(*args)
+    except GhError as exc:
+        if "404" in str(exc) or "Not Found" in str(exc):
+            return None
+        raise
+    return out if raw else json.loads(out or "null")
+
+
+# -- what the repository says about itself -------------------------------------------------------------------------
+
+@dataclass
+class Candidate:
+    glob: str
+    detail: str = ""
+    picked: bool = True
+
+
+@dataclass
+class Proposal:
+    repo: str
+    generated: list[Candidate] = field(default_factory=list)
+    api_surface: list[Candidate] = field(default_factory=list)
+    critical: list[Candidate] = field(default_factory=list)
+    test_only: list[Candidate] = field(default_factory=list)
+    ready_labels: list[Candidate] = field(default_factory=list)
+    attention_labels: list[Candidate] = field(default_factory=list)
+    has_pack: bool = False
+    truncated: bool = False
+
+
+def glob_regex(glob: str) -> re.Pattern:
+    """The pack's glob language: `*` within a directory, `**` across directories, `**/` for zero or more."""
+    out, i = "", 0
+    while i < len(glob):
+        c = glob[i]
+        if c == "*":
+            if glob[i:i + 2] == "**":
+                i += 2
+                if glob[i:i + 1] == "/":
+                    i += 1
+                    out += "(?:.*/)?"
+                else:
+                    out += ".*"
+                continue
+            out += "[^/]*"
+        elif c == "?":
+            out += "[^/]"
+        else:
+            out += re.escape(c)
+        i += 1
+    return re.compile(out + r"\Z")
+
+
+def matches(glob: str, paths: list[str]) -> int:
+    rx = glob_regex(glob)
+    return sum(1 for p in paths if rx.match(p))
+
+
+_GENERATED = [
+    ("**/zz_generated.*", "Go code generators"), ("**/*.pb.*", "protobuf"),
+    ("**/*_generated.*", "generated"), ("**/*.generated.*", "generated"), ("**/dist/**", "build output"), ("package-lock.json", "lockfile"), ("yarn.lock", "lockfile"),
+    ("pnpm-lock.yaml", "lockfile"), ("Cargo.lock", "lockfile"), ("poetry.lock", "lockfile"), ("go.sum", "lockfile"),
+    ("**/*.min.js", "minified"), ("**/crds/**", "CRDs"), ("docs/api/**", "generated API docs"),
+]
+_API_DIRS = ("api", "apis", "proto", "protos", "openapi", "swagger", "schema", "schemas", "sdk")
+_TESTS = [
+    ("**/*_test.go", "Go tests"), ("**/*.test.ts", "TypeScript tests"), ("**/*.test.tsx", "TypeScript tests"),
+    ("**/*.test.js", "JavaScript tests"), ("**/*.spec.ts", "TypeScript specs"), ("**/*.spec.js", "JavaScript specs"),
+    ("**/test_*.py", "Python tests"), ("**/*_test.py", "Python tests"), ("tests/**", "tests folder"),
+    ("test/**", "test folder"), ("**/__tests__/**", "Jest tests"), ("**/testdata/**", "test data"),
+]
+_READY = re.compile(r"ready|lgtm|approved|awaiting[- ]review|needs[- ]review|review[- ]requested", re.I)
+_ATTENTION = re.compile(r"needs?[- ](author|changes|info|rebase|update)|author[- ]action|waiting[- ](on[- ])?author|"
+                        r"changes[- ]requested|awaiting[- ](author|response)", re.I)
+
+
+def attribute_globs(text: str) -> list[str]:
+    """Patterns the repository itself marks `linguist-generated` in .gitattributes."""
+    found = []
+    for line in text.splitlines():
+        parts = line.split("#", 1)[0].split()
+        if len(parts) >= 2 and any(a in ("linguist-generated", "linguist-generated=true") for a in parts[1:]):
+            pat = parts[0].lstrip("/")
+            found.append(pat + "**" if pat.endswith("/") else pat if "*" in pat or "." in pat.split("/")[-1] else pat + "/**")
+    return found
+
+
+def codeowner_globs(text: str, dirs: set[str]) -> list[tuple[str, str]]:
+    """(glob, owners) for each CODEOWNERS line that names a folder."""
+    found = []
+    for line in text.splitlines():
+        parts = line.split("#", 1)[0].split()
+        if len(parts) < 2 or parts[0] in ("*", "/*"):
+            continue
+        pat = parts[0].lstrip("/")
+        if pat.endswith("/"):
+            glob = pat + "**"
+        elif pat.endswith("/**") or pat.endswith("**"):
+            glob = pat
+        elif "*" not in pat and pat in dirs:
+            glob = pat + "/**"
+        else:
+            continue
+        found.append((glob, " ".join(parts[1:3])))
+    return found
+
+
+def propose(repo: str, paths: list[str], attributes: str, codeowners: str, labels: list[str]) -> Proposal:
+    p = Proposal(repo)
+    dirs = {"/".join(path.split("/")[:i]) for path in paths for i in range(1, len(path.split("/")))}
+    covered: set[str] = set()
+
+    def add(target: list[Candidate], glob: str, detail: str, picked: bool = True) -> None:
+        """Offer a glob only if it matches something no earlier glob of this kind already covers."""
+        rx = glob_regex(glob)
+        files = {path for path in paths if rx.match(path)}
+        if files and not files <= covered:
+            covered.update(files)
+            target.append(Candidate(glob, f"{detail} · {len(files)} file{'' if len(files) == 1 else 's'}", picked))
+
+    for glob in attribute_globs(attributes):
+        add(p.generated, glob, ".gitattributes")
+    for glob, why in _GENERATED:
+        add(p.generated, glob, why)
+    covered.clear()
+    for d in sorted(d for d in dirs if d.split("/")[-1] in _API_DIRS and d.count("/") <= 1 and not d.startswith(("docs", "test", "examples"))):
+        add(p.api_surface, d + "/**", "folder name")
+    covered.clear()
+    for glob, owners in codeowner_globs(codeowners, dirs)[:15]:
+        add(p.critical, glob, f"CODEOWNERS: {owners}", picked=False)       # who owns a folder is not how risky it is
+    covered.clear()
+    for glob, why in _TESTS:
+        add(p.test_only, glob, why)
+    for name in labels:
+        (p.ready_labels if _READY.search(name) else p.attention_labels if _ATTENTION.search(name) else []).append(
+            Candidate(name, "label"))
+    return p
+
+
+def load(repo: str) -> Proposal:
+    meta = api(f"repos/{repo}")
+    if not meta:
+        raise GhError(f"{repo}: not found, or your gh login cannot see it")
+    branch = meta["default_branch"]
+    tree = api(f"repos/{repo}/git/trees/{branch}?recursive=1") or {}
+    paths = [t["path"] for t in tree.get("tree", []) if t["type"] == "blob"]
+    owners_path = next((p for p in (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS") if p in paths), None)
+    text = lambda name: (api(f"repos/{repo}/contents/{name}", raw=True) or "") if name in paths else ""   # noqa: E731
+    labels = [n for n in gh("api", f"repos/{repo}/labels?per_page=100", "--paginate", "--jq", ".[].name", check=False).split("\n") if n]
+    p = propose(repo, paths, text(".gitattributes"), text(owners_path) if owners_path else "", labels)
+    p.has_pack = f".github/{PACK}" in paths
+    p.truncated = bool(tree.get("truncated"))
+    p.all_labels = labels      # type: ignore[attr-defined]
+    p.top_dirs = sorted({path.split("/")[0] for path in paths if "/" in path})   # type: ignore[attr-defined]
+    return p
+
+
+# -- the pack ------------------------------------------------------------------------------------------------------
+
+def quote(s: str) -> str:
+    return json.dumps(s)
+
+
+def render(name: str, chosen: dict[str, list[str]]) -> str:
+    """The pack as YAML, in the form docs/organisation-pack.md describes. Only what was chosen is written."""
+    out = [f"# Organisation pack for the maintainer assistant, written by `assistant init`. Edit it freely;",
+           "# the reference is docs/organisation-pack.md in kyverno/assistant.", f"name: {quote(name)}"]
+    readiness = {k: chosen.get(k) for k in ("ready_labels", "attention_labels") if chosen.get(k)}
+    if readiness:
+        out.append("\nreadiness:")
+        for k, v in readiness.items():
+            out.append(f"  {k}: [{', '.join(quote(x) for x in v)}]")
+    classes = {k: chosen.get(k) for k in ("generated", "api_surface", "critical", "test_only") if chosen.get(k)}
+    if classes:
+        out.append("\nmaintainer:\n  file_classes:")
+        for k, v in classes.items():
+            out.append(f"    {k}:")
+            out += [f"      - {quote(x)}" for x in v]
+    return "\n".join(out) + "\n"
+
+
+def inferred(p: Proposal) -> dict[str, list[str]]:
+    """What was inferred, taken as it is (--yes, or no terminal). Critical code is never guessed."""
+    return {"generated": [c.glob for c in p.generated if c.picked], "api_surface": [c.glob for c in p.api_surface if c.picked],
+            "test_only": [c.glob for c in p.test_only if c.picked], "ready_labels": [c.glob for c in p.ready_labels],
+            "attention_labels": [c.glob for c in p.attention_labels]}
+
+
+def review(p: Proposal) -> dict[str, list[str]]:
+    """Walk the user through the proposal, one question per kind of rule."""
+    chosen: dict[str, list[str]] = {}
+    sections = [
+        ("generated", "Generated files (a change here without a change to its source is suspect)", p.generated),
+        ("api_surface", "Public API surface (changing these changes the product)", p.api_surface),
+        ("critical", "Critical code (a bug here costs the most; mark what you would never skim)", p.critical),
+        ("test_only", "Test-only files (low risk after merge)", p.test_only),
+    ]
+    for key, title, cands in sections:
+        options = [Option(c.glob, c.detail, checked=c.picked) for c in cands]
+        picked = [o.label for o in menu(title, options, multi=True)] if options else []
+        extra = ask(f"  More {key.replace('_', ' ')} globs, comma-separated (Enter to skip)") if key in ("critical", "generated") else ""
+        picked += [g.strip() for g in extra.split(",") if g.strip()]
+        if not options and key == "critical" and not extra:
+            tops = getattr(p, "top_dirs", [])
+            if tops:
+                more = menu("Critical code: which top-level folders? (nothing was inferred)",
+                            [Option(f"{d}/**") for d in tops], multi=True)
+                picked += [o.label for o in more]
+        chosen[key] = picked
+    names = getattr(p, "all_labels", [])
+    for key, title, cands in (("ready_labels", "Labels that mean ready for a maintainer", p.ready_labels),
+                              ("attention_labels", "Labels that mean waiting on the author", p.attention_labels)):
+        marked = {c.glob for c in cands}
+        options = [Option(n, "suggested" if n in marked else "", checked=n in marked) for n in sorted(names, key=lambda n: (n not in marked, n))]
+        chosen[key] = [o.label for o in menu(title, options, multi=True)] if options else []
+    return chosen
+
+
+# -- writing it to GitHub ------------------------------------------------------------------------------------------
+
+def publish(target: str, path: str, content: str, branch: str, title: str, body: str) -> str:
+    """Add `path` to `target` (owner/repo) on a branch and open a pull request; from your fork when you cannot push."""
+    open_pr = gh("pr", "list", "--repo", target, "--search", f"head:{branch}", "--state", "open", "--json", "url",
+                 "--jq", ".[0].url", check=False).strip()
+    if open_pr:
+        raise GhError(f"{target} already has an open pull request for this: {open_pr}")
+    perms = (api(f"repos/{target}") or {}).get("permissions", {})
+    me = gh("api", "user", "--jq", ".login").strip()
+    work = tempfile.mkdtemp(prefix="assistant-init-")
+    try:
+        source = target
+        if not perms.get("push"):
+            gh("repo", "fork", target, "--clone=false", check=False)
+            source = f"{me}/{target.split('/')[1]}"
+        gh("repo", "clone", source, work, "--", "--quiet", "--depth", "1")
+        git = lambda *a: subprocess.run(["git", "-C", work, *a], check=True, capture_output=True, text=True)   # noqa: E731
+        if source != target:
+            git("remote", "add", "upstream", f"https://github.com/{target}.git")
+            git("fetch", "--quiet", "--depth", "1", "upstream")
+            git("checkout", "--quiet", "-B", branch, "upstream/" + (api(f"repos/{target}") or {})["default_branch"])
+        else:
+            git("checkout", "--quiet", "-B", branch)
+        dest = os.path.join(work, path)
+        if os.path.exists(dest):
+            raise GhError(f"{target} already has {path}; not overwriting it")
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(dest, "w") as f:
+            f.write(content)
+        git("add", path)
+        git("commit", "--quiet", "-s", "-m", title)
+        git("push", "--quiet", "--set-upstream", "origin", branch)
+        head = branch if source == target else f"{me}:{branch}"
+        return gh("pr", "create", "--repo", target, "--head", head, "--title", title, "--body", body).strip()
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def create_shared_repo(owner: str, content: str) -> str:
+    private = choose(f"Create {owner}/.github as", [Option("Public (recommended: anyone's assistant can read the pack)", value=False),
+                                                      Option("Private (the token must be able to read it)", value=True)]).value
+    gh("repo", "create", f"{owner}/.github", "--private" if private else "--public", "--description",
+       "Organisation defaults", "--add-readme")
+    return publish(f"{owner}/.github", PACK, content, "add-assistant-org-pack", "Add the assistant organisation pack",
+                   "Adds `assistant-org.yaml`, written by `assistant init`.")
+
+
+# -- the flow ------------------------------------------------------------------------------------------------------
+
+def merge(chosen_by_repo: list[dict[str, list[str]]]) -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {}
+    for chosen in chosen_by_repo:
+        for k, v in chosen.items():
+            out[k] = list(dict.fromkeys(out.get(k, []) + v))
+    return out
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    ap = argparse.ArgumentParser(prog="assistant init", description=__doc__.split("\n\n")[0])
+    ap.add_argument("repos", nargs="*", help="owner/repo, one or more")
+    ap.add_argument("--location", choices=("repo", "org"), help="put the pack in each repository, or once in <owner>/.github")
+    ap.add_argument("--yes", action="store_true", help="accept what was inferred, without asking")
+    ap.add_argument("--dry-run", action="store_true", help="print the pack and stop; write nothing anywhere")
+    args = ap.parse_args(argv)
+    plain = args.yes or not interactive()
+
+    try:
+        print(bold("assistant init") + dim("  writes the pack that tells the assistant what is generated, critical and ready"))
+        repos = args.repos or [r.strip() for r in re.split(r"[ ,]+", ask("Repositories (owner/repo, space-separated)")) if r.strip()]
+        if not repos or any(not re.fullmatch(r"[\w.-]+/[\w.-]+", r) for r in repos):
+            print(red("Give repositories as owner/repo."), file=sys.stderr)
+            return 2
+        print(dim("Reading " + ", ".join(repos) + " with your gh login..."))
+        proposals = [load(r) for r in repos]
+    except GhError as exc:
+        print(red(str(exc)), file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        print("\nCancelled. Nothing was written.")
+        return 130
+
+    try:
+        for p in proposals:
+            if p.truncated:
+                print(yellow(f"{p.repo}: the file list was cut off by GitHub, so some suggestions may be missing"))
+            if p.has_pack:
+                print(yellow(f"{p.repo} already has .github/{PACK}; it will be left as it is"))
+        todo = [p for p in proposals if not p.has_pack]
+        if not todo:
+            return 0
+        owners = {p.repo.split("/")[0] for p in todo}
+        location = args.location
+        if not location:
+            if len(todo) == 1 and len(owners) == 1:
+                one = choose("Where should the pack live?", [
+                    Option(f"In {todo[0].repo} itself (recommended)", f".github/{PACK}, nothing else to create", "repo"),
+                    Option(f"In {todo[0].repo.split('/')[0]}/.github", "shared with the owner's other repositories", "org")])
+                location = one.value
+            elif len(owners) == 1:
+                one = choose(f"{len(todo)} repositories: one pack or one each?", [
+                    Option("One shared pack", f"{next(iter(owners))}/.github, same rules for all {len(todo)}", "org"),
+                    Option("One pack per repository", "each repository decides for itself", "repo")])
+                location = one.value
+            else:
+                location = "repo"
+                print(dim("The repositories belong to different owners, so each gets its own pack."))
+        if location == "org" and len(owners) > 1:
+            print(red("A shared pack needs one owner; choose --location repo."), file=sys.stderr)
+            return 2
+
+        packs: list[tuple[str, str, str, str]] = []        # (target repo, path, content, name)
+        if location == "org":
+            owner = next(iter(owners))
+            chosen = merge([inferred(p) if plain else review(p) for p in todo])
+            packs.append((f"{owner}/.github", PACK, render(owner, chosen), owner))
+        else:
+            for p in todo:
+                if plain:
+                    chosen = inferred(p)
+                else:
+                    print(f"\n{bold(p.repo)}")
+                    chosen = review(p)
+                packs.append((p.repo, f".github/{PACK}", render(p.repo.split("/")[0], chosen), p.repo))
+
+        for target, path, content, _ in packs:
+            print(f"\n{bold(target + '/' + path)}\n" + dim("-" * 60) + f"\n{content}" + dim("-" * 60))
+        if args.dry_run:
+            print(dim("--dry-run: nothing was written."))
+            return 0
+        action = choose("What now?", [Option("Open a pull request (a new repository for a shared pack)", value="pr"),
+                                      Option(f"Save {PACK} here and stop", value="file"),
+                                      Option("Cancel", value="no")]) if not plain else Option("", value="pr")
+        if action.value == "no":
+            print("Nothing was written.")
+            return 0
+        if action.value == "file":
+            for _, _, content, name in packs:
+                dest = PACK if len(packs) == 1 else f"{name.replace('/', '-')}-{PACK}"
+                with open(dest, "w") as f:
+                    f.write(content)
+                print(green(f"Wrote {dest}"))
+            return 0
+        for target, path, content, _ in packs:
+            if location == "org" and api(f"repos/{target}") is None:
+                if not confirm(f"{target} does not exist. Create it?"):
+                    print("Nothing was written.")
+                    return 0
+                url = create_shared_repo(target.split("/")[0], content)
+            else:
+                url = publish(target, path, content, "add-assistant-org-pack", "Add the assistant organisation pack",
+                              "Adds `.github/assistant-org.yaml`, written by `assistant init` from the repository's own files, "
+                              "labels and CODEOWNERS. Review the globs: they decide what the assistant treats as generated, "
+                              "critical or test-only.")
+            print(green("Opened ") + url)
+        print(dim("Merge it, and the published assistant reads it from the default branch. Check with: ask for repo_pack."))
+        return 0
+    except GhError as exc:
+        print(red(str(exc)), file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        print("\nCancelled. Nothing more was written.")
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main())

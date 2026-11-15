@@ -17,6 +17,22 @@ Both are read from the default branch, so a pull request cannot change its own r
 To bake a pack into an image you build instead, put it in `container/org/acme/` and run `container/assistant --build --org acme`;
 a baked pack is read-only to the agent.
 
+## Writing it with `assistant init`
+
+```bash
+container/assistant init acme/api                 # one repository
+container/assistant init acme/api acme/web        # asks: one shared pack, or one per repository
+container/assistant init acme/api --yes --dry-run # take the inferred answers and only print the file
+```
+
+It runs on your machine with your `gh` login and Python 3, and needs no image. It reads the repository's file tree,
+`.gitattributes` (`linguist-generated`), `CODEOWNERS` and labels, and offers only globs that match something. Generated files,
+API folders, test files and the ready and waiting-on-author labels are suggested and pre-ticked; critical code is **never
+guessed** (owning a folder is not how risky it is), so it asks. Keys: up and down (or `j`, `k`) move, space ticks, `a` all, `n` none,
+`/` filters a long list, enter confirms. Without a terminal it takes the suggestions. It adds the file in a pull request (from your
+fork if you cannot push), signed off, and never overwrites an existing pack. With a shared pack it offers to create
+`<owner>/.github` if it does not exist.
+
 ## Where the assistant reads it from
 
 | How you run it | Where the pack comes from |

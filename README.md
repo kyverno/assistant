@@ -380,6 +380,12 @@ on and says so. See [Shared CI actions](#shared-ci-actions) above.
 
 ### 2. Write your organisation pack
 
+The easy way: run `container/assistant init owner/repo` (or several repositories). It reads each repository with your own `gh` login,
+proposes what is generated, API surface, test-only and "ready" in your files and labels, lets you change it with the arrow keys, space
+and enter, shows the file, and opens a pull request that adds it. For several repositories it asks whether to write one shared pack or
+one per repository. Nothing is written until you confirm, and `--dry-run` only prints. The written pack is yours to edit.
+To write it by hand instead:
+
 Everything specific to your organisation lives in one small file, never in code. Publish it as `.github/assistant-org.yaml`
 in the repository itself (and optionally `.github/assistant-org-facts.md`), or once for all your repositories as
 `assistant-org.yaml` at the root of `<owner>/.github`. The published image reads it from there: no clone, no build. `org.yaml` says which paths are generated, API surface, critical or test-only, whether you have a merge gate, and which
