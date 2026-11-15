@@ -38,10 +38,8 @@ def _transient(message: str) -> bool:
 # nothing is baked.
 IMAGE_PACK = Path("/opt/kyverno/profiles/contributor/org/org.yaml")
 
-# An organisation publishes its own pack as this file (and optionally the facts file) at the root of its `.github`
-# repository, so the published image works for every organisation without a clone or a build.
+# An organisation publishes its own pack as this file at the root of its `.github` repository, so the published image works for every organisation without a clone or a build.
 REMOTE_PACK = "assistant-org.yaml"
-REMOTE_FACTS = "assistant-org-facts.md"
 _REMOTE_TTL = 600
 _remote_seen: Dict[str, float] = {}
 
@@ -50,6 +48,11 @@ def owner_of(repo: Optional[str] = None) -> Optional[str]:
     repo = repo or github.secret("ASSISTANT_REPO") or ""
     owner = repo.split("/", 1)[0].lower() if "/" in repo else ""
     return owner or None
+
+
+def _valid_repositories(repos: Any) -> bool:
+    return isinstance(repos, list) and all(
+        isinstance(r, dict) and isinstance(r.get("repo"), str) and r["repo"].count("/") == 1 for r in repos)
 
 
 def applies_to(path: Path, owner: Optional[str]) -> bool:
@@ -62,9 +65,9 @@ def applies_to(path: Path, owner: Optional[str]) -> bool:
     except Exception:
         return True              # a broken pack is reported by load_org, not hidden here
     repos = data.get("repositories") if isinstance(data, dict) else None
-    if not repos:
-        return True
-    return any(isinstance(r, dict) and str(r.get("repo", "")).split("/", 1)[0].lower() == owner for r in repos)
+    if not repos or not _valid_repositories(repos):
+        return True              # a malformed list is rejected by _read_org, so a broken pack is an error, not "no pack"
+    return any(r["repo"].split("/", 1)[0].lower() == owner for r in repos)
 
 
 def candidate_paths(owner: Optional[str] = None) -> list:
@@ -72,7 +75,9 @@ def candidate_paths(owner: Optional[str] = None) -> list:
     explicit = os.environ.get("ASSISTANT_ORG_FILE")
     if explicit:
         paths.append(Path(explicit))
-    paths.append(hermes_home() / "org" / "org.yaml")
+    home = hermes_home() / "org" / "org.yaml"
+    if not home.is_file() or applies_to(home, owner):      # a copy installed for another owner is not this one's pack
+        paths.append(home)
     return paths
 
 
@@ -101,7 +106,6 @@ def remote_path(owner: Optional[str], client: Optional["github.Client"] = None) 
     client = client or github.Client()
     try:
         body = _remote_file(client, owner, REMOTE_PACK)
-        facts = _remote_file(client, owner, REMOTE_FACTS) if body is not None else None
     except OrgFileUnavailable:
         if target.is_file():
             return target
@@ -112,10 +116,6 @@ def remote_path(owner: Optional[str], client: Optional["github.Client"] = None) 
         return None
     dest.mkdir(parents=True, exist_ok=True)
     target.write_bytes(body)
-    if facts is not None:
-        (dest / "facts.md").write_bytes(facts)
-    else:
-        (dest / "facts.md").unlink(missing_ok=True)
     return target
 
 
@@ -126,6 +126,8 @@ def _read_org(p: Path) -> Dict[str, Any]:
     missing = [k for k in REQUIRED if k not in data]
     if missing:
         raise OrgFileError(f"{p}: missing keys {missing}")
+    if data.get("repositories") is not None and not _valid_repositories(data["repositories"]):
+        raise OrgFileError(f"{p}: repositories: expected a list of entries like `- repo: owner/name`")
     return data
 
 

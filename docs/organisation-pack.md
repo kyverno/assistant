@@ -8,7 +8,7 @@ The [README](../README.md#2-write-your-organisation-pack) has the short version.
 ```
 acme/.github/
 ├── assistant-org.yaml          the rules: which files are generated or critical, your merge gate, which labels mean "ready"
-└── assistant-org-facts.md      optional prose the assistant should know (codegen, CI, label meanings), in your own words
+└── assistant-org-facts.md      optional prose for the maintainer assistant (codegen, CI, label meanings), in your own words
 ```
 
 The file format is the one below; `container/org/kyverno/` is the worked example (its files are `org.yaml` and `facts.md`).
@@ -28,9 +28,9 @@ a baked pack is read-only to the agent.
 
 | Situation | Result |
 |---|---|
-| No pack (nothing published at `<owner>/.github`) | The tools still run. Every file reads `STANDARD`, no PR is gate-blocked, no label means "ready". `repo_pack` says `pack: none`, and the assistant tells you which signals it is therefore missing. |
+| No pack (nothing published at `<owner>/.github`, or a private `.github` the token cannot see: GitHub answers "not found" for both, and `repo_pack` says so) | The tools still run. Every file reads `STANDARD`, no PR is gate-blocked, no label means "ready". `repo_pack` says `pack: none`, and the assistant tells you which signals it is therefore missing. |
 | The published pack cannot be read (a private `.github` the token cannot see, a network error with no earlier copy) | An error that names the file and the HTTP status, not "no pack". |
-| A key it does not know (a typo), a wrong type, or a file that is not a mapping | An error that names the key, from `repo_pack` and the tools that need it. It never ignores it silently and never crashes. |
+| A key it does not know (a typo), a wrong type, a malformed `repositories:` list, or a file that is not a mapping | An error that names the key, from `repo_pack` and the tools that need it. It never ignores it silently and never crashes. |
 | A bad gate (no bypass label, a marker regex without a `(?P<branch>...)` group) | An error that names the gate and the problem. |
 | A rule that matches nothing | Nothing happens. Check with `repo_pack`, which returns exactly what was loaded. |
 

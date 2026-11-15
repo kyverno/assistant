@@ -31,4 +31,9 @@ def handle_repo_pack(args: Dict[str, Any], **_kw) -> str:
         rules = pack.load(repo=_repo(args))
     except pack.PackError as exc:
         return json.dumps({"success": False, "error": f"organisation pack: {exc}"})
-    return json.dumps({"success": True, **rules.summary(), "facts": rules.facts})
+    out = {"success": True, **rules.summary(), "facts": rules.facts}
+    if not rules.source:
+        owner = pack.owner_of(_repo(args)) or "<owner>"
+        out["looked_in"] = (f"{owner}/.github/{pack.REMOTE_PACK}: not found. GitHub also answers 'not found' when the token "
+                            "cannot see a private .github repository, so if the organisation has one, check the token's access")
+    return json.dumps(out)

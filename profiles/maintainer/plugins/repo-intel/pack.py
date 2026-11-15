@@ -74,6 +74,11 @@ def owner_of(repo: Optional[str] = None) -> Optional[str]:
     return owner or None
 
 
+def _valid_repositories(repos: Any) -> bool:
+    return isinstance(repos, list) and all(
+        isinstance(r, dict) and isinstance(r.get("repo"), str) and r["repo"].count("/") == 1 for r in repos)
+
+
 def applies_to(path: Path, owner: Optional[str]) -> bool:
     """A pack that lists repositories applies only to their owners; one without the list applies to any."""
     if owner is None:
@@ -85,16 +90,18 @@ def applies_to(path: Path, owner: Optional[str]) -> bool:
     except Exception:
         return True              # a broken pack is reported by load(), not hidden here
     repos = data.get("repositories") if isinstance(data, dict) else None
-    if not repos:
-        return True
-    return any(isinstance(r, dict) and str(r.get("repo", "")).split("/", 1)[0].lower() == owner for r in repos)
+    if not repos or not _valid_repositories(repos):
+        return True              # a malformed list is rejected by parse(), so a broken pack is an error, not "no pack"
+    return any(r["repo"].split("/", 1)[0].lower() == owner for r in repos)
 
 
 def candidate_paths(owner: Optional[str] = None) -> list[Path]:
     paths = [IMAGE_PACK] if not IMAGE_PACK.is_file() or applies_to(IMAGE_PACK, owner) else []
     if os.environ.get("ASSISTANT_ORG_FILE"):
         paths.append(Path(os.environ["ASSISTANT_ORG_FILE"]))
-    paths.append(_home() / "org" / "org.yaml")
+    home = _home() / "org" / "org.yaml"
+    if not home.is_file() or applies_to(home, owner):      # a copy installed for another owner is not this one's pack
+        paths.append(home)
     return paths
 
 
@@ -305,6 +312,8 @@ def parse(data: Any, source: Optional[str] = None, facts: str = "") -> Rules:
     if not isinstance(data, dict):
         raise PackError(f"the file must be a mapping of keys, not a {type(data).__name__}")
     _check_keys(data, _ROOT_KEYS, "the file")
+    if data.get("repositories") is not None and not _valid_repositories(data["repositories"]):
+        raise PackError("repositories: expected a list of entries like `- repo: owner/name`")
     m = _check_keys(data.get("maintainer"), tuple(_KNOWN), "maintainer")
     fc = _check_keys(m.get("file_classes"), _FILE_CLASSES, "maintainer.file_classes")
     gi = _check_keys(m.get("generated_inputs"), _KNOWN["generated_inputs"], "maintainer.generated_inputs")

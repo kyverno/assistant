@@ -1,4 +1,5 @@
 """The organisation's own pack, read from <owner>/.github at run time: the published image needs no build per organisation."""
+import json
 import os
 import pathlib
 import sys
@@ -11,7 +12,7 @@ from _load import FIXTURES, ROOT, contributor, repo_intel
 repo_intel()
 contributor()
 from contributor import github, rules  # noqa: E402
-from repo_intel import pack  # noqa: E402
+from repo_intel import pack, pack_tools  # noqa: E402
 
 KYVERNO = ROOT / "container/org/kyverno/org.yaml"
 OTHER = (FIXTURES / "other-org.yaml").read_bytes()
@@ -103,6 +104,29 @@ class Maintainer(Env):
         self.serve({})
         self.assertEqual(pack.load(repo="acme/api").source, None)
 
+    def test_a_copy_installed_for_another_owner_is_not_used(self):
+        self.serve({})
+        home = pathlib.Path(self.home) / "org"
+        home.mkdir()
+        (home / "org.yaml").write_bytes(KYVERNO.read_bytes())
+        self.assertEqual(pack.load(repo="acme/api").source, None)
+        self.assertEqual(pack.load(repo="kyverno/kyverno").gate.name, "e2e-gate")
+
+    def test_a_malformed_repository_list_is_an_error_not_no_pack(self):
+        self.serve({})
+        p = pathlib.Path(self.home) / "bad.yaml"
+        for bad in ("repositories: kyverno/kyverno\n", "repositories: [1, 2]\n", "repositories:\n  - repo: nowhere\n"):
+            p.write_text("name: x\n" + bad)
+            pack.IMAGE_PACK = p
+            with self.assertRaises(pack.PackError):
+                pack.load(repo="acme/api")
+
+    def test_repo_pack_says_where_it_looked_when_there_is_none(self):
+        self.serve({})
+        out = json.loads(pack_tools.handle_repo_pack({"repo": "acme/api"}))
+        self.assertIn("acme/.github/assistant-org.yaml", out["looked_in"])
+        self.assertIn("private", out["looked_in"])
+
     def test_an_image_built_for_one_organisation_without_a_list_applies_everywhere(self):
         p = pathlib.Path(self.home) / "org.yaml"
         p.write_bytes(OTHER)
@@ -154,6 +178,25 @@ class Contributor(Env):
         self.use({"assistant-org.yaml": github.GitHubError("GitHub 403 for contents: forbidden")})
         with self.assertRaises(rules.OrgFileError):
             rules.load_org(repo="acme/api")
+
+    def test_a_copy_installed_for_another_owner_is_not_used(self):
+        self.use({})
+        home = pathlib.Path(self.home) / "org"
+        home.mkdir()
+        (home / "org.yaml").write_bytes(KYVERNO.read_bytes())
+        with self.assertRaises(rules.OrgFileError):
+            rules.load_org(repo="acme/api")
+        self.assertEqual(rules.load_org(repo="kyverno/kyverno")["name"], "kyverno")
+
+    def test_a_malformed_repository_list_is_an_error_not_no_pack(self):
+        self.use({})
+        p = pathlib.Path(self.home) / "bad.yaml"
+        rules.IMAGE_PACK = p
+        for bad in ("repositories: kyverno/kyverno\n", "repositories: [1, 2]\n", "repositories:\n  - repo: nowhere\n"):
+            p.write_text(KYVERNO.read_text().replace("repositories:", "x_unused:") + bad)
+            with self.assertRaises(rules.OrgFileError) as ctx:
+                rules.load_org(repo="acme/api")
+            self.assertIn("repositories", str(ctx.exception))
 
     def _with_cached(self):
         text = KYVERNO.read_text().replace("name: kyverno", "name: acme").replace("repositories:", "x_unused:")
