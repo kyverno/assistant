@@ -98,7 +98,7 @@ ensure_image() {
   ORG_PACK="${ORG_PACK:-${ASSISTANT_ORG:-kyverno}}"
   if [[ ! "$ORG_PACK" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then fail "'$ORG_PACK' is not a valid pack name"; exit 2; fi
   if [ "$BUILD" != 1 ] && [ "$ORG_PACK" != kyverno ]; then
-    fail "--org NAME bakes your pack into an image you build: add --build (the published image carries Kyverno's pack)"; exit 2
+    fail "--org NAME bakes your pack into an image you build: add --build (the published image reads your pack from <owner>/.github/assistant-org.yaml instead)"; exit 2
   fi
   if [ "$BUILD" = 1 ] && [ ! -f "$REPO_ROOT/container/org/$ORG_PACK/org.yaml" ]; then
     fail "no pack at container/org/$ORG_PACK/org.yaml (see docs/organisation-pack.md)"; exit 2

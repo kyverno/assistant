@@ -27,7 +27,7 @@ def _call(fn: Callable[..., Dict[str, Any]], args: Dict[str, Any], **kw) -> str:
     if not repo:
         return json.dumps({"success": False, "error": "repo (or ASSISTANT_REPO) is required"})
     try:
-        return json.dumps(fn(github.Client(), rules.load_org(), repo, **kw))
+        return json.dumps(fn(github.Client(), rules.load_org(repo=repo), repo, **kw))
     except (github.GitHubError, rules.OrgFileError) as exc:
         return json.dumps({"success": False, "error": str(exc)})
     except Exception as exc:        # a surprise in GitHub's data must not take the chat turn down

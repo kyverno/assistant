@@ -29,9 +29,9 @@ class FetchError(RuntimeError):
     pass
 
 
-def _rules() -> Rules:
+def _rules(repo: Optional[str] = None) -> Rules:
     try:
-        return load_pack()
+        return load_pack(repo=repo)
     except PackError as exc:
         raise FetchError(f"organisation pack: {exc}") from exc
 
@@ -470,7 +470,7 @@ def fetch_pr_candidates(
     numbers = [n["number"] for n in search_result["nodes"] if n]
     total_count = search_result["issueCount"]
 
-    rules = _rules()
+    rules = _rules(repo)
     fetch_one = _fetch_one_stale if include_stale_detail else _fetch_one
     prs: list[dict[str, Any]] = []
     errors: list[str] = []
@@ -539,7 +539,7 @@ def fetch_pr_details(
         raise FetchError(f"repo must be 'owner/name', got {repo!r}")
     owner, name = repo.split("/", 1)
 
-    rules = _rules()
+    rules = _rules(repo)
     fetch_one = _fetch_one_stale if include_stale_detail else _fetch_one
     prs: list[dict[str, Any]] = []
     errors: list[str] = []

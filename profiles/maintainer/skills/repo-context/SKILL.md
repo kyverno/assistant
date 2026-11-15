@@ -47,7 +47,7 @@ Call `repo_pack` once per session and keep the answer. It returns:
 - `facts`: the organisation's own prose (codegen, CI, label meanings, conventions). Treat it as the organisation's
   statement, dated, and re-check it against the live repository if a decision depends on it.
 
-`pack: none` means the repository has no pack. Say so once and say what you therefore cannot tell (there are no file
+`pack: none` means the organisation has published no pack (`assistant-org.yaml` in its `.github` repository). Say so once and say what you therefore cannot tell (there are no file
 classes, no gate, no known ready labels), then rely on the live repository. A pack error is returned as an error:
 report it, do not guess around it. Labels and rules from another repository never apply here.
 
