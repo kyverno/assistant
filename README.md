@@ -198,6 +198,7 @@ Then `assistant`, `assistant --profile contributor`, `assistant --upgrade` and s
 | 1. Docker and OpenShell | Checks Docker, installs OpenShell and its gateway if missing | Nothing, unless Docker is not running |
 | 2. Image | Pulls the image the first time (about 1.2 GB compressed) | Wait a few minutes |
 | 3. GitHub | Asks which assistant (**maintainer** or **contributor**), then the repository as `owner/repo` (it offers a default only if a policy gives one). If your organisation publishes a policy, it offers to use it. Then asks how to authorize GitHub, checks the token against the repository, and stores it **in OpenShell, not in the sandbox** | Type the repository, then sign in |
+| 3a. Your repository (maintainer, first run) | Looks at the repository: is there an organisation pack, and is the PR automation adopted? Offers to set up what is missing (each opens a pull request; it asks first). `assistant setup owner/repo` does the same later. Skipped with no terminal, no `gh` login or `ASSISTANT_SKIP_SETUP=1` | Tick what you want, or none |
 | 4. Sandbox | Creates the sandbox and applies the network policy | Wait a minute or two |
 | 5. Copilot | Reads your GitHub username from the token, then starts the GitHub Copilot sign-in: it shows a **code and a page** | Open <https://github.com/login/device>, enter the code, approve it, then pick a model |
 
@@ -362,8 +363,8 @@ them on.
 
 You reference an action from a short workflow (`uses: kyverno/assistant/.github/actions/pr-management@<full commit SHA>`), so
 the actions themselves need no checkout. `scripts/adopt-ci.sh` is a helper that opens the adoption PR in each repository you
-name, and it **does run from a checkout of this repository** (it reads the templates next to it); you can also copy the files
-from [`adopt-ci-templates/`](adopt-ci-templates/) by hand. Steps, files and permissions:
+name. It runs from a checkout of this repository, or with no clone through the launcher (`assistant setup owner/repo`, which also
+offers the organisation pack); you can also copy the files from [`adopt-ci-templates/`](adopt-ci-templates/) by hand. Steps, files and permissions:
 [`docs/adopting-actions.md`](docs/adopting-actions.md).
 
 ## Prepare your repository
@@ -376,7 +377,7 @@ make them effective (the contributor assistant reads the same files), and organi
 The queue and stale-PR skills read the labels the actions maintain: `ready-for-review`, `needs-author-action`,
 `workflow-approval-required`, `stale`, `merge-conflicts`, and path labels from your `.github/labels.yml`. A repository that
 already runs them hands the assistant its signals for free. Without them it still runs, but it has no readiness labels to go
-on and says so. See [Shared CI actions](#shared-ci-actions) above.
+on and says so. See [Shared CI actions](#shared-ci-actions) above. `assistant setup owner/repo` does this and step 2 for you.
 
 ### 2. Write your organisation pack
 

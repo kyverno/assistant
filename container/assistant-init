@@ -746,17 +746,106 @@ def merge(chosen_by_repo: list[dict]) -> dict:
     return out
 
 
+# -- `assistant setup`: what a repository still lacks, and doing it ----------------------------------------------------
+
+BAKED_OWNERS = {"kyverno"}        # owners whose pack the published image carries (container/org/kyverno)
+PACK_BRANCH, CI_BRANCH = "add-assistant-org-pack", "ci/adopt-shared-actions"
+
+
+def open_pr(repo: str, branch: str) -> str:
+    return gh("pr", "list", "--repo", repo, "--search", f"head:{branch}", "--state", "open", "--json", "url",
+              "--jq", ".[0].url", check=False).strip()
+
+
+def setup_status(repo: str) -> dict:
+    """For the pack and for the PR automation: 'found', a pull request URL that is open for it, or '' (missing)."""
+    owner = repo.split("/")[0]
+    has_pack = (owner.lower() in BAKED_OWNERS or api(f"repos/{repo}/contents/.github/{PACK}") is not None
+                or api(f"repos/{owner}/.github/contents/{PACK}") is not None)
+    flows = api(f"repos/{repo}/contents/.github/workflows")
+    has_ci = isinstance(flows, list) and any("pr-management" in str(f.get("name", "")) for f in flows)
+    return {"pack": "found" if has_pack else open_pr(repo, PACK_BRANCH),
+            "ci": "found" if has_ci else open_pr(repo, CI_BRANCH)}
+
+
+def codeowner_team(repo: str) -> str:
+    """The first team of the repository's own organisation that its CODEOWNERS names, or ''."""
+    owner = repo.split("/")[0]
+    for path in (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"):
+        text = api(f"repos/{repo}/contents/{path}", raw=True)
+        if isinstance(text, str):
+            for line in text.splitlines():
+                m = re.search(rf"@{re.escape(owner)}/[A-Za-z0-9_.-]+", line.split("#")[0], re.I)
+                if m:
+                    return m.group(0)
+    return ""
+
+
+def adopt_script() -> str:
+    here = os.path.dirname(os.path.abspath(__file__))
+    for path in (os.path.join(here, "adopt-ci.sh"), os.path.join(here, "..", "scripts", "adopt-ci.sh")):
+        if os.path.isfile(path):
+            return path
+    return ""
+
+
+def setup(repo: str) -> int:
+    """Say what `repo` lacks (an organisation pack, the PR automation) and, if asked, do it. Nothing runs without a yes."""
+    st = setup_status(repo)
+    label = {"pack": "Organisation pack", "ci": "PR automation (labels, readiness, stale)"}
+    for key in ("pack", "ci"):
+        state = st[key]
+        print(f"  {green('✓') if state == 'found' else yellow('•')} {label[key]}: "
+              + ("found" if state == "found" else f"pull request open: {state}" if state else "not set up"))
+    missing = [k for k in ("pack", "ci") if not st[k]]
+    if not missing:
+        return 0
+    if not interactive():
+        print(dim(f"Run `assistant setup {repo}` in a terminal to set up what is missing."))
+        return 0
+    options = []
+    if "pack" in missing:
+        options.append(Option("Write the organisation pack", "file classes and guides read from the repository; opens a pull request", "pack", True))
+    if "ci" in missing:
+        options.append(Option("Adopt the PR automation", "opens a pull request; it only previews until you switch it on", "ci", True))
+    picked = [o.value for o in menu(f"Set up {repo} now? (space ticks, enter confirms; none ticked skips)", options, multi=True)]
+    code = 0
+    if "pack" in picked:
+        code = main([repo]) or code
+    if "ci" in picked:
+        script = adopt_script()
+        if not script:
+            print(red("The CI adoption script is not here: use the installer (install.sh | sh -s -- setup owner/repo) or a checkout."))
+            return 1
+        team = codeowner_team(repo) or ask(f"Team to notify when a PR needs a maintainer (@{repo.split('/')[0]}/team)")
+        if not team:
+            print("No team given; skipped the PR automation.")
+            return code
+        code = subprocess.run(["bash", script, "--reviewers", team, repo]).returncode or code
+    return code
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(prog="assistant init", description=__doc__.split("\n\n")[0])
     ap.add_argument("repos", nargs="*", help="owner/repo, one or more")
     ap.add_argument("--location", choices=("repo", "org"), help="put the pack in each repository, or once in <owner>/.github")
     ap.add_argument("--yes", action="store_true", help="accept what was inferred, without asking")
     ap.add_argument("--dry-run", action="store_true", help="print the pack and stop; write nothing anywhere")
+    ap.add_argument("--setup", action="store_true", help="say what the repository lacks (pack, PR automation) and offer to set it up")
     ap.add_argument("--dump", action="store_true", help=argparse.SUPPRESS)       # the inputs as JSON, for tests
     ap.add_argument("--no-facts", action="store_true", help="leave out assistant-org-facts.md, the stub of questions to fill in")
     args = ap.parse_args(argv)
     use_terminal()
     plain = args.yes or not interactive()
+    if args.setup:
+        if len(args.repos) != 1:
+            print(red("setup takes one owner/repo"), file=sys.stderr)
+            return 2
+        try:
+            return setup(args.repos[0])
+        except GhError as exc:
+            print(red(str(exc)), file=sys.stderr)
+            return 1
     if args.dump:
         try:
             print(json.dumps(snapshot(args.repos[0])))

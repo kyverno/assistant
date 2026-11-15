@@ -6,12 +6,16 @@
 #   scripts/adopt-ci.sh --reviewers @your-org/maintainers --dry-run your-org/repo-a
 #   scripts/adopt-ci.sh --update-pin your-org/repo-a    # repos that already use the action: move only its pin
 #
-# Existing files are never overwritten. The action is pinned to the commit of this checkout, which must be pushed.
+# Existing files are never overwritten. The action is pinned to the current commit of the source's default branch (or, in a
+# checkout, to its HEAD when that commit is already on it). It runs from a checkout, or from the launcher folder the
+# installer extracts, with no clone.
 set -euo pipefail
 
-here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+self=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+here=$(cd "$self/.." && pwd)
 source_repo="kyverno/assistant"
 ref=""
+reviewers_arg=""
 reviewers=""
 dry_run=false
 branch=""
@@ -21,16 +25,18 @@ die() { echo "error: $*" >&2; exit 1; }
 
 usage() {
   cat << 'EOF'
-usage: adopt-ci.sh --reviewers @org/team [options] owner/repo [owner/repo ...]
+usage: adopt-ci.sh [--reviewers @org/team] [options] owner/repo [owner/repo ...]
        adopt-ci.sh --update-pin [options] owner/repo [owner/repo ...]
 
   --reviewers @org/team  existing team of the repo's organisation that the bot mentions when a PR needs a maintainer
-                         (required, except with --update-pin)
+                         (default: the first team of the repo's organisation named in its CODEOWNERS; ignored with
+                         --update-pin)
   --update-pin           for repos that already use pr-management: rewrite only the pinned action reference in their
                          workflows, wherever it points now; add nothing and leave all config alone
   --dry-run              show which files would change; push nothing, open nothing
   --source owner/repo    where the actions live (default: kyverno/assistant)
-  --ref SHA              full commit of the source to pin (default: this checkout's HEAD)
+  --ref SHA              full commit of the source to pin; it must be on the source's default branch
+                         (default: that branch's current commit)
   --branch NAME          branch to open the PR from (default: ci/adopt-shared-actions; ci/update-pr-management-pin
                          with --update-pin)
 EOF
@@ -39,7 +45,7 @@ EOF
 repos=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --reviewers) reviewers="${2:?--reviewers needs a value}"; shift 2 ;;
+    --reviewers) reviewers_arg="${2:?--reviewers needs a value}"; shift 2 ;;
     --dry-run) dry_run=true; shift ;;
     --update-pin) update_pin=true; shift ;;
     --source) source_repo="${2:?--source needs a value}"; shift 2 ;;
@@ -56,25 +62,34 @@ if [[ -z "$branch" ]]; then
   if [[ "$update_pin" == "true" ]]; then branch="ci/update-pr-management-pin"; else branch="ci/adopt-shared-actions"; fi
 fi
 [[ "$source_repo" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || die "--source must look like owner/repo"
-if [[ "$update_pin" == "false" ]]; then
+if [[ -n "$reviewers_arg" ]]; then
   # Same rule as the action's own config check; a single @user is rejected there.
-  [[ "$reviewers" =~ ^@[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$ ]] || die "--reviewers must look like @org/team"
+  [[ "$reviewers_arg" =~ ^@[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$ ]] || die "--reviewers must look like @org/team"
 fi
 for tool in gh git jq; do command -v "$tool" > /dev/null || die "$tool is required"; done
 gh auth status > /dev/null 2>&1 || die "run 'gh auth login' first"
 
+source_branch=$(gh api "repos/${source_repo}" --jq .default_branch 2> /dev/null) || die "cannot read ${source_repo}"
+# A commit that exists only on a fork or an unmerged branch is found by the API but is not on the source's own history;
+# a repository pinned to it fails with "workflow file issue" once the branch is gone. Only a default-branch commit is pinned.
+on_default_branch() { # SHA
+  [[ "$(gh api "repos/${source_repo}/compare/${1}...${source_branch}" --jq .status 2> /dev/null)" =~ ^(ahead|identical)$ ]]
+}
 if [[ -z "$ref" ]]; then
-  ref=$(git -C "$here" rev-parse HEAD)
+  if [[ -d "$here/.git" ]] && head=$(git -C "$here" rev-parse HEAD 2> /dev/null) && on_default_branch "$head"; then
+    ref="$head"
+  else
+    ref=$(gh api "repos/${source_repo}/commits/${source_branch}" --jq .sha) || die "cannot read ${source_repo}@${source_branch}"
+  fi
 fi
 [[ "$ref" =~ ^[0-9a-f]{40}$ ]] || die "--ref must be a full 40-character commit SHA"
-gh api "repos/${source_repo}/commits/${ref}" --jq .sha > /dev/null 2>&1 \
-  || die "commit ${ref} is not in ${source_repo}; push this checkout or pass --ref with a pushed commit"
+on_default_branch "$ref" || die "commit ${ref} is not on ${source_repo}@${source_branch}; pin a commit that is merged there"
 if [[ "$update_pin" == "false" ]]; then
   gh api "repos/${source_repo}/contents/.github/workflows/pr-management.yml?ref=${ref}" --jq .path > /dev/null 2>&1 \
     || die "commit ${ref} has no .github/workflows/pr-management.yml; use a commit that includes the shared workflows"
 fi
 
-templates="$here/adopt-ci-templates"
+if [[ -d "$self/adopt-ci-templates" ]]; then templates="$self/adopt-ci-templates"; else templates="$here/adopt-ci-templates"; fi
 workflows=(pr-management check-pr-management pr-labelling sync-labels)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -252,9 +267,28 @@ add_file() { # source, destination (relative to repo root); never overwrites
   added+=("$dest")
 }
 
+# The first team of the repo's own organisation that its CODEOWNERS names: whoever owns code is who a PR should reach.
+team_from_codeowners() { # owner/repo
+  local repo="$1" path text
+  for path in .github/CODEOWNERS CODEOWNERS docs/CODEOWNERS; do
+    text=$(gh api -H "Accept: application/vnd.github.raw" "repos/${repo}/contents/${path}" 2> /dev/null) || continue
+    printf '%s\n' "$text" | grep -v '^[[:space:]]*#' | grep -oiE "@${repo%%/*}/[A-Za-z0-9_.-]+" | head -n 1 && return 0
+  done
+  return 1
+}
+
 adopt() {
   local repo="$1" default_branch writable work
   echo "== $repo"
+  reviewers="$reviewers_arg"
+  if [[ "$update_pin" == "false" && -z "$reviewers" ]]; then
+    reviewers=$(team_from_codeowners "$repo" || true)
+    if [[ -z "$reviewers" ]]; then
+      echo "  skipped: no team of ${repo%%/*} is named in its CODEOWNERS; pass --reviewers @${repo%%/*}/<team>" >&2
+      return 1
+    fi
+    echo "  reviewers: ${reviewers} (from CODEOWNERS)"
+  fi
   [[ "$(gh api "repos/${repo}" --jq .archived)" == "false" ]] || { echo "  archived, skipped"; return 0; }
   if [[ "$update_pin" == "false" ]]; then
     # The team must exist in the repository's own organisation: a mention of any other name notifies nobody.
@@ -316,6 +350,9 @@ adopt() {
       -m "Pins ${source_repo}/.github/actions/pr-management at ${ref}."
     pr_body > "$tmp/body.md"
     publish "ci: adopt the shared PR automation" || exit 1
+    echo "  after you merge it: run the \"Sync labels\" workflow once (Actions tab), then switch it on with"
+    echo "    gh variable set PR_AUTOMATION_LIVE --body true --repo ${repo}"
+    echo "  until then it only previews: nothing is labelled, commented on or closed."
   )
 }
 

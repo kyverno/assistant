@@ -161,6 +161,63 @@ class Flow(unittest.TestCase):
             init.review = saved_review
 
 
+class Setup(unittest.TestCase):
+    """`assistant setup`: say what is missing, and run nothing without a yes."""
+    def _with(self, files, prs=None, tty=False):
+        calls = []
+        saved = (init.api, init.open_pr, init.interactive, init.main, init.subprocess.run)
+        init.api = lambda path, raw=False: files.get(path)
+        init.open_pr = lambda repo, branch: (prs or {}).get(branch, "")
+        init.interactive = lambda: tty
+        init.main = lambda argv: calls.append(("pack", argv)) or 0
+        init.subprocess.run = lambda *a, **k: calls.append(("ci", a)) or type("R", (), {"returncode": 0})()
+        return calls, saved
+
+    def _restore(self, saved):
+        init.api, init.open_pr, init.interactive, init.main, init.subprocess.run = saved
+
+    def test_it_reports_what_is_missing_and_runs_nothing_without_a_terminal(self):
+        calls, saved = self._with({})
+        try:
+            self.assertEqual(init.setup("o/r"), 0)
+            self.assertEqual(init.setup_status("o/r"), {"pack": "", "ci": ""})
+        finally:
+            self._restore(saved)
+        self.assertEqual(calls, [])
+
+    def test_a_repository_with_both_is_left_alone(self):
+        calls, saved = self._with({f"repos/o/r/contents/.github/{init.PACK}": {"name": "x"},
+                                   "repos/o/r/contents/.github/workflows": [{"name": "pr-management.yaml"}]}, tty=True)
+        try:
+            self.assertEqual(init.setup("o/r"), 0)
+        finally:
+            self._restore(saved)
+        self.assertEqual(calls, [])
+
+    def test_an_open_pull_request_counts_and_is_not_offered_again(self):
+        calls, saved = self._with({}, prs={init.PACK_BRANCH: "https://x/pr/1", init.CI_BRANCH: "https://x/pr/2"}, tty=True)
+        try:
+            self.assertEqual(init.setup("o/r"), 0)
+        finally:
+            self._restore(saved)
+        self.assertEqual(calls, [])
+
+    def test_the_owners_shared_pack_counts(self):
+        calls, saved = self._with({f"repos/o/.github/contents/{init.PACK}": {"name": "x"}})
+        try:
+            self.assertEqual(init.setup_status("o/r")["pack"], "found")
+        finally:
+            self._restore(saved)
+
+    def test_the_reviewers_team_comes_from_the_organisations_own_codeowners(self):
+        calls, saved = self._with({"repos/o/r/contents/CODEOWNERS": "# @o/commented\n*.md @alice @Other/x @O/docs-team\n"})
+        init.api = lambda path, raw=False: "# @o/commented\n*.md @alice @Other/x @O/docs-team\n" if path.endswith("/CODEOWNERS") and "github" not in path else None
+        try:
+            self.assertEqual(init.codeowner_team("o/r"), "@O/docs-team")
+        finally:
+            self._restore(saved)
+
+
 class Rendering(unittest.TestCase):
     def test_what_it_writes_is_a_valid_pack(self):
         p = init.propose("o/r", TREE, "", "", ["ready-for-review", "needs-author-action"])

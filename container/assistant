@@ -4,6 +4,7 @@
 #   container/assistant [--profile maintainer|contributor] [--image IMAGE | --build] [--name NAME] [--provider P ...]
 #                     [--upgrade] [--reset]
 #   container/assistant init [owner/repo ...]     write your organisation pack by answering questions (see docs/organisation-pack.md)
+#   container/assistant setup owner/repo          see what the repository lacks (pack, PR automation) and set it up
 #   container/assistant --no-openshell [...]     plain Docker instead of OpenShell (less protection; --no-openshell --help)
 #
 # What it does, each time: checks Docker, installs OpenShell if it is missing, registers your GitHub
@@ -44,6 +45,12 @@ if [ "${1:-}" = init ]; then
   command -v python3 >/dev/null 2>&1 || { echo "assistant init needs python3" >&2; exit 1; }
   exec python3 "$HERE/assistant-init" "$@"
 fi
+# `assistant setup owner/repo`: say what the repository lacks (organisation pack, PR automation) and offer to set it up.
+if [ "${1:-}" = setup ]; then
+  shift
+  command -v python3 >/dev/null 2>&1 || { echo "assistant setup needs python3" >&2; exit 1; }
+  exec python3 "$HERE/assistant-init" --setup "$@"
+fi
 for a in "$@"; do
   [ "$a" = "--no-openshell" ] && exec "$HERE/assistant-docker" "$@"
 done
@@ -71,7 +78,7 @@ while [ $# -gt 0 ]; do
     --reset) RESET=1; shift ;;
     --push-to-fork) PUSH=1; shift ;;
     --no-push) NO_PUSH=1; shift ;;
-    -h|--help) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
@@ -241,6 +248,12 @@ else
     || { fail "could not store the token in OpenShell"; printf '%s\n' "$out" | sed 's/^/    /' >&2; exit 1; }
   unset PAT
   pass "token stored in OpenShell"
+  # First run for a maintainer: say what the repository lacks and offer to set it up, so nothing has to be found out later.
+  if [ "$HERMES_PROFILE" = maintainer ] && [ -t 0 ] && [ -z "${ASSISTANT_SKIP_SETUP:-}" ] \
+     && command -v python3 >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+    step "3a. Is $REPO set up for the assistant?"
+    python3 "$HERE/assistant-init" --setup "$REPO" || info "setup did not finish; run 'assistant setup $REPO' to try again"
+  fi
 fi
 
 # Pushing to your own fork, if you asked for it. Off by default: the assistant otherwise only reads GitHub.
