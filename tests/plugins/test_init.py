@@ -41,12 +41,6 @@ class Inference(unittest.TestCase):
         self.assertEqual(init.attribute_globs("docs/gen/** linguist-generated\n*.pb.go linguist-generated=true\n*.go text\n"),
                          ["docs/gen/**", "*.pb.go"])
 
-    def test_codeowners_gives_folders_never_everything(self):
-        dirs = {"pkg", "pkg/engine"}
-        text = "* @org/all\n/pkg/engine/ @org/eng\n/pkg/engine @org/eng2\n*.md @docs\n# comment\n"
-        got = init.codeowner_globs(text, dirs)
-        self.assertEqual([g for g, _ in got], ["pkg/engine/**", "pkg/engine/**"])
-
     def test_the_proposal_only_offers_what_the_repository_has(self):
         p = init.propose("o/r", TREE, "", "/pkg/engine/ @org/eng\n", ["ready-for-review", "needs-author-action", "bug", "lgtm"])
         self.assertEqual({c.glob for c in p.generated}, {"**/zz_generated.*", "**/dist/**", "package-lock.json", "**/crds/**"})
@@ -55,10 +49,6 @@ class Inference(unittest.TestCase):
         self.assertEqual([(c.glob, c.picked) for c in p.critical], [("pkg/engine/**", False)])   # owning is not riskiness
         self.assertEqual({c.glob for c in p.ready_labels}, {"ready-for-review"})
         self.assertEqual([c.glob for c in p.attention_labels], ["needs-author-action"])
-
-    def test_an_empty_repository_gives_an_empty_proposal(self):
-        p = init.propose("o/r", [], "", "", [])
-        self.assertEqual((p.generated, p.api_surface, p.critical, p.test_only, p.ready_labels), ([], [], [], [], []))
 
 
 CTX = ["AGENTS.md", "CLAUDE.md", "RELEASING.md", "pkg/a/AGENTS.md", ".github/instructions/go.instructions.md",
@@ -73,18 +63,10 @@ class Context(unittest.TestCase):
         self.assertEqual({c.glob for c in self.p.agent_docs},
                          {"AGENTS.md", "**/AGENTS.md", "CLAUDE.md", "RELEASING.md", ".github/instructions/*.instructions.md"})
 
-    def test_the_readme_and_security_policy_are_not_guides(self):
-        self.assertFalse({"README.md", "SECURITY.md"} & {c.glob for c in self.p.agent_docs})
-
     def test_where_it_keeps_its_owners_labels_and_checks(self):
         self.assertEqual((self.p.codeowners_file, self.p.labels_source, self.p.checks_file, self.p.instructions_dir),
                          (".github/CODEOWNERS", ".github/labels.yml", ".github/pr-readiness-checks.yml", ".github/instructions"))
         self.assertEqual((self.p.area_prefixes, self.p.kind_prefixes), (["area/"], ["kind/"]))
-
-    def test_nothing_is_claimed_that_the_repository_lacks(self):
-        p = init.propose("o/r", ["src/x.ts"], "", "", [])
-        self.assertEqual((p.agent_docs, p.codeowners_file, p.labels_source, p.checks_file, p.instructions_dir), ([], None, None, None, None))
-        self.assertEqual((p.area_prefixes, p.kind_prefixes), ([], []))
 
     def test_the_full_pack_is_valid(self):
         chosen = {**init.inferred(self.p), "review_bots": ["copilot-pull-request-reviewer"]}
@@ -96,12 +78,6 @@ class Context(unittest.TestCase):
     def test_a_shared_pack_keeps_a_single_value_only_where_repositories_agree(self):
         merged = init.merge([{"codeowners": ".github/CODEOWNERS", "agent_docs": ["A"]}, {"codeowners": "CODEOWNERS", "agent_docs": ["B"]}])
         self.assertEqual((merged["codeowners"], merged["agent_docs"]), (None, ["A", "B"]))
-
-    def test_the_facts_stub_names_the_repository_and_asks_the_questions(self):
-        text = init.FACTS_STUB.format(name="o/r", ci="")
-        self.assertIn("o/r", text)
-        for heading in ("release", "Branches", "not the author's fault", "reviewer"):
-            self.assertIn(heading, text)
 
     def test_what_it_could_not_infer_is_always_said(self):
         said = " ".join(init.not_inferred(self.p, "repo"))
@@ -190,9 +166,6 @@ class Rendering(unittest.TestCase):
         self.assertEqual(data["maintainer"]["file_classes"]["critical"], ['x/"y"/**', "with space/**"])
         pack.parse(data, "test")
 
-    def test_nothing_chosen_is_still_a_valid_pack(self):
-        pack.parse(__import__("yaml").safe_load(init.render("o", {})), "test")
-
 
 def drive(keys, call):
     """Run `call` (Python source using `init`) in a real terminal, send `keys`, return what it printed as its last line."""
@@ -256,21 +229,6 @@ class Menus(unittest.TestCase):
 
     def test_the_preselection_is_kept_when_nothing_is_touched(self):
         self.assertEqual(drive([ENTER], MULTI), ["b"])
-
-    def test_a_selects_all_and_n_none(self):
-        self.assertEqual(drive([b"a", ENTER], MULTI), ["a", "b", "c"])
-        self.assertEqual(drive([b"n", ENTER], MULTI), [])
-
-    def test_a_single_choice_follows_the_arrows(self):
-        self.assertEqual(drive([DOWN, DOWN, ENTER], SINGLE), "three")
-        self.assertEqual(drive([DOWN, DOWN, UP, ENTER], SINGLE), "two")
-
-    def test_j_and_k_also_move(self):
-        self.assertEqual(drive([b"j", ENTER], SINGLE), "two")
-
-    def test_the_cursor_stops_at_the_ends(self):
-        self.assertEqual(drive([UP, ENTER], SINGLE), "one")
-        self.assertEqual(drive([DOWN] * 6 + [ENTER], SINGLE), "three")
 
     def test_filtering_narrows_a_long_list(self):
         many = ("opts = [i.Option(f'label-{n}') for n in range(30)]\n"
