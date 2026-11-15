@@ -257,6 +257,14 @@ class Proposal:
     test_only: list[Candidate] = field(default_factory=list)
     ready_labels: list[Candidate] = field(default_factory=list)
     attention_labels: list[Candidate] = field(default_factory=list)
+    agent_docs: list[Candidate] = field(default_factory=list)
+    review_bots: list[Candidate] = field(default_factory=list)
+    instructions_dir: Optional[str] = None
+    codeowners_file: Optional[str] = None
+    labels_source: Optional[str] = None
+    checks_file: Optional[str] = None
+    area_prefixes: list[str] = field(default_factory=list)
+    kind_prefixes: list[str] = field(default_factory=list)
     has_pack: bool = False
     truncated: bool = False
 
@@ -301,6 +309,15 @@ _TESTS = [
     ("**/*.test.js", "JavaScript tests"), ("**/*.spec.ts", "TypeScript specs"), ("**/*.spec.js", "JavaScript specs"),
     ("**/test_*.py", "Python tests"), ("**/*_test.py", "Python tests"), ("tests/**", "tests folder"),
     ("test/**", "test folder"), ("**/__tests__/**", "Jest tests"), ("**/testdata/**", "test data"),
+]
+# The repository's own writing about itself, which the assistant reads before judging a change.
+_DOCS = [
+    ("AGENTS.md", "agent guide"), ("**/AGENTS.md", "agent guide per package"), ("CLAUDE.md", "agent guide"),
+    ("ARCHITECTURE.md", "architecture"), ("CONTRIBUTING.md", "contribution rules"), (".github/CONTRIBUTING.md", "contribution rules"),
+    ("DEVELOPMENT.md", "development"), ("RELEASING.md", "release process"), ("RELEASE.md", "release process"),
+    ("MAINTAINERS.md", "who maintains what"), ("GOVERNANCE.md", "governance"), ("REVIEW.md", "review rules"),
+    (".github/copilot-instructions.md", "Copilot instructions"), (".github/instructions/*.instructions.md", "path instructions"),
+    ("docs/context/**", "agent context"),
 ]
 _READY = re.compile(r"ready|lgtm|approved|awaiting[- ]review|needs[- ]review|review[- ]requested", re.I)
 _ATTENTION = re.compile(r"needs?[- ](author|changes|info|rebase|update)|author[- ]action|waiting[- ](on[- ])?author|"
@@ -364,10 +381,40 @@ def propose(repo: str, paths: list[str], attributes: str, codeowners: str, label
     covered.clear()
     for glob, why in _TESTS:
         add(p.test_only, glob, why)
+    covered.clear()
+    for glob, why in _DOCS:
+        add(p.agent_docs, glob, why)
+    if any(path.startswith(".github/instructions/") for path in paths):
+        p.instructions_dir = ".github/instructions"
+    p.codeowners_file = next((f for f in (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS") if f in paths), None)
+    p.labels_source = next((f for f in (".github/labels.yml", ".github/labels.yaml") if f in paths), None)
+    p.checks_file = ".github/pr-readiness-checks.yml" if ".github/pr-readiness-checks.yml" in paths else None
+    p.area_prefixes = ["area/"] if any(n.startswith("area/") for n in labels) else []
+    p.kind_prefixes = ["kind/"] if any(n.startswith("kind/") for n in labels) else []
     for name in labels:
         (p.ready_labels if _READY.search(name) else p.attention_labels if _ATTENTION.search(name) else []).append(
             Candidate(name, "label"))
     return p
+
+
+def recent_review_bots(repo: str) -> list[str]:
+    """Logins of bots that reviewed the last pull requests, as the pack writes them (no `[bot]` suffix)."""
+    owner, name = repo.split("/")
+    query = ("query($o:String!,$n:String!){repository(owner:$o,name:$n){pullRequests(last:30,orderBy:{field:UPDATED_AT,direction:ASC})"
+             "{nodes{reviews(first:20){nodes{author{login __typename}}}}}}}")
+    try:
+        data = json.loads(gh("api", "graphql", "-f", f"query={query}", "-F", f"o={owner}", "-F", f"n={name}", check=False) or "{}")
+        prs = data["data"]["repository"]["pullRequests"]["nodes"]
+    except (ValueError, KeyError, TypeError):
+        return []
+    found: dict[str, int] = {}
+    for pr in prs:
+        for r in (pr.get("reviews") or {}).get("nodes", []):
+            a = r.get("author") or {}
+            if a.get("__typename") == "Bot" and a.get("login"):
+                login = a["login"].removesuffix("[bot]")
+                found[login] = found.get(login, 0) + 1
+    return [k for k, _ in sorted(found.items(), key=lambda kv: -kv[1])]
 
 
 def load(repo: str) -> Proposal:
@@ -382,6 +429,8 @@ def load(repo: str) -> Proposal:
     labels = [n for n in gh("api", f"repos/{repo}/labels?per_page=100", "--paginate", "--jq", ".[].name", check=False).split("\n") if n]
     p = propose(repo, paths, text(".gitattributes"), text(owners_path) if owners_path else "", labels)
     p.has_pack = f".github/{PACK}" in paths
+    for login in recent_review_bots(repo):
+        p.review_bots.append(Candidate(login, "reviewed recent pull requests"))
     p.truncated = bool(tree.get("truncated"))
     p.all_labels = labels      # type: ignore[attr-defined]
     p.top_dirs = sorted({path.split("/")[0] for path in paths if "/" in path})   # type: ignore[attr-defined]
@@ -394,15 +443,36 @@ def quote(s: str) -> str:
     return json.dumps(s)
 
 
-def render(name: str, chosen: dict[str, list[str]]) -> str:
+def render(name: str, chosen: dict) -> str:
     """The pack as YAML, in the form docs/organisation-pack.md describes. Only what was chosen is written."""
-    out = [f"# Organisation pack for the maintainer assistant, written by `assistant init`. Edit it freely;",
+    def flow(v) -> str:
+        return "[" + ", ".join(quote(x) for x in v) + "]"
+
+    out = ["# Organisation pack for the maintainer assistant, written by `assistant init`. Edit it freely;",
            "# the reference is docs/organisation-pack.md in kyverno/assistant.", f"name: {quote(name)}"]
+    if chosen.get("agent_docs"):
+        out += ["\n# The repository's own guides, read before judging a change.", "agent_docs:"] + [f"  - {quote(x)}" for x in chosen["agent_docs"]]
+    if chosen.get("instructions_dir"):
+        out.append(f"instructions_dir: {quote(chosen['instructions_dir'])}")
+    if chosen.get("codeowners"):
+        out.append(f"codeowners: {quote(chosen['codeowners'])}")
+    labels = {k: chosen[k] for k in ("labels_source", "area_prefixes", "kind_prefixes") if chosen.get(k)}
+    if labels:
+        out.append("\nlabels:")
+        if "labels_source" in labels:
+            out.append(f"  source: {quote(labels['labels_source'])}")
+        for key in ("area_prefixes", "kind_prefixes"):
+            if key in labels:
+                out.append(f"  {key}: {flow(labels[key])}")
+    if chosen.get("review_bots"):
+        out.append(f"\nreview_bots: {flow(chosen['review_bots'])}")
     readiness = {k: chosen.get(k) for k in ("ready_labels", "attention_labels") if chosen.get(k)}
-    if readiness:
+    if readiness or chosen.get("checks_file"):
         out.append("\nreadiness:")
+        if chosen.get("checks_file"):
+            out.append(f"  checks_file: {quote(chosen['checks_file'])}")
         for k, v in readiness.items():
-            out.append(f"  {k}: [{', '.join(quote(x) for x in v)}]")
+            out.append(f"  {k}: {flow(v)}")
     classes = {k: chosen.get(k) for k in ("generated", "api_surface", "critical", "test_only") if chosen.get(k)}
     if classes:
         out.append("\nmaintainer:\n  file_classes:")
@@ -412,16 +482,28 @@ def render(name: str, chosen: dict[str, list[str]]) -> str:
     return "\n".join(out) + "\n"
 
 
-def inferred(p: Proposal) -> dict[str, list[str]]:
+def inferred(p: Proposal) -> dict:
     """What was inferred, taken as it is (--yes, or no terminal). Critical code is never guessed."""
     return {"generated": [c.glob for c in p.generated if c.picked], "api_surface": [c.glob for c in p.api_surface if c.picked],
             "test_only": [c.glob for c in p.test_only if c.picked], "ready_labels": [c.glob for c in p.ready_labels],
-            "attention_labels": [c.glob for c in p.attention_labels]}
+            "attention_labels": [c.glob for c in p.attention_labels], **context(p)}
 
 
-def review(p: Proposal) -> dict[str, list[str]]:
+def context(p: Proposal) -> dict:
+    """What the repository states about itself, taken as it is: its guides, owners file, label catalogue and review bots."""
+    return {"agent_docs": [c.glob for c in p.agent_docs], "instructions_dir": p.instructions_dir, "codeowners": p.codeowners_file,
+            "labels_source": p.labels_source, "area_prefixes": p.area_prefixes, "kind_prefixes": p.kind_prefixes,
+            "checks_file": p.checks_file, "review_bots": [c.glob for c in p.review_bots]}
+
+
+def review(p: Proposal) -> dict:
     """Walk the user through the proposal, one question per kind of rule."""
-    chosen: dict[str, list[str]] = {}
+    chosen: dict = {}
+    docs = [Option(c.glob, c.detail, checked=c.picked) for c in p.agent_docs]
+    chosen["agent_docs"] = [o.label for o in menu("Guides the assistant should read (it reads them before judging a change)", docs, multi=True)] if docs else []
+    bots = [Option(c.glob, c.detail, checked=True) for c in p.review_bots]
+    chosen["review_bots"] = [o.label for o in menu("Review bots (their comments are labelled as a bot's)", bots, multi=True)] if bots else []
+    chosen.update({k: v for k, v in context(p).items() if k not in chosen})
     sections = [
         ("generated", "Generated files (a change here without a change to its source is suspect)", p.generated),
         ("api_surface", "Public API surface (changing these changes the product)", p.api_surface),
@@ -430,15 +512,13 @@ def review(p: Proposal) -> dict[str, list[str]]:
     ]
     for key, title, cands in sections:
         options = [Option(c.glob, c.detail, checked=c.picked) for c in cands]
+        if not options and key == "critical" and getattr(p, "top_dirs", []):
+            options = [Option(f"{d}/**") for d in p.top_dirs]          # nothing to suggest, so offer the folders
+            title = "Critical code: which top-level folders? (nothing was inferred)"
         picked = [o.label for o in menu(title, options, multi=True)] if options else []
-        extra = ask(f"  More {key.replace('_', ' ')} globs, comma-separated (Enter to skip)") if key in ("critical", "generated") else ""
-        picked += [g.strip() for g in extra.split(",") if g.strip()]
-        if not options and key == "critical" and not extra:
-            tops = getattr(p, "top_dirs", [])
-            if tops:
-                more = menu("Critical code: which top-level folders? (nothing was inferred)",
-                            [Option(f"{d}/**") for d in tops], multi=True)
-                picked += [o.label for o in more]
+        if key in ("critical", "generated"):
+            extra = ask(f"  More {key.replace('_', ' ')} globs, comma-separated (Enter to skip)")
+            picked += [g.strip() for g in extra.split(",") if g.strip()]
         chosen[key] = picked
     names = getattr(p, "all_labels", [])
     for key, title, cands in (("ready_labels", "Labels that mean ready for a maintainer", p.ready_labels),
@@ -451,18 +531,19 @@ def review(p: Proposal) -> dict[str, list[str]]:
 
 # -- writing it to GitHub ------------------------------------------------------------------------------------------
 
-def publish(target: str, path: str, content: str, branch: str, title: str, body: str) -> str:
-    """Add `path` to `target` (owner/repo) on a branch and open a pull request; from your fork when you cannot push."""
+def publish(target: str, files: dict[str, str], branch: str, title: str, body: str) -> str:
+    """Add `files` (path -> content) to `target` (owner/repo) on a branch and open a pull request; from your fork when you
+    cannot push. Never overwrites a file that exists."""
     open_pr = gh("pr", "list", "--repo", target, "--search", f"head:{branch}", "--state", "open", "--json", "url",
                  "--jq", ".[0].url", check=False).strip()
     if open_pr:
         raise GhError(f"{target} already has an open pull request for this: {open_pr}")
-    perms = (api(f"repos/{target}") or {}).get("permissions", {})
+    meta = api(f"repos/{target}") or {}
     me = gh("api", "user", "--jq", ".login").strip()
     work = tempfile.mkdtemp(prefix="assistant-init-")
     try:
         source = target
-        if not perms.get("push"):
+        if not meta.get("permissions", {}).get("push"):
             gh("repo", "fork", target, "--clone=false", check=False)
             source = f"{me}/{target.split('/')[1]}"
         gh("repo", "clone", source, work, "--", "--quiet", "--depth", "1")
@@ -470,16 +551,17 @@ def publish(target: str, path: str, content: str, branch: str, title: str, body:
         if source != target:
             git("remote", "add", "upstream", f"https://github.com/{target}.git")
             git("fetch", "--quiet", "--depth", "1", "upstream")
-            git("checkout", "--quiet", "-B", branch, "upstream/" + (api(f"repos/{target}") or {})["default_branch"])
+            git("checkout", "--quiet", "-B", branch, "upstream/" + meta["default_branch"])
         else:
             git("checkout", "--quiet", "-B", branch)
-        dest = os.path.join(work, path)
-        if os.path.exists(dest):
-            raise GhError(f"{target} already has {path}; not overwriting it")
-        os.makedirs(os.path.dirname(dest), exist_ok=True)
-        with open(dest, "w") as f:
-            f.write(content)
-        git("add", path)
+        for path, content in files.items():
+            dest = os.path.join(work, path)
+            if os.path.exists(dest):
+                raise GhError(f"{target} already has {path}; not overwriting it")
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(dest, "w") as f:
+                f.write(content)
+            git("add", path)
         git("commit", "--quiet", "-s", "-m", title)
         git("push", "--quiet", "--set-upstream", "origin", branch)
         head = branch if source == target else f"{me}:{branch}"
@@ -488,22 +570,62 @@ def publish(target: str, path: str, content: str, branch: str, title: str, body:
         shutil.rmtree(work, ignore_errors=True)
 
 
-def create_shared_repo(owner: str, content: str) -> str:
+def create_shared_repo(owner: str, files: dict[str, str]) -> str:
     private = choose(f"Create {owner}/.github as", [Option("Public (recommended: anyone's assistant can read the pack)", value=False),
                                                       Option("Private (the token must be able to read it)", value=True)]).value
     gh("repo", "create", f"{owner}/.github", "--private" if private else "--public", "--description",
        "Organisation defaults", "--add-readme")
-    return publish(f"{owner}/.github", PACK, content, "add-assistant-org-pack", "Add the assistant organisation pack",
+    return publish(f"{owner}/.github", files, "add-assistant-org-pack", "Add the assistant organisation pack",
                    "Adds `assistant-org.yaml`, written by `assistant init`.")
 
 
-# -- the flow ------------------------------------------------------------------------------------------------------
+FACTS_STUB = """# What the assistant should know about {name}
 
-def merge(chosen_by_repo: list[dict[str, list[str]]]) -> dict[str, list[str]]:
-    out: dict[str, list[str]] = {}
+The assistant already reads this repository's guides, CODEOWNERS, labels and its pull requests. Write here what none of
+those say. Short answers are enough; delete a heading you have nothing to say under.
+
+## How a release is made
+(Branches, who cuts it, anything that must not be merged near one.)
+
+## Branches that matter
+(The default branch, long-lived release branches, anything that is never merged into.)
+
+## Failures that are not the author's fault
+(Known-flaky checks, services that go down, and how to tell.)
+
+## What a reviewer here looks for first
+(The things you would never merge without, and the things you let slide.)
+
+## Where the assistant keeps getting it wrong
+(Add to this whenever it does.)
+"""
+
+
+def not_inferred(p: Proposal, location: str) -> list[str]:
+    """What init could not work out, each with where to write it."""
+    items = []
+    if not p.agent_docs:
+        items.append("Guides: no AGENTS.md, CONTRIBUTING.md, RELEASING.md or similar was found. Put the rules a new reviewer "
+                     "must know in one of them; the assistant reads them (add the path to `agent_docs` in the pack).")
+    items.append("Merge gates (a check that blocks everyone, like a shared end-to-end suite): `maintainer.branch_gates` needs "
+                 "its check name, the label of the issue that reports it broken, and a bypass label. See docs/organisation-pack.md.")
+    items.append("Critical code: only you know which code costs the most when it is wrong; `critical` lists what you chose.")
+    items.append("The release process, flaky failures and review norms: write them in `assistant-org-facts.md` next to the pack, "
+                 "or in CONTRIBUTING.md / RELEASING.md if they belong there too.")
+    return items
+
+
+def merge(chosen_by_repo: list[dict]) -> dict:
+    """One shared pack from several repositories: lists are joined, a single value is kept only if they all agree."""
+    out: dict = {}
     for chosen in chosen_by_repo:
         for k, v in chosen.items():
-            out[k] = list(dict.fromkeys(out.get(k, []) + v))
+            if isinstance(v, list):
+                out[k] = list(dict.fromkeys(out.get(k, []) + v))
+            elif k not in out:
+                out[k] = v
+            elif out[k] != v:
+                out[k] = None
     return out
 
 
@@ -513,6 +635,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--location", choices=("repo", "org"), help="put the pack in each repository, or once in <owner>/.github")
     ap.add_argument("--yes", action="store_true", help="accept what was inferred, without asking")
     ap.add_argument("--dry-run", action="store_true", help="print the pack and stop; write nothing anywhere")
+    ap.add_argument("--facts", action="store_true", help="also add assistant-org-facts.md, a stub of questions to fill in")
     args = ap.parse_args(argv)
     use_terminal()
     plain = args.yes or not interactive()
@@ -560,12 +683,26 @@ def main(argv: Optional[list[str]] = None) -> int:
         if location == "org" and len(owners) > 1:
             print(red("A shared pack needs one owner; choose --location repo."), file=sys.stderr)
             return 2
+        if location == "org":
+            owner = next(iter(owners))
+            if api(f"repos/{owner}/.github/contents/{PACK}") is not None:
+                # Say so before the questions, not after them: a shared pack is already there.
+                print(yellow(f"{owner}/.github already has {PACK}; it covers every repository of {owner} that has no pack of its own."))
+                if plain or not confirm("Write a pack for just " + ", ".join(p.repo for p in todo) + " instead (it overrides the shared one)?"):
+                    print("Nothing was written. Edit the shared file, or run again with --location repo.")
+                    return 0 if not plain else 1
+                location = "repo"
 
-        packs: list[tuple[str, str, str, str]] = []        # (target repo, path, content, name)
+        facts_wanted = args.facts or (not plain and confirm("Also add assistant-org-facts.md, a short list of questions about your "
+                                                          "release process and review norms for you to fill in?", default=True))
+        packs: list[tuple[str, dict[str, str], str]] = []        # (target repo, files, name)
         if location == "org":
             owner = next(iter(owners))
             chosen = merge([inferred(p) if plain else review(p) for p in todo])
-            packs.append((f"{owner}/.github", PACK, render(owner, chosen), owner))
+            files = {PACK: render(owner, chosen)}
+            if facts_wanted:
+                files["assistant-org-facts.md"] = FACTS_STUB.format(name=owner)
+            packs.append((f"{owner}/.github", files, owner))
         else:
             for p in todo:
                 if plain:
@@ -573,36 +710,44 @@ def main(argv: Optional[list[str]] = None) -> int:
                 else:
                     print(f"\n{bold(p.repo)}")
                     chosen = review(p)
-                packs.append((p.repo, f".github/{PACK}", render(p.repo.split("/")[0], chosen), p.repo))
+                files = {f".github/{PACK}": render(p.repo.split("/")[0], chosen)}
+                if facts_wanted:
+                    files[".github/assistant-org-facts.md"] = FACTS_STUB.format(name=p.repo)
+                packs.append((p.repo, files, p.repo))
 
-        for target, path, content, _ in packs:
-            print(f"\n{bold(target + '/' + path)}\n" + dim("-" * 60) + f"\n{content}" + dim("-" * 60))
+        for target, files, _ in packs:
+            for path, content in files.items():
+                print(f"\n{bold(target + '/' + path)}\n" + dim("-" * 60) + f"\n{content.rstrip()}\n" + dim("-" * 60))
+        print("\n" + bold("What init could not work out for you:"))
+        for item in not_inferred(todo[0], location):
+            print(f"  {yellow('•')} {item}")
         if args.dry_run:
-            print(dim("--dry-run: nothing was written."))
+            print(dim("\n--dry-run: nothing was written."))
             return 0
         action = choose("What now?", [Option("Open a pull request (a new repository for a shared pack)", value="pr"),
-                                      Option(f"Save {PACK} here and stop", value="file"),
+                                      Option("Save the files here and stop", value="file"),
                                       Option("Cancel", value="no")]) if not plain else Option("", value="pr")
         if action.value == "no":
             print("Nothing was written.")
             return 0
         if action.value == "file":
-            for _, _, content, name in packs:
-                dest = PACK if len(packs) == 1 else f"{name.replace('/', '-')}-{PACK}"
-                with open(dest, "w") as f:
-                    f.write(content)
-                print(green(f"Wrote {dest}"))
+            for _, files, name in packs:
+                for path, content in files.items():
+                    dest = os.path.basename(path) if len(packs) == 1 else f"{name.replace('/', '-')}-{os.path.basename(path)}"
+                    with open(dest, "w") as f:
+                        f.write(content)
+                    print(green(f"Wrote {dest}"))
             return 0
-        for target, path, content, _ in packs:
+        for target, files, _ in packs:
             if location == "org" and api(f"repos/{target}") is None:
                 if not confirm(f"{target} does not exist. Create it?"):
                     print("Nothing was written.")
                     return 0
-                url = create_shared_repo(target.split("/")[0], content)
+                url = create_shared_repo(target.split("/")[0], files)
             else:
-                url = publish(target, path, content, "add-assistant-org-pack", "Add the assistant organisation pack",
+                url = publish(target, files, "add-assistant-org-pack", "Add the assistant organisation pack",
                               "Adds `.github/assistant-org.yaml`, written by `assistant init` from the repository's own files, "
-                              "labels and CODEOWNERS. Review the globs: they decide what the assistant treats as generated, "
+                              "labels, CODEOWNERS and guides. Review the globs: they decide what the assistant treats as generated, "
                               "critical or test-only.")
             print(green("Opened ") + url)
         print(dim("Merge it, and the published assistant reads it from the default branch. Check with: ask for repo_pack."))

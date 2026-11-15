@@ -60,6 +60,68 @@ class Inference(unittest.TestCase):
         self.assertEqual((p.generated, p.api_surface, p.critical, p.test_only, p.ready_labels), ([], [], [], [], []))
 
 
+CTX = ["AGENTS.md", "CLAUDE.md", "RELEASING.md", "pkg/a/AGENTS.md", ".github/instructions/go.instructions.md",
+       ".github/CODEOWNERS", ".github/labels.yml", ".github/pr-readiness-checks.yml", "src/x.ts", "README.md", "SECURITY.md"]
+
+
+class Context(unittest.TestCase):
+    def setUp(self):
+        self.p = init.propose("o/r", CTX, "", "", ["area/docs", "kind/bug", "ready-for-review"])
+
+    def test_the_repositorys_own_guides_are_offered(self):
+        self.assertEqual({c.glob for c in self.p.agent_docs},
+                         {"AGENTS.md", "**/AGENTS.md", "CLAUDE.md", "RELEASING.md", ".github/instructions/*.instructions.md"})
+
+    def test_the_readme_and_security_policy_are_not_guides(self):
+        self.assertFalse({"README.md", "SECURITY.md"} & {c.glob for c in self.p.agent_docs})
+
+    def test_where_it_keeps_its_owners_labels_and_checks(self):
+        self.assertEqual((self.p.codeowners_file, self.p.labels_source, self.p.checks_file, self.p.instructions_dir),
+                         (".github/CODEOWNERS", ".github/labels.yml", ".github/pr-readiness-checks.yml", ".github/instructions"))
+        self.assertEqual((self.p.area_prefixes, self.p.kind_prefixes), (["area/"], ["kind/"]))
+
+    def test_nothing_is_claimed_that_the_repository_lacks(self):
+        p = init.propose("o/r", ["src/x.ts"], "", "", [])
+        self.assertEqual((p.agent_docs, p.codeowners_file, p.labels_source, p.checks_file, p.instructions_dir), ([], None, None, None, None))
+        self.assertEqual((p.area_prefixes, p.kind_prefixes), ([], []))
+
+    def test_the_full_pack_is_valid(self):
+        chosen = {**init.inferred(self.p), "review_bots": ["copilot-pull-request-reviewer"]}
+        rules = pack.parse(__import__("yaml").safe_load(init.render("o", chosen)), "test")
+        self.assertEqual(rules.codeowners, ".github/CODEOWNERS")
+        self.assertIn("RELEASING.md", rules.agent_docs)
+        self.assertEqual(rules.review_bots, ("copilot-pull-request-reviewer",))
+
+    def test_a_shared_pack_keeps_a_single_value_only_where_repositories_agree(self):
+        merged = init.merge([{"codeowners": ".github/CODEOWNERS", "agent_docs": ["A"]}, {"codeowners": "CODEOWNERS", "agent_docs": ["B"]}])
+        self.assertEqual((merged["codeowners"], merged["agent_docs"]), (None, ["A", "B"]))
+
+    def test_the_facts_stub_names_the_repository_and_asks_the_questions(self):
+        text = init.FACTS_STUB.format(name="o/r")
+        self.assertIn("o/r", text)
+        for heading in ("release", "Branches", "not the author's fault", "reviewer"):
+            self.assertIn(heading, text)
+
+    def test_what_it_could_not_infer_is_always_said(self):
+        said = " ".join(init.not_inferred(self.p, "repo"))
+        for word in ("gates", "Critical", "release process"):
+            self.assertIn(word, said)
+
+
+class Flow(unittest.TestCase):
+    def test_an_existing_shared_pack_is_reported_before_any_question(self):
+        calls = []
+        saved = (init.load, init.api, init.publish)
+        init.load = lambda repo: init.propose(repo, ["src/x.ts"], "", "", [])
+        init.api = lambda path, raw=False: {"name": init.PACK} if path.endswith("/.github/contents/" + init.PACK) else None
+        init.publish = lambda *a, **k: calls.append(a)
+        try:
+            self.assertEqual(init.main(["o/r", "--location", "org", "--yes"]), 1)
+        finally:
+            init.load, init.api, init.publish = saved
+        self.assertEqual(calls, [])
+
+
 class Rendering(unittest.TestCase):
     def test_what_it_writes_is_a_valid_pack(self):
         p = init.propose("o/r", TREE, "", "", ["ready-for-review", "needs-author-action"])

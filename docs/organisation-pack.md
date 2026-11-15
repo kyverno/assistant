@@ -31,13 +31,27 @@ It runs on your machine with your `gh` login and Python 3, and needs no clone, n
 curl -fsSL https://raw.githubusercontent.com/kyverno/assistant/main/container/assistant-init | python3 - acme/api
 ```
 
-(Pin a release tag instead of `main` if you want to read the exact script first; with a checkout, `container/assistant init acme/api` does the same.) It reads the repository's file tree,
-`.gitattributes` (`linguist-generated`), `CODEOWNERS` and labels, and offers only globs that match something. Generated files,
-API folders, test files and the ready and waiting-on-author labels are suggested and pre-ticked; critical code is **never
-guessed** (owning a folder is not how risky it is), so it asks. Keys: up and down (or `j`, `k`) move, space ticks, `a` all, `n` none,
-`/` filters a long list, enter confirms. Without a terminal it takes the suggestions. It adds the file in a pull request (from your
-fork if you cannot push), signed off, and never overwrites an existing pack. With a shared pack it offers to create
-`<owner>/.github` if it does not exist.
+(Pin a release tag instead of `main` if you want to read the exact script first; with a checkout, `container/assistant init acme/api` does the same.) It reads the repository's file tree, `.gitattributes` (`linguist-generated`), `CODEOWNERS`, labels and recent reviews, and offers
+only what exists:
+
+| Written to the pack | From |
+|---|---|
+| `maintainer.file_classes`: generated, API surface, test-only (pre-ticked) and critical (you choose; it is never guessed, because owning a folder is not how risky it is) | File names, `.gitattributes`, folder names |
+| `agent_docs`, `instructions_dir`: the repository's own guides (`AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `RELEASING.md`, ...) | File names |
+| `codeowners`, `labels` (catalogue file, `area/` and `kind/` prefixes), `readiness.checks_file` | Where the repository keeps them |
+| `readiness` ready and waiting-on-the-author labels, `review_bots` | Label names, bots that reviewed recent PRs |
+
+Label meanings need no entry: the assistant reads each label's description from GitHub live, so write them there (or in
+`.github/labels.yml`). With `--facts` or when asked, it also adds `assistant-org-facts.md`, a short list of questions (how a release is
+made, which branches matter, failures that are not the author's fault, what a reviewer looks for first) for you to fill in. It ends by
+listing what it **could not** work out: merge gates (`branch_gates` needs a check name, a label and a bypass label), critical code, and
+the release process and review norms. Put the last of those in `assistant-org-facts.md`, or in `CONTRIBUTING.md` or `RELEASING.md`
+if they belong there too.
+
+Keys: up and down (or `j`, `k`) move, space ticks, `a` all, `n` none, `/` filters a long list, enter confirms. Without a terminal it
+takes the suggestions. It adds the files in a pull request (from your fork if you cannot push), signed off, and never overwrites an
+existing file. If a shared pack already exists it says so before asking anything, and offers a pack for just that repository that
+overrides it. With a shared pack it offers to create `<owner>/.github` if it does not exist.
 
 ## Where the assistant reads it from
 
