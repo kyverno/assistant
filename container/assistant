@@ -218,10 +218,12 @@ if [ "$RESET" = 1 ]; then
   openshell provider delete "$PROVIDER" >/dev/null 2>&1
 fi
 REPO="${ASSISTANT_REPO:-}"
-[ -n "$REPO" ] && resolve_policy "$REPO" "" 1
+repo_from_instance    # on a later run the repository is in the sandbox's profile, not in your environment
 LOGIN="${!LOGIN_VAR:-}"
 if openshell provider get "$PROVIDER" >/dev/null 2>&1; then
   pass "GitHub token already stored in OpenShell (use --reset to replace it)"
+  [ -n "$REPO" ] && resolve_policy "$REPO" "" 1
+  check_stored_token ""
 else
   token_note_gh() {
     info "     only $REPO. It goes to OpenShell, never into the sandbox, and $TOKEN_SCOPE"

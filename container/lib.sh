@@ -30,8 +30,8 @@ POLICY_RESOLVED=0
 policy_text() {
   if [ "$POLICY_SET" = 1 ]; then printf '%s\n' "$POLICY_TEXT"; return 0; fi
   local f="${ASSISTANT_POLICY:-$HERE/assistant-policy.yaml}"
-  [ -f "$f" ] && cat "$f"
-  return 0
+  [ -f "$f" ] || return 0
+  cat "$f" 2>/dev/null
 }
 
 policy_scalar() {
@@ -45,9 +45,12 @@ policy_list() {
     { sub(/[ \t]*#.*/, "") }
     $0 ~ "^" k ":[ \t]*\\[" { sub(/^[^[]*\[/, ""); sub(/\].*/, ""); n = split($0, a, ","); for (i = 1; i <= n; i++) { gsub(/^[ \t"\047]+|[ \t"\047]+$/, "", a[i]); if (a[i] != "") print a[i] } exit }
     $0 ~ "^" k ":[ \t]*$" { f = 1; next }
-    f && /^[ \t]+-[ \t]*/ { sub(/^[ \t]+-[ \t]*/, ""); gsub(/^["\047]+|["\047]+$/, ""); print; next }
+    f && /^[ \t]*-[ \t]*/ { sub(/^[ \t]*-[ \t]*/, ""); gsub(/^["\047]+|["\047]+$/, ""); if ($0 != "") print; next }
     f && /[^ \t]/ { exit }'
 }
+
+# Is the key there at all (so an empty or malformed value can be told from a missing key)?
+policy_has() { [ "$(policy_text | grep -c "^$1[[:space:]]*:")" -gt 0 ]; }
 
 lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 
@@ -60,39 +63,77 @@ valid_repo_pattern() { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_.*-]+$ &&
 
 # Why the current policy is not usable, or nothing. Prints to stderr; the caller decides whether to stop.
 policy_problem() {
-  local src="${POLICY_SOURCE:-${ASSISTANT_POLICY:-$HERE/assistant-policy.yaml}}" p rc=0
+  local src="${POLICY_SOURCE:-${ASSISTANT_POLICY:-$HERE/assistant-policy.yaml}}" p k keys dups stray rc=0
+  keys="$(policy_text | awk '{ sub(/[ \t]*#.*/, "") } /^[A-Za-z_][A-Za-z0-9_-]*[ \t]*:/ { sub(/[ \t]*:.*/, ""); print }')"
+  while IFS= read -r k; do
+    case "$k" in
+      "") ;;
+      default_repo|repos|fork_repos|token) ;;
+      *) fail "$src: unknown key '$k' (the keys are default_repo, repos, fork_repos and token)"; rc=1 ;;
+    esac
+  done <<<"$keys"
+  dups="$(printf '%s\n' "$keys" | sort | uniq -d)"
+  [ -z "$dups" ] || { fail "$src: $(printf '%s' "$dups" | tr '\n' ' ')appears more than once"; rc=1; }
+  stray="$(policy_text | awk '{ sub(/[ \t]*#.*/, "") } /[^ \t]/ && !/^[A-Za-z_][A-Za-z0-9_-]*[ \t]*:/ && !/^[ \t]/ && !/^-/ { print; exit }')"
+  [ -z "$stray" ] || { fail "$src: cannot read the line '$stray'"; rc=1; }
+  for k in repos fork_repos; do
+    policy_has "$k" || continue
+    if [ -n "$(policy_scalar "$k")" ]; then fail "$src: $k must be a list, one '- item' per line or [a, b]"; rc=1; continue; fi
+    if [ "$(policy_text | grep -E "^$k:[[:space:]]*\\[" | grep -vc '\]')" -gt 0 ]; then fail "$src: $k has a '[' without a closing ']'"; rc=1; continue; fi
+    [ -n "$(policy_list "$k")" ] || { fail "$src: $k is empty; list at least one, or remove the key"; rc=1; }
+  done
   while IFS= read -r p; do
     [ -z "$p" ] || valid_repo_pattern "$p" || { fail "$src: '$p' under repos is not an owner/repo pattern (e.g. acme/* or acme/api)"; rc=1; }
   done <<<"$(policy_list repos)"
+  while IFS= read -r p; do
+    [ -z "$p" ] || valid_repo "x/$p" || { fail "$src: '$p' under fork_repos is not a repository name"; rc=1; }
+  done <<<"$(policy_list fork_repos)"
+  for k in token default_repo; do
+    policy_has "$k" && [ -z "$(policy_scalar "$k")" ] && { fail "$src: $k has no value"; rc=1; }
+  done
   case "$(policy_scalar token)" in ""|any|fine-grained) ;; *) fail "$src: token must be 'any' or 'fine-grained'"; rc=1 ;; esac
   p="$(policy_scalar default_repo)"
   [ -z "$p" ] || valid_repo "$p" || { fail "$src: default_repo '$p' is not an owner/repo name"; rc=1; }
   return $rc
 }
 
-# Use this text as the policy, unless it is not valid (then the previous one stays).
-adopt_policy() {
-  local old_text="$POLICY_TEXT" old_src="$POLICY_SOURCE" old_set="$POLICY_SET"
+# Is this text a usable policy? Says why not. Leaves the current policy as it was.
+usable_policy() {
+  local old_text="$POLICY_TEXT" old_src="$POLICY_SOURCE" old_set="$POLICY_SET" rc
   POLICY_TEXT="$2" POLICY_SOURCE="$1" POLICY_SET=1
-  policy_problem && return 0
+  policy_problem; rc=$?
   POLICY_TEXT="$old_text" POLICY_SOURCE="$old_src" POLICY_SET="$old_set"
-  return 1
+  return $rc
 }
 
-# Print a policy from an https URL or a file. A token is sent only to raw.githubusercontent.com, and then without
-# following redirects, so it cannot be handed on to another host.
+# Use this text as the policy, unless it is not valid (then the previous one stays).
+adopt_policy() {
+  usable_policy "$1" "$2" || return 1
+  POLICY_TEXT="$2" POLICY_SOURCE="$1" POLICY_SET=1
+}
+
+# Print a policy from an https URL or a file. Returns 1 when it is not there (a 404, a missing file) and 2 when it
+# cannot be told (no network, a 5xx, rate limiting), so a lookup that failed is never taken for "no policy". A token is
+# sent only to raw.githubusercontent.com, and then without following redirects, so it cannot be handed on to another host.
 read_policy_source() {
-  local src="$1" token="${2:-}" out
+  local src="$1" token="${2:-}" out code rc
   case "$src" in
-    https://raw.githubusercontent.com/*)
-      if [ -n "$token" ]; then
-        out="$(printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -fs -m 15 --max-filesize 65536 -K - "$src")" || return 1
+    https://*)
+      if [ -n "$token" ] && [[ "$src" == https://raw.githubusercontent.com/* ]]; then
+        out="$(printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -s -m 15 --max-filesize 65536 -w '\n%{http_code}' -K - "$src")"; rc=$?
       else
-        out="$(curl -fsL -m 15 --max-filesize 65536 "$src")" || return 1
-      fi ;;
-    https://*) out="$(curl -fsL -m 15 --max-filesize 65536 "$src")" || return 1 ;;
+        out="$(curl -sL -m 15 --max-filesize 65536 -w '\n%{http_code}' "$src")"; rc=$?
+      fi
+      [ "$rc" = 63 ] && { fail "$src is larger than 64 KB, which is too big for a policy"; return 2; }
+      [ "$rc" = 0 ] || return 2
+      code="${out##*$'\n'}"; out="${out%$'\n'*}"
+      case "$code" in
+        200) ;;
+        401|403|404|410) return 1 ;;
+        *) return 2 ;;
+      esac ;;
     *://*) fail "'$src': only https policy locations are supported"; return 1 ;;
-    *) [ -f "$src" ] || return 1; out="$(head -c 65536 "$src")" ;;
+    *) [ -f "$src" ] || return 1; out="$(head -c 65536 "$src")" || return 2 ;;
   esac
   printf '%s\n' "$out"
 }
@@ -159,7 +200,7 @@ ask_policy_location() {
 # token exists (FINAL=0, public lookup only) and again once it does (FINAL=1, which also sees a private .github repo and
 # asks if nothing was found). A person who already chose is not asked again unless the organisation's file changed.
 resolve_policy() {
-  local repo="$1" token="${2:-}" final="${3:-0}" owner url text saved src prev
+  local repo="$1" token="${2:-}" final="${3:-0}" owner url text saved src prev rc
   [ "$POLICY_EXPLICIT" = 1 ] && POLICY_RESOLVED=1
   if [ "$POLICY_RESOLVED" != 1 ]; then
     owner="${repo%%/*}"
@@ -168,18 +209,30 @@ resolve_policy() {
     if [ -n "$saved" ] && [ "$src" != none ]; then
       text="$(read_policy_source "$src" "$token")" \
         || { fail "the policy chosen earlier for $repo ($src) could not be read; to choose again, delete its line in $(choice_file)"; exit 1; }
+      usable_policy "$src" "$text" || exit 1
       if [ "$(sha256_of "$text")" = "$prev" ]; then
         info "using the policy from $src, as chosen before"; take_policy "$repo" "$src" "$text"
       else
         offer_policy "$repo" "$src" "$text" "The policy has changed since you last used it:"
       fi
-    elif text="$(read_policy_source "$url" "$token" 2>/dev/null)"; then
-      if [ -n "$saved" ] && [ "$(sha256_of "$text")" = "$prev" ]; then no_policy "$repo" "$prev"   # declined this very file before
-      else offer_policy "$repo" "$url" "$text" "Found $owner's policy at"; fi
-    elif [ "$final" = 1 ]; then
-      if [ -n "$saved" ]; then no_policy "$repo"; else ask_policy_location "$repo" "$url"; fi
+    else
+      text="$(read_policy_source "$url" "$token")"; rc=$?
+      case "$rc" in
+        0)
+          usable_policy "$url" "$text" || exit 1
+          if [ -n "$saved" ] && [ "$(sha256_of "$text")" = "$prev" ]; then no_policy "$repo" "$prev"   # declined this very file before
+          else offer_policy "$repo" "$url" "$text" "Found $owner's policy at"; fi ;;
+        1)
+          if [ "$final" = 1 ]; then
+            if [ -n "$saved" ]; then no_policy "$repo"; else ask_policy_location "$repo" "$url"; fi
+          fi ;;
+        *)
+          fail "could not look up $owner's policy at $url (no answer from GitHub). Try again, or set ASSISTANT_POLICY to a file or URL to skip the lookup"
+          exit 1 ;;
+      esac
     fi
   fi
+  if [ "$final" = 1 ] && [ "$POLICY_RESOLVED" != 1 ]; then fail "could not decide which policy applies to $repo"; exit 1; fi
   [ "$POLICY_RESOLVED" = 1 ] && check_scope "$repo"
   return 0
 }
@@ -191,6 +244,8 @@ policy_check() {
     POLICY_EXPLICIT=1
     text="$(read_policy_source "$f")" || { fail "ASSISTANT_POLICY: could not read a policy from '$f'"; exit 1; }
     POLICY_TEXT="$text" POLICY_SOURCE="$f" POLICY_SET=1
+  else
+    policy_text >/dev/null || { fail "could not read the policy next to the launcher ($HERE/assistant-policy.yaml)"; exit 1; }
   fi
   policy_problem || exit 1
 }
@@ -331,17 +386,56 @@ check_scope() {
 
 # With token: fine-grained in the policy, refuse a token that is not limited to selected repositories. GitHub sends an
 # X-OAuth-Scopes header for a classic token and for the gh sign-in's, and none for a fine-grained one.
-token_is_broad() {
-  printf 'header = "Authorization: Bearer %s"\n' "$1" \
-    | curl -s -m 10 -D - -o /dev/null -K - https://api.github.com/user | grep -qi '^x-oauth-scopes:'
+
+token_kind() {
+  local hdr
+  hdr="$(printf 'header = "Authorization: Bearer %s"\n' "$1" | curl -s -m 10 -D - -o /dev/null -K - https://api.github.com/user)" \
+    || { echo unknown; return 0; }
+  case "$(printf '%s' "$hdr" | head -n 1)" in *" 200"*) ;; *) echo unknown; return 0 ;; esac
+  if [ "$(printf '%s\n' "$hdr" | grep -ci '^x-oauth-scopes:')" -gt 0 ]; then echo broad; else echo fine; fi
 }
 
-check_token_scope() {
+# What the launcher learned about each stored token, so a policy that later asks for fine-grained tokens can tell,
+# without reading a token OpenShell keeps: "<provider>|<broad, fine or unknown>".
+token_kinds_file() { printf '%s' "${ASSISTANT_TOKEN_KINDS:-${XDG_CONFIG_HOME:-$HOME/.config}/assistant/token-kinds}"; }
+token_kind_get() {
+  [ -f "$(token_kinds_file)" ] || return 0
+  awk -v k="$1|" 'index($0, k) == 1 { print substr($0, length(k) + 1); exit }' "$(token_kinds_file)"
+}
+token_kind_set() {
+  local f; f="$(token_kinds_file)"
+  mkdir -p "$(dirname "$f")" 2>/dev/null || return 0
+  { [ -f "$f" ] && awk -v k="$1|" 'index($0, k) != 1' "$f"; printf '%s|%s\n' "$1" "$2"; } > "$f.tmp" 2>/dev/null && mv "$f.tmp" "$f"
+  return 0
+}
+
+# With token: fine-grained in the policy, refuse a token that is not limited to selected repositories. Only a token
+# known to be fine-grained passes: a broad one, or one that could not be checked, stops the launcher.
+enforce_token_kind() {
   [ "$(policy_scalar token)" = fine-grained ] || return 0
-  if token_is_broad "$1"; then
-    fail "this token can act on every repository you have access to, and the organisation's policy requires a fine-grained token (README step 1)"
-    exit 1
+  case "$1" in
+    fine) ;;
+    broad) fail "this token can act on every repository you have access to, and the organisation's policy requires a fine-grained token (README step 1)"; exit 1 ;;
+    *) fail "could not check what kind of token this is (GitHub did not answer), and the organisation's policy requires a fine-grained one; try again"; exit 1 ;;
+  esac
+}
+
+# The token stored by an earlier run, under a policy that may have changed since. Docker mode can read its token;
+# OpenShell keeps it, so this goes by what the launcher recorded when the token was stored.
+check_stored_token() {
+  [ "$(policy_scalar token)" = fine-grained ] || return 0
+  local kind
+  if [ -n "${1:-}" ]; then
+    kind="$(token_kind "$1")"
+  else
+    kind="$(token_kind_get "${PROVIDER:-$TOKEN_KEY}")"
+    [ -n "$kind" ] || { fail "this token was stored before the launcher recorded what kind it is, and the organisation's policy requires a fine-grained one: replace it with --reset (delete the sandbox first if there is one)"; exit 1; }
   fi
+  case "$kind" in
+    fine) ;;
+    broad) fail "the stored token can act on every repository you have access to, and the organisation's policy requires a fine-grained token: replace it with --reset (delete the sandbox first if there is one)"; exit 1 ;;
+    *) fail "could not check the stored token (GitHub did not answer), and the organisation's policy requires a fine-grained one; try again"; exit 1 ;;
+  esac
 }
 
 # Ask which repo to manage and get a GitHub token, by a gh sign-in or a pasted token; check it against the repo.
@@ -356,7 +450,7 @@ acquire_github_token() {
   valid_repo "$REPO" || { fail "'$REPO' is not an owner/repo name (letters, digits, dots, dashes, underscores)"; exit 1; }
   resolve_policy "$REPO" "" 0
   PAT=""
-  local method="paste" choice="" code
+  local method="paste" choice="" code kind
   if [ "$(policy_scalar token)" = fine-grained ]; then
     info "Your organisation's policy requires a fine-grained token limited to the repositories it needs, so there is no gh sign-in."
   elif command -v gh >/dev/null 2>&1; then
@@ -395,11 +489,17 @@ acquire_github_token() {
   code=$(printf 'header = "Authorization: Bearer %s"\n' "$PAT" \
          | curl -s -o /dev/null -w '%{http_code}' -K - "https://api.github.com/repos/$REPO")
   case "$code" in
-    200) pass "GitHub accepts the token for $REPO"; resolve_policy "$REPO" "$PAT" 1; check_token_scope "$PAT" ;;
+    200) pass "GitHub accepts the token for $REPO" ;;
     401) fail "GitHub rejected the token (401): wrong, expired or revoked"; exit 1 ;;
     403|404) fail "the token cannot read $REPO ($code): scope it to that repo, or get the org to approve it"; exit 1 ;;
     *) info "could not verify the token (HTTP ${code:-none}) — continuing" ;;
   esac
+  # Whatever the check said, the policy is decided and its token rule applied before the token is kept. A policy that
+  # cannot be settled, or a token that cannot be classified under token: fine-grained, stops here.
+  resolve_policy "$REPO" "$PAT" 1
+  kind="$(token_kind "$PAT")"
+  enforce_token_kind "$kind"
+  token_kind_set "${PROVIDER:-$TOKEN_KEY}" "$kind"
   if [ -z "$LOGIN" ]; then
     LOGIN=$(printf 'header = "Authorization: Bearer %s"\n' "$PAT" \
             | curl -s -m 10 -K - https://api.github.com/user | sed -n 's/.*"login": *"\([^"]*\)".*/\1/p' | head -n 1)

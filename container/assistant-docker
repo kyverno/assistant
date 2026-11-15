@@ -162,10 +162,12 @@ step "3. Keys"
 info "secrets file: $SECRETS_FILE"
 [ "$RESET" = 1 ] && secrets_unset "$TOKEN_KEY"
 REPO="${ASSISTANT_REPO:-}"
-[ -n "$REPO" ] && resolve_policy "$REPO" "" 1
+repo_from_instance    # on a later run the repository is in the container's profile, not in your environment
 LOGIN="${!LOGIN_VAR:-}"
 if [ -n "$(secrets_get "$TOKEN_KEY")" ]; then
   pass "GitHub token already in the secrets file (use --reset to replace it)"
+  [ -n "$REPO" ] && resolve_policy "$REPO" "" 1
+  check_stored_token "$(secrets_get "$TOKEN_KEY")"
 else
   token_note_gh() {
     info "     only $REPO. Without OpenShell the assistant holds this token itself, and nothing but the token's"

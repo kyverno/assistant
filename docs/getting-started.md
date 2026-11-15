@@ -207,8 +207,10 @@ Keys, all optional:
 - `token: fine-grained`: refuses a token that can act beyond selected repositories (the `gh` sign-in, a classic token) and
   does not offer the `gh` sign-in.
 
-A policy that cannot be read, or is malformed, stops the launcher: it never falls back to no limits. The check runs on your
-machine, so it stops mistakes, not someone who edits their own copy. What the agent can do once it runs is limited by
+Every start checks the stored repository against the policy. A policy that cannot be fetched or read, or has a mistake (an
+unknown key, a list written as one value, an empty list), stops the launcher: it never falls back to no limits. If an
+organisation starts requiring `token: fine-grained`, a token stored earlier is refused until you replace it with `--reset`.
+The check runs on your machine, so it stops mistakes, not someone who edits their own copy. What the agent can do once it runs is limited by
 OpenShell's policies, not by this file: see the [README](../README.md#protected-by-openshell).
 
 ## Choosing a model
