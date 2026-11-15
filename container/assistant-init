@@ -683,7 +683,7 @@ def publish(target: str, files: dict[str, str], branch: str, title: str, body: s
             if os.path.exists(dest):
                 raise GhError(f"{target} already has {path}; not overwriting it")
             os.makedirs(os.path.dirname(dest), exist_ok=True)
-            with open(dest, "w") as f:
+            with open(dest, "x") as f:
                 f.write(content)
             git("add", path)
         git("commit", "--quiet", "-s", "-m", title)
@@ -734,6 +734,8 @@ def not_inferred(p: Proposal, location: str) -> list[str]:
     items.append("Merge gates (a check that blocks everyone, like a shared end-to-end suite): `maintainer.branch_gates` needs "
                  "its check name, the label of the issue that reports it broken, and a bypass label. See docs/organisation-pack.md.")
     items.append("Critical code: only you know which code costs the most when it is wrong; `critical` lists what you chose.")
+    items.append("The contributor assistant needs more than this: `ladder`, plus `readiness` and `labels` keys it reads (see "
+                 "docs/organisation-pack.md, \"Keys only the contributor assistant reads\"). The maintainer assistant works from this pack as it is.")
     items.append("The release process, flaky failures and review norms: write them in `assistant-org-facts.md` next to the pack, "
                  "or in CONTRIBUTING.md / RELEASING.md if they belong there too.")
     return items
@@ -856,6 +858,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         if args.dry_run:
             print(dim("\n--dry-run: nothing was written."))
             return 0
+        if not args.yes and not interactive():
+            print(dim("\nNo terminal and no --yes: nothing was written. Re-run with --yes to open the pull request, or --dry-run to only print."))
+            return 0
         action = choose("What now?", [Option("Open a pull request (a new repository for a shared pack)", value="pr"),
                                       Option("Save the files here and stop", value="file"),
                                       Option("Cancel", value="no")]) if not plain else Option("", value="pr")
@@ -866,7 +871,10 @@ def main(argv: Optional[list[str]] = None) -> int:
             for _, files, name in packs:
                 for path, content in files.items():
                     dest = os.path.basename(path) if len(packs) == 1 else f"{name.replace('/', '-')}-{os.path.basename(path)}"
-                    with open(dest, "w") as f:
+                    if os.path.exists(dest):
+                        print(red(f"{dest} already exists; not overwriting it"), file=sys.stderr)
+                        return 1
+                    with open(dest, "x") as f:
                         f.write(content)
                     print(green(f"Wrote {dest}"))
             return 0

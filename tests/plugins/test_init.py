@@ -11,6 +11,7 @@ import subprocess
 import sys
 import time
 import unittest
+from pathlib import Path
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
 from _load import ROOT, repo_intel
@@ -120,6 +121,56 @@ class Flow(unittest.TestCase):
         finally:
             init.load, init.api, init.publish = saved
         self.assertEqual(calls, [])
+
+    def _run(self, argv):
+        calls = []
+        saved = (init.load, init.api, init.publish, init.interactive)
+        init.load = lambda repo: init.propose(repo, ["src/x.ts"], "", "", [])
+        init.api = lambda path, raw=False: None
+        init.publish = lambda *a, **k: calls.append(a) or "https://example/pr/1"
+        init.interactive = lambda: False
+        try:
+            code = init.main(argv)
+        finally:
+            init.load, init.api, init.publish, init.interactive = saved
+        return code, calls
+
+    def test_without_a_terminal_and_without_yes_nothing_is_published(self):
+        self.assertEqual(self._run(["o/r"]), (0, []))
+
+    def test_yes_opens_the_pull_request(self):
+        code, calls = self._run(["o/r", "--yes"])
+        self.assertEqual((code, len(calls)), (0, 1))
+
+    def test_saving_here_never_overwrites_a_file(self):
+        import contextlib, io, os, tempfile
+        saved = init.choose
+        init.choose = lambda *a, **k: init.Option("", value="file")
+        old = os.getcwd()
+        with tempfile.TemporaryDirectory() as d:
+            os.chdir(d)
+            try:
+                Path(init.PACK).write_text("mine")
+                with contextlib.redirect_stderr(io.StringIO()):
+                    code, _ = self._run_interactive(["o/r", "--location", "repo"])
+                self.assertEqual((code, Path(init.PACK).read_text()), (1, "mine"))
+            finally:
+                os.chdir(old)
+                init.choose = saved
+
+    def _run_interactive(self, argv):
+        saved = (init.load, init.api, init.interactive, init.confirm)
+        init.load = lambda repo: init.propose(repo, ["src/x.ts"], "", "", [])
+        init.api = lambda path, raw=False: None
+        init.interactive = lambda: True
+        init.confirm = lambda *a, **k: False
+        saved_review = init.review
+        init.review = lambda p: init.inferred(p)
+        try:
+            return init.main(argv), None
+        finally:
+            init.load, init.api, init.interactive, init.confirm = saved
+            init.review = saved_review
 
 
 class Rendering(unittest.TestCase):

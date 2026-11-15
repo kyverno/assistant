@@ -16,7 +16,8 @@ REPO_PACK_SCHEMA = {
         "critical, test-only), generated-file inputs, dependency bots, milestone format and urgency labels, "
         "readiness labels, review bots, docs globs, and its own prose facts (facts). Call it once per session "
         "before using any of those; never assume conventions from another repository. The pack is the "
-        "organisation's own, published as assistant-org.yaml in its .github repository. `pack: none` means the "
+        "organisation's own: the repository's own .github/assistant-org.yaml if it has one (used whole, not merged), else "
+        "assistant-org.yaml in the owner's .github repository. `pack: none` means the "
         "organisation has published none: say so once, and that it can add one (docs/organisation-pack.md), then work from the live repository only (labels, CODEOWNERS, "
         "docs) and say which signals are therefore missing (no file classes, no gate)."
     ),

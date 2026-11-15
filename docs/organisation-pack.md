@@ -67,7 +67,7 @@ overrides it. With a shared pack it offers to create `<owner>/.github` if it doe
 | Situation | Result |
 |---|---|
 | No pack (nothing published in the repository or at `<owner>/.github`, or a private one the token cannot see: GitHub answers "not found" for both, and `repo_pack` says so) | The tools still run. Every file reads `STANDARD`, no PR is gate-blocked, no label means "ready". `repo_pack` says `pack: none`, and the assistant tells you which signals it is therefore missing. |
-| The published pack cannot be read (a private `.github` the token cannot see, a network error with no earlier copy) | An error that names the file and the HTTP status, not "no pack". |
+| The published pack cannot be read (GitHub answers 403, the file is oversized, or a network or server error with no earlier copy) | An error that names the file and the HTTP status, not "no pack". A private `.github` the token cannot see is not this case: GitHub answers 404, which reads as "no pack" (first row). |
 | A key it does not know (a typo), a wrong type, a malformed `repositories:` list, or a file that is not a mapping | An error that names the key, from `repo_pack` and the tools that need it. It never ignores it silently and never crashes. |
 | A bad gate (no bypass label, a marker regex without a `(?P<branch>...)` group) | An error that names the gate and the problem. |
 | A rule that matches nothing | Nothing happens. Check with `repo_pack`, which returns exactly what was loaded. |
