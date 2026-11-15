@@ -25,7 +25,13 @@ container/assistant init acme/api acme/web        # asks: one shared pack, or on
 container/assistant init acme/api --yes --dry-run # take the inferred answers and only print the file
 ```
 
-It runs on your machine with your `gh` login and Python 3, and needs no image. It reads the repository's file tree,
+It runs on your machine with your `gh` login and Python 3, and needs no clone, no Docker and no image:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kyverno/assistant/main/container/assistant-init | python3 - acme/api
+```
+
+(Pin a release tag instead of `main` if you want to read the exact script first; with a checkout, `container/assistant init acme/api` does the same.) It reads the repository's file tree,
 `.gitattributes` (`linguist-generated`), `CODEOWNERS` and labels, and offers only globs that match something. Generated files,
 API folders, test files and the ready and waiting-on-author labels are suggested and pre-ticked; critical code is **never
 guessed** (owning a folder is not how risky it is), so it asks. Keys: up and down (or `j`, `k`) move, space ticks, `a` all, `n` none,

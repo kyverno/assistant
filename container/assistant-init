@@ -5,7 +5,8 @@
 
 It reads each repository with your own `gh` login (its file tree, .gitattributes, CODEOWNERS and labels), proposes the
 pack, lets you change it (arrow keys, space, enter), shows the file, and opens a pull request that adds it. Nothing is
-written to a repository until you say so. Python 3 standard library only; the only other tool it needs is `gh`.
+written to a repository until you say so. Python 3 standard library only; the only other tool it needs is `gh`. It needs no
+clone and no Docker: `curl -fsSL https://raw.githubusercontent.com/kyverno/assistant/main/container/assistant-init | python3 - owner/repo`.
 """
 
 from __future__ import annotations
@@ -39,6 +40,15 @@ def cyan(t): return style(t, "36")
 def green(t): return style(t, "32")
 def yellow(t): return style(t, "33")
 def red(t): return style(t, "31")
+
+
+def use_terminal() -> None:
+    """Run as `curl ... | python3 - owner/repo`, stdin is the script, not the keyboard: read keys from the terminal instead."""
+    if not sys.stdin.isatty() and sys.stdout.isatty():
+        try:
+            sys.stdin = open("/dev/tty")
+        except OSError:
+            pass
 
 
 def interactive() -> bool:
@@ -504,6 +514,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--yes", action="store_true", help="accept what was inferred, without asking")
     ap.add_argument("--dry-run", action="store_true", help="print the pack and stop; write nothing anywhere")
     args = ap.parse_args(argv)
+    use_terminal()
     plain = args.yes or not interactive()
 
     try:
