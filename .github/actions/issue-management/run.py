@@ -39,6 +39,7 @@ import re
 import shlex
 import subprocess
 import sys
+import urllib.parse
 import time
 
 DEFAULTS = {
@@ -575,7 +576,7 @@ def ensure_label(gh, repo, name, known):
     if name in known or gh.dry_run:
         return
     try:
-        gh.read("api", f"repos/{repo}/labels/{name}")
+        gh.read("api", f"repos/{repo}/labels/{urllib.parse.quote(name, safe='')}")
     except GhError:
         color, description = LABEL_INFO.get(name, ("EDEDED", ""))
         gh.write("label", "create", name, "-R", repo, "--color", color, "--description", description)
