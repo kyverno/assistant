@@ -60,12 +60,19 @@ def _home() -> Path:
 # organisation); the profile copy is for host installs, where nothing is baked.
 IMAGE_PACK = Path("/opt/kyverno/profiles/maintainer/org/org.yaml")
 
-# An organisation publishes its own pack as these two files at the root of its `.github` repository, so the published
-# image works for every organisation without a clone or a build.
+# An organisation publishes its own pack as these two files: in the repository itself, under `.github/`, or once for all
+# its repositories at the root of `<owner>/.github`. The published image then works for every organisation without a
+# clone or a build.
 REMOTE_PACK = "assistant-org.yaml"
 REMOTE_FACTS = "assistant-org-facts.md"
 _REMOTE_TTL = 600           # seconds a fetched pack is reused before GitHub is asked again
 _REMOTE_MAX = 256 * 1024    # a pack is a few KB; refuse anything absurd
+
+
+def name_of(repo: Optional[str] = None) -> Optional[str]:
+    repo = repo or os.environ.get("ASSISTANT_REPO") or ""
+    name = repo.split("/", 1)[1] if "/" in repo else ""
+    return name or None
 
 
 def owner_of(repo: Optional[str] = None) -> Optional[str]:
@@ -133,34 +140,47 @@ def _get(url: str) -> Optional[bytes]:
     return body
 
 
-def remote_path(owner: Optional[str]) -> Optional[Path]:
-    """The organisation's own pack from `<owner>/.github`, written under Hermes' home, or None when it publishes none.
-    A fetch that fails falls back to the last good copy; with none, it is an error."""
-    if not owner or not re.fullmatch(r"[a-z0-9][a-z0-9-]*", owner):
-        return None
-    dest = _home() / "org-cache" / owner
-    target = dest / "org.yaml"
-    if time.time() - _remote_seen.get(owner, 0) < _REMOTE_TTL:
+def _fetch_location(key: Path, base: str, pack_file: str, facts_file: str) -> Optional[Path]:
+    """One published location, written under Hermes' home: the cached org.yaml, or None when nothing is published there.
+    A fetch that fails for a transient reason falls back to the last good copy; with none, or for anything else, it is an
+    error."""
+    target = key / "org.yaml"
+    if time.time() - _remote_seen.get(str(key), 0) < _REMOTE_TTL:
         return target if target.is_file() else None
-    base = f"https://api.github.com/repos/{owner}/.github/contents/"
     try:
-        body = _get(base + REMOTE_PACK)
-        facts = _get(base + REMOTE_FACTS) if body is not None else None
+        body = _get(base + pack_file)
+        facts = _get(base + facts_file) if body is not None else None
     except PackUnavailable:
         if target.is_file():
             return target
         raise
-    _remote_seen[owner] = time.time()
+    _remote_seen[str(key)] = time.time()
     if body is None:
-        shutil.rmtree(dest, ignore_errors=True)
+        shutil.rmtree(key, ignore_errors=True)
         return None
-    dest.mkdir(parents=True, exist_ok=True)
-    (dest / "org.yaml").write_bytes(body)
+    key.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(body)
     if facts is not None:
-        (dest / "facts.md").write_bytes(facts)
+        (key / "facts.md").write_bytes(facts)
     else:
-        (dest / "facts.md").unlink(missing_ok=True)
+        (key / "facts.md").unlink(missing_ok=True)
     return target
+
+
+def remote_path(owner: Optional[str], name: Optional[str] = None) -> Optional[Path]:
+    """The pack the organisation published for this repository, or None when it publishes none. The repository's own
+    `.github/assistant-org.yaml` wins outright (it replaces the shared one, nothing is merged); else the owner's
+    `.github` repository (`<owner>/.github`, at its root). Both are read from the default branch, so a pull request cannot
+    change its own rules."""
+    if not owner or not re.fullmatch(r"[a-z0-9][a-z0-9-]*", owner):
+        return None
+    api = f"https://api.github.com/repos/{owner}"
+    cache = _home() / "org-cache" / owner
+    if name and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name):
+        own = _fetch_location(cache / name, f"{api}/{name}/contents/", f".github/{REMOTE_PACK}", f".github/{REMOTE_FACTS}")
+        if own is not None:
+            return own
+    return _fetch_location(cache / ".org", f"{api}/.github/contents/", REMOTE_PACK, REMOTE_FACTS)
 
 
 # -- globs ---------------------------------------------------------------------------------
@@ -388,8 +408,8 @@ def _read(p: Path) -> Rules:
 
 
 def load(path: Optional[str] = None, repo: Optional[str] = None) -> Rules:
-    """The rules for `repo` (default: ASSISTANT_REPO): the pack baked into the image if it covers that owner, else the
-    owner's own `.github/assistant-org.yaml`, else the home copy; empty rules when there is none. A pack that exists but
+    """The rules for `repo` (default: ASSISTANT_REPO): the pack baked into the image if it covers that owner, else the one
+    published in the repository or in `<owner>/.github`, else the home copy; empty rules when there is none. A pack that exists but
     is wrong, or that cannot be read, is an error."""
     if path:
         return _read(Path(path)) if Path(path).is_file() else Rules()
@@ -400,7 +420,7 @@ def load(path: Optional[str] = None, repo: Optional[str] = None) -> Rules:
     for p in ordered:
         if p.is_file():
             return _read(p)
-    remote = remote_path(owner)
+    remote = remote_path(owner, name_of(repo))
     if remote is not None:
         return _read(remote)
     for p in paths:

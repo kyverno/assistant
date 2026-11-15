@@ -16,7 +16,8 @@ REPO_PACK_SCHEMA = {
         "critical, test-only), generated-file inputs, dependency bots, milestone format and urgency labels, "
         "readiness labels, review bots, docs globs, and its own prose facts (facts). Call it once per session "
         "before using any of those; never assume conventions from another repository. The pack is the "
-        "organisation's own, published as assistant-org.yaml in its .github repository. `pack: none` means the "
+        "organisation's own: the repository's own .github/assistant-org.yaml if it has one (used whole, not merged), else "
+        "assistant-org.yaml in the owner's .github repository. `pack: none` means the "
         "organisation has published none: say so once, and that it can add one (docs/organisation-pack.md), then work from the live repository only (labels, CODEOWNERS, "
         "docs) and say which signals are therefore missing (no file classes, no gate)."
     ),
@@ -33,7 +34,10 @@ def handle_repo_pack(args: Dict[str, Any], **_kw) -> str:
         return json.dumps({"success": False, "error": f"organisation pack: {exc}"})
     out = {"success": True, **rules.summary(), "facts": rules.facts}
     if not rules.source:
-        owner = pack.owner_of(_repo(args)) or "<owner>"
-        out["looked_in"] = (f"{owner}/.github/{pack.REMOTE_PACK}: not found. GitHub also answers 'not found' when the token "
-                            "cannot see a private .github repository, so if the organisation has one, check the token's access")
+        repo = _repo(args) or ""
+        owner = pack.owner_of(repo) or "<owner>"
+        name = pack.name_of(repo) or "<repo>"
+        out["looked_in"] = (f"{owner}/{name}/.github/{pack.REMOTE_PACK} and {owner}/.github/{pack.REMOTE_PACK}: not found. "
+                            "GitHub also answers 'not found' when the token cannot see a private repository, so if one is "
+                            "private, check the token's access")
     return json.dumps(out)

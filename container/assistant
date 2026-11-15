@@ -3,6 +3,7 @@
 #
 #   container/assistant [--profile maintainer|contributor] [--image IMAGE | --build] [--name NAME] [--provider P ...]
 #                     [--upgrade] [--reset]
+#   container/assistant init [owner/repo ...]     write your organisation pack by answering questions (see docs/organisation-pack.md)
 #   container/assistant --no-openshell [...]     plain Docker instead of OpenShell (less protection; --no-openshell --help)
 #
 # What it does, each time: checks Docker, installs OpenShell if it is missing, registers your GitHub
@@ -37,6 +38,12 @@ KIND=""
 SANDBOX=""
 DASH_PORT="${ASSISTANT_DASHBOARD_PORT:-9219}"   # not 9119, which a Hermes dashboard on your laptop would use
 # --no-openshell: run the image in plain Docker instead. A separate script, so everything below stays as it is.
+# `assistant init`: write your organisation pack by answering questions (runs on your machine, with your gh login).
+if [ "${1:-}" = init ]; then
+  shift
+  command -v python3 >/dev/null 2>&1 || { echo "assistant init needs python3" >&2; exit 1; }
+  exec python3 "$HERE/assistant-init" "$@"
+fi
 for a in "$@"; do
   [ "$a" = "--no-openshell" ] && exec "$HERE/assistant-docker" "$@"
 done
@@ -64,7 +71,7 @@ while [ $# -gt 0 ]; do
     --reset) RESET=1; shift ;;
     --push-to-fork) PUSH=1; shift ;;
     --no-push) NO_PUSH=1; shift ;;
-    -h|--help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
