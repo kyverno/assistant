@@ -165,7 +165,8 @@ class Setup(unittest.TestCase):
     """`assistant setup`: say what is missing, and run nothing without a yes."""
     def _with(self, files, prs=None, tty=False):
         calls = []
-        saved = (init.api, init.open_pr, init.interactive, init.main, init.subprocess.run)
+        saved = (init.api, init.open_pr, init.interactive, init.main, init.subprocess.run, init.gh)
+        init.gh = lambda *a, **k: "true"
         init.api = lambda path, raw=False: files.get(path, {"name": "r"} if path == "repos/o/r" else None)
         init.open_pr = lambda repo, branch: (prs or {}).get(branch, "")
         init.interactive = lambda: tty
@@ -174,7 +175,7 @@ class Setup(unittest.TestCase):
         return calls, saved
 
     def _restore(self, saved):
-        init.api, init.open_pr, init.interactive, init.main, init.subprocess.run = saved
+        init.api, init.open_pr, init.interactive, init.main, init.subprocess.run, init.gh = saved
 
     def test_it_reports_what_is_missing_and_runs_nothing_without_a_terminal(self):
         calls, saved = self._with({})
@@ -211,12 +212,48 @@ class Setup(unittest.TestCase):
         self.assertEqual(pick("ci/adopt-shared-actions"), "two")
         self.assertEqual(pick("add-assistant-org-pack"), "")
 
+    def test_an_adopted_repository_that_is_not_switched_on_is_said_so_without_a_terminal(self):
+        import contextlib, io
+        calls, saved = self._with({f"repos/o/r/contents/.github/{init.PACK}": {"name": "x"},
+                                   "repos/o/r/contents/.github/workflows": [{"name": "pr-management.yaml"}]})
+        init.api = lambda path, raw=False, _a=init.api: ({"name": "PR_AUTOMATION_LIVE", "value": "false"} if "variables" in path else _a(path, raw))
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(init.setup("o/r"), 0)
+        finally:
+            self._restore(saved)
+        self.assertIn("not created yet", out.getvalue())
+        self.assertIn("only previews", out.getvalue())
+        self.assertEqual(calls, [])
+
+    def test_waiting_ends_when_every_pull_request_is_merged_or_closed(self):
+        seen = iter(["OPEN", "OPEN", "MERGED", "CLOSED"])
+        saved = (init.pr_state, init.time.sleep)
+        init.pr_state = lambda url: next(seen)
+        init.time.sleep = lambda s: None
+        try:
+            states = init.wait_for_merge(["a", "b"])
+        finally:
+            init.pr_state, init.time.sleep = saved
+        self.assertEqual(states, {"a": "MERGED", "b": "CLOSED"})
+
+    def test_the_next_steps_say_how_to_edit_it_and_where_the_reference_is(self):
+        import contextlib, io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            init.next_steps("o/r", "https://github.com/o/r/pull/7")
+        for text in ("gh pr checkout 7 --repo o/r", "Edit file", "organisation-pack.md", "ten minutes"):
+            self.assertIn(text, out.getvalue())
+
     def test_a_name_that_is_not_owner_slash_repo_is_refused(self):
         self.assertEqual(init.main(["--setup", "not-a-repo"]), 2)
 
     def test_a_repository_with_both_is_left_alone(self):
         calls, saved = self._with({f"repos/o/r/contents/.github/{init.PACK}": {"name": "x"},
-                                   "repos/o/r/contents/.github/workflows": [{"name": "pr-management.yaml"}]}, tty=True)
+                                   "repos/o/r/contents/.github/workflows": [{"name": "pr-management.yaml"}],
+                                   "repos/o/r/labels/ready-for-review": {"name": "ready-for-review"},
+                                   "repos/o/r/actions/variables/PR_AUTOMATION_LIVE": {"value": "true"}}, tty=True)
         try:
             self.assertEqual(init.setup("o/r"), 0)
         finally:

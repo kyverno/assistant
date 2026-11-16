@@ -21,6 +21,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass, field
 from typing import Iterator, Optional
 
@@ -661,9 +662,52 @@ def review(p: Proposal) -> dict:
 
 # -- writing it to GitHub ------------------------------------------------------------------------------------------
 
+def say(message: str) -> None:
+    print(dim(f"  … {message}"), flush=True)
+
+
+OPENED: list[tuple[str, str]] = []          # (repository, pull request URL) opened in this run
+WAIT_SECONDS = 15
+
+
+def next_steps(target: str, url: str) -> None:
+    """After the pack pull request is open: how to make it useful, where the reference is, and what comes after the merge."""
+    number = url.rstrip("/").rsplit("/", 1)[-1]
+    print("\n" + bold("Next: make it useful, then merge it") + f"\n  {url}")
+    print("  It is a draft. Before you merge, edit it (the description lists what to check):")
+    print(f"    • in the browser: open the link, then Files changed, the ... menu on a file, Edit file")
+    print(f"    • or here:        gh pr checkout {number} --repo {target}   (edit, commit, git push)")
+    print(f"  What else the pack can hold: {DOCS_URL}")
+    print("  After you merge it the assistant reads it from the default branch (remembered for ten minutes).")
+
+
+def pr_state(url: str) -> str:
+    return gh("pr", "view", url, "--json", "state", "--jq", ".state", check=False).strip()
+
+
+def wait_for_merge(urls: list[str]) -> dict[str, str]:
+    """Poll until each pull request is merged or closed. Ctrl-C stops waiting and leaves the rest as they are."""
+    states = {u: "OPEN" for u in urls}
+    try:
+        while True:
+            for u in [u for u, st in states.items() if st == "OPEN"]:
+                states[u] = pr_state(u) or "OPEN"
+            pending = [u for u, st in states.items() if st == "OPEN"]
+            if not pending:
+                break
+            sys.stdout.write("\r\x1b[K" + dim("Waiting for " + ", ".join(pending) + " to be merged (Ctrl-C to stop)..."))
+            sys.stdout.flush()
+            time.sleep(WAIT_SECONDS)
+    except KeyboardInterrupt:
+        pass
+    sys.stdout.write("\r\x1b[K")
+    return states
+
+
 def publish(target: str, files: dict[str, str], branch: str, title: str, body: str) -> str:
     """Add `files` (path -> content) to `target` (owner/repo) on a branch and open a pull request; from your fork when you
     cannot push. Never overwrites a file that exists."""
+    say(f"checking {target}")
     existing = open_pr(target, branch)
     if existing:
         raise GhError(f"{target} already has an open pull request for this: {existing}")
@@ -673,8 +717,10 @@ def publish(target: str, files: dict[str, str], branch: str, title: str, body: s
     try:
         source = target
         if not meta.get("permissions", {}).get("push"):
+            say("you cannot push to it, so forking it")
             gh("repo", "fork", target, "--clone=false", check=False)
             source = f"{me}/{target.split('/')[1]}"
+        say(f"cloning {source}")
         gh("repo", "clone", source, work, "--", "--quiet", "--depth", "1")
         git = lambda *a: subprocess.run(["git", "-C", work, *a], check=True, capture_output=True, text=True)   # noqa: E731
         # A merged or closed pull request leaves its branch behind, and pushing to it is refused: use the next free name.
@@ -697,8 +743,10 @@ def publish(target: str, files: dict[str, str], branch: str, title: str, body: s
                 f.write(content)
             git("add", path)
         git("commit", "--quiet", "-s", "-m", title)
+        say(f"pushing {branch}")
         git("push", "--quiet", "--set-upstream", "origin", branch)
         head = branch if source == target else f"{me}:{branch}"
+        say("opening the pull request")
         return gh("pr", "create", "--repo", target, "--head", head, "--title", title, "--body", body).strip()
     finally:
         shutil.rmtree(work, ignore_errors=True)
@@ -849,6 +897,45 @@ def adopt_script() -> str:
     return ""
 
 
+def finish_ci(repo: str) -> None:
+    """The PR automation is adopted: are its labels created, and is it switched on? Offer what is left (only on a terminal)."""
+    labels = api(f"repos/{repo}/labels/ready-for-review") is not None
+    try:            # reading a repository variable needs admin: without it GitHub refuses, which is not the same as "not set"
+        var = api(f"repos/{repo}/actions/variables/PR_AUTOMATION_LIVE")
+        live: Optional[bool] = isinstance(var, dict) and var.get("value") == "true"
+    except GhError:
+        live = None
+    print(f"  {green('✓') if labels else yellow('•')} Labels: {'created' if labels else 'not created yet (the Sync labels workflow creates them)'}")
+    if live is None:
+        print(f"  {dim('•')} Switched on: could not check (reading the variable needs admin on {repo})")
+    else:
+        print(f"  {green('✓') if live else yellow('•')} Switched on: {'yes' if live else 'no, it only previews: nothing is labelled, commented on or closed'}")
+    if (labels and live is not False) or not interactive():
+        return
+    options = []
+    if not labels:
+        options.append(Option("Run the Sync labels workflow", "creates the labels the automation uses", "labels", True))
+    if live is False:
+        options.append(Option("Switch the automation on", "sets PR_AUTOMATION_LIVE=true; the first run can mark old quiet PRs stale", "live", False))
+    picked = [o.value for o in menu("Finish the PR automation? (space ticks, enter confirms; none ticked skips)", options, multi=True)]
+    try:
+        if "labels" in picked:
+            gh("workflow", "run", "sync-labels.yaml", "--repo", repo)
+            print(green("Started Sync labels") + ": the labels appear in about a minute.")
+        if "live" in picked:
+            gh("variable", "set", "PR_AUTOMATION_LIVE", "--body", "true", "--repo", repo)
+            print(green("Switched on") + ": readiness and path labels act on the next PR event, stale in its daily run.")
+    except GhError as exc:
+        print(red(str(exc)), file=sys.stderr)
+    for key, command in (("labels", f"gh workflow run sync-labels.yaml --repo {repo}"),
+                         ("live", f"gh variable set PR_AUTOMATION_LIVE --body true --repo {repo}")):
+        if key in [o.value for o in options] and key not in picked:
+            print(dim(f"  Later: {command}"))
+
+
+PR_URL = re.compile(r"https://github\.com/\S+/pull/\d+")
+
+
 def setup(repo: str) -> int:
     """Say what `repo` lacks (an organisation pack, the PR automation) and, if asked, do it. Nothing runs without a yes."""
     if api(f"repos/{repo}") is None:
@@ -860,6 +947,8 @@ def setup(repo: str) -> int:
         state = st[key]
         print(f"  {green('✓') if state == 'found' else yellow('•')} {label[key]}: "
               + ("found" if state == "found" else f"pull request open: {state}" if state else "not set up"))
+    if st["ci"] == "found":
+        finish_ci(repo)
     missing = [k for k in ("pack", "ci") if not st[k]]
     if not missing:
         return 0
@@ -873,8 +962,12 @@ def setup(repo: str) -> int:
         options.append(Option("Adopt the PR automation", "opens a pull request; it only previews until you switch it on", "ci", True))
     picked = [o.value for o in menu(f"Set up {repo} now? (space ticks, enter confirms; none ticked skips)", options, multi=True)]
     code = 0
+    opened: dict[str, str] = {}            # kind -> pull request URL
     if "pack" in picked:
+        before = len(OPENED)
         code = main([repo]) or code
+        if len(OPENED) > before:
+            opened["pack"] = OPENED[-1][1]
     if "ci" in picked:
         script = adopt_script()
         if not script:
@@ -884,7 +977,37 @@ def setup(repo: str) -> int:
         if not team:
             print("No team given; skipped the PR automation.")
             return code
-        code = subprocess.run(["bash", script, "--reviewers", team, repo]).returncode or code
+        print(dim("  … adopting the PR automation"), flush=True)
+        proc = subprocess.Popen(["bash", script, "--reviewers", team, repo], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        for line in proc.stdout:
+            print(line, end="", flush=True)
+            found = PR_URL.search(line)
+            if found:
+                opened["ci"] = found.group(0)
+        code = proc.wait() or code
+        if "ci" in opened:
+            print("\n" + bold("Next: make it useful, then merge it") + f"\n  {opened['ci']}")
+            print("  Check its description: the reviewers team, .github/labels.yml and .github/pr-readiness-checks.yml are yours to edit.")
+            print("  Edit in the browser (Files changed, the ... menu, Edit file), or: gh pr checkout "
+                  f"{opened['ci'].rsplit('/', 1)[-1]} --repo {repo}")
+            print("  Reference: https://github.com/kyverno/assistant/blob/main/docs/adopting-actions.md")
+    if opened:
+        go = choose("Merge them when you are ready. Continue here afterwards?", [
+            Option("Wait here until they are merged", "checks every few seconds; Ctrl-C stops", "wait"),
+            Option("Stop here", f"run `assistant setup {repo}` again after merging: it says what is left", "stop")])
+        if go.value == "wait":
+            states = wait_for_merge(list(opened.values()))
+            for kind, url in opened.items():
+                state = states.get(url, "OPEN")
+                what = {"pack": "The organisation pack", "ci": "The PR automation"}[kind]
+                if state == "MERGED":
+                    print(green(f"✓ {what} is merged."))
+                elif state == "CLOSED":
+                    print(yellow(f"• {url} was closed without merging."))
+                else:
+                    print(dim(f"• {url} is still open. Run `assistant setup {repo}` again after merging."))
+            if states.get(opened.get("ci", ""), "") == "MERGED":
+                finish_ci(repo)
     return code
 
 
@@ -1036,7 +1159,9 @@ def main(argv: Optional[list[str]] = None) -> int:
                 url = publish(target, files, "add-assistant-org-pack", "Add the assistant organisation pack",
                               pack_pr_body(files, not_inferred(todo[0], location)))
             print(green("Opened ") + url)
-        print(dim("Merge it, and the published assistant reads it from the default branch. Check with: ask for repo_pack."))
+            OPENED.append((target, url))
+            next_steps(target, url)
+        print(dim("\nTo see what the assistant loaded once it is merged, ask it for repo_pack."))
         return 0
     except GhError as exc:
         print(red(str(exc)), file=sys.stderr)
