@@ -141,8 +141,12 @@ detail_query='
         }
         # Only the newest 100 of each (the API page maximum), without pagination: a check about "the latest comment"
         # never needs older ones, but a PR with over 100 newer events could hide an unanswered maintainer comment.
+        # For `unanswered` and the plain-comment nudge that only means a missed check or nudge, which is the quiet side.
+        # A wrong nudge would need a maintainer review in view while the later reply of the author, in the comments
+        # connection, was pushed out by more than 100 newer comments. Paginating would add API cost to every PR in the
+        # sweep for that rare case.
         comments(last: 100) { nodes { id url bodyText author { login __typename } authorAssociation createdAt } }
-        reviews(last: 100) { nodes { id url author { login __typename } authorAssociation state submittedAt bodyText commit { oid } } }
+        reviews(last: 100) { nodes { id url author { login __typename } authorAssociation state submittedAt bodyText commit { oid } inlineComments: comments(first: 1) { totalCount } } }
       }
     }
   }'
@@ -202,6 +206,10 @@ paginate_connection() {
 # lists every run. Only the newest run of each check says whether it passes now, so an earlier red run must not keep
 # blocking a PR whose later run is green. A run that has not finished counts as the newest, so a queued re-run is
 # never hidden behind an older result. Entries with no name are kept as they are: the pending check treats them as unknown.
+# Pending wins over a newer completed run on purpose, as it does everywhere else in readiness: a PR is not ready while
+# any run of a check is still going. That holds the PR only until the older run finishes (a hung one ends at its job
+# timeout), after which the newest run decides. Ordering by start time instead would mark a PR ready under a run that
+# is still in progress.
 latest_check_per_name() {
   jq -c '
     def key: .name // .context;
@@ -248,8 +256,10 @@ fetch_pr_details() {
 # Written straight to a file, never through a bash variable — PR content can contain arbitrary text.
 # Called in an `if` context (errexit suppressed), so every fallible command returns explicitly; a failed
 # PR is skipped (never evaluated or mutated) and the run still fails after the remaining PRs are handled.
-# A maintainer's plain comment (a PR comment, or a review that only comments) the author has not answered. Only "Request
-# changes" blocks readiness, so such a comment may be a requested change the reviewer never marked as one. Prints the
+# A maintainer's plain comment the author has not answered: a PR comment, or the summary of a review that only comments.
+# Inline comments are never nudged, and neither is the summary of a review that has inline comments: those are review
+# threads, which the `threads` check already tracks. Only "Request changes" blocks readiness, so a plain comment may be
+# a requested change the reviewer never marked as one. Prints the
 # newest such comment as {id, url, who, text}, or null; always null unless the repository opts in with
 # nudge_plain_comments. It only decides whether to ask the reviewer once, so it errs towards staying quiet:
 #  - answered: the author commented, reviewed or replied in a review thread afterwards, or pushed. A review is for one
@@ -280,6 +290,7 @@ plain_comment_to_nudge() {
           | {id, url, text: excerpt, who: .author.login, at: .createdAt, routine: routine, pushed: ($pushed > .createdAt)}),
        (.reviews.nodes[]? | select(human and maintainer and .author.login != $author)
           | select(.state == "COMMENTED" and ((.bodyText // "") != ""))
+          | select((.inlineComments.totalCount // 1) == 0)
           | {id, url, text: excerpt, who: .author.login, at: .submittedAt, routine: routine, pushed: ((.commit.oid // "") != $head)})]
     | map(. as $c | select(
         ($c.at > $answered) and ($c.pushed | not) and ($c.routine | not)

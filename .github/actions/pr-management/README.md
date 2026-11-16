@@ -123,8 +123,8 @@ Kyverno, for example, uses `Kyverno Release ` and stamps qualifying same-reposit
 during readiness sweeps.
 
 `nudge_plain_comments` (optional, default `false`) makes readiness ask a reviewer about a plain comment. When a
-PR that is otherwise `ready-for-review` has a maintainer's comment (a PR comment, or a review that only comments)
-that the author has not answered, the bot posts, naming the reviewer, linking the comment and quoting its first 100
+PR that is otherwise `ready-for-review` has a maintainer's comment (a PR comment, or the summary of a review that only
+comments) that the author has not answered, the bot posts, naming the reviewer, linking the comment and quoting its first 100
 characters (with `@`, `#`, `<` and `>` removed, so the quote pings, links and injects nothing), and asks whether it is a
 requested change. It never changes a label. A requested change belongs in a **Request changes** review, which the
 `unanswered` check tracks; a reviewer who does not want a formal review can add an exempt label such as `hold`, which
@@ -135,6 +135,8 @@ stops the bot changing labels on that PR. It errs towards staying quiet:
 - At most once per head commit, so reviewers talking to each other do not trigger a nudge per message.
 - A comment is answered by the author's later comment, review or reply in a review thread, or by a push. A review is for
   one commit, so a different head means a push; a PR comment has no commit, so the head commit's date stands in.
+- Not for inline comments, nor for the summary of a review that has inline comments: those are review threads, which the
+  `threads` check already tracks.
 - Not for `/commands`, a bare LGTM or thanks, or a reviewer who approved afterwards.
 - Only comments from the last 7 days, so enabling it never digs up old threads. Run the workflow once with `dry_run`
   to see how many nudges the first sweep would post.

@@ -274,6 +274,10 @@ class AutomationTests(unittest.TestCase):
                                            run("build", "FAILURE", 2)], True, False),
             ("queued re-run is not hidden by the old result",
              [run("markers", "FAILURE", 3), {"name": "markers", "status": "QUEUED", "conclusion": None}], False, False),
+            ("an older run still running keeps the PR pending",
+             [run("markers", "SUCCESS", 1), run("markers", None, 3, status="IN_PROGRESS")], False, False),
+            ("once that older run finishes, the newest run decides",
+             [run("markers", "SUCCESS", 1), run("markers", "FAILURE", 3)], False, True),
             ("DCO is deduplicated too", [run("DCO", "FAILURE", 3), run("DCO", "SUCCESS", 1)], False, True),
             ("commit statuses are deduplicated by context",
              [{"context": "legacy", "state": "FAILURE", "createdAt": at(3)},
@@ -302,10 +306,14 @@ class AutomationTests(unittest.TestCase):
             return {"id": id, "url": f"https://github.com/kyverno/example/pull/1#issuecomment-{id}", "bodyText": text,
                     "author": {"login": login, "__typename": kind}, "authorAssociation": assoc, "createdAt": at(days)}
 
-        def review(days, oid=SHA, body="looks off", state="COMMENTED", id="PRR_1"):
+        def review(days, oid=SHA, body="looks off", state="COMMENTED", id="PRR_1", inline=0):
             return {"id": id, "url": f"https://github.com/kyverno/example/pull/1#pullrequestreview-{id}",
                     "author": {"login": "maintainer", "__typename": "User"}, "authorAssociation": "MEMBER",
-                    "state": state, "submittedAt": at(days), "bodyText": body, "commit": {"oid": oid} if oid else None}
+                    "state": state, "submittedAt": at(days), "bodyText": body, "commit": {"oid": oid} if oid else None,
+                    "inlineComments": {"totalCount": inline}}
+
+        unknown_inline = review(2)
+        del unknown_inline["inlineComments"]
 
         reply = comment(1, id="IC_reply", assoc="CONTRIBUTOR", login="contributor")
         inline_reply = connection([{"isResolved": True, "comments": connection([
@@ -326,6 +334,10 @@ class AutomationTests(unittest.TestCase):
             ("bot", [], [comment(2, login="coderabbitai[bot]", kind="Bot")], 9, False, {}),
             ("the author's own comment", [], [comment(2, login="contributor", assoc="OWNER")], 9, False, {}),
             # Gaps found by going through the cases.
+            ("summary of a review that has inline comments", [review(2, inline=3)], [], 9, False, {}),
+            ("summary of a review with one inline comment", [review(2, inline=1)], [], 9, False, {}),
+            ("review whose inline-comment count is unknown", [unknown_inline], [], 9, False, {}),
+            ("a plain comment next to a review with inline comments", [review(2, inline=3)], [comment(2)], 9, True, {}),
             ("review body answered only by inline replies", [review(2)], [], 9, False, {"reviewThreads": inline_reply}),
             ("an inline reply by someone else is not the author's", [review(2)], [], 9, True,
              {"reviewThreads": inline_by_other}),
