@@ -958,7 +958,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         if not args.yes and not interactive():
             print(dim("\nNo terminal and no --yes: nothing was written. Re-run with --yes to open the pull request, or --dry-run to only print."))
             return 0
-        action = choose("What now?", [Option("Open a pull request (a new repository for a shared pack)", value="pr"),
+        where = ", ".join(t for t, _, _ in packs)
+        pr_label = (f"Open a pull request in {where} (the repository is created if it does not exist)" if location == "org"
+                    else f"Open a pull request in {where}")
+        action = choose("What now?", [Option(pr_label, value="pr"),
                                       Option("Save the files here and stop", value="file"),
                                       Option("Cancel", value="no")]) if not plain else Option("", value="pr")
         if action.value == "no":
