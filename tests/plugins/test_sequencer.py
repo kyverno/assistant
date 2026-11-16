@@ -81,7 +81,7 @@ class Annotations(unittest.TestCase):
 
     def test_file_classification_is_the_highest_tier_among_the_files(self):
         r = sequencer.sequence([pr(1, changed_files=["README.md", "core/x.go", "x_test.go"])], "main", rules=RULES)
-        self.assertEqual(tier_of(r, 1)[1]["file_classification"], "ADMISSION_CRITICAL")
+        self.assertEqual(tier_of(r, 1)[1]["file_classification"], "CRITICAL")
 
     def test_gate_blocks_prs_on_a_branch_with_an_open_failure_issue(self):
         prs = [pr(1, base_branch="release-1"), pr(2, base_branch="main"), pr(3, base_branch="release-1", labels=["gate-bypass"])]

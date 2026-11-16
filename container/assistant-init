@@ -389,12 +389,30 @@ def workflow_info(path: str, text: str) -> tuple[str, set[str]]:
             if km:
                 triggers.add(km.group(1))
         break
+    if "push" in triggers:
+        # A push that only matches tags is a release, not a merge: look at the keys indented under `push:`.
+        for i, ln in enumerate(lines):
+            if re.match(r"\s+push:\s*(#.*)?$", ln):
+                base = len(ln) - len(ln.lstrip())
+                keys = set()
+                for nxt in lines[i + 1:]:
+                    if not nxt.strip() or nxt.lstrip().startswith("#"):
+                        continue
+                    if len(nxt) - len(nxt.lstrip()) <= base:
+                        break
+                    km = re.match(r"\s+([a-z-]+):", nxt)
+                    if km:
+                        keys.add(km.group(1))
+                if "tags" in keys and not keys & {"branches", "paths"}:
+                    triggers.discard("push")
+                    triggers.add("tag_push")
+                break
     return name, triggers
 
 
 def ci_facts(workflows: dict[str, str]) -> str:
     """A draft 'CI before and after merge' section from what triggers each workflow. The user checks it."""
-    before, after, scheduled, reusable = [], [], [], []
+    before, after, scheduled, reusable, tagged = [], [], [], [], []
     for path in sorted(workflows):
         name, trig = workflow_info(path, workflows[path])
         label = name if name == os.path.basename(path) else f"{name} ({os.path.basename(path)})"
@@ -404,13 +422,16 @@ def ci_facts(workflows: dict[str, str]) -> str:
             reusable.append(label)
         elif trig & _AFTER:
             after.append(label)
+        elif "tag_push" in trig:
+            tagged.append(label)
         elif "schedule" in trig:
             scheduled.append(label)
-    if not (before or after or scheduled or reusable):
+    if not (before or after or scheduled or reusable or tagged):
         return ""
     out = ["## CI before and after merge", "(Drafted by `assistant init` from the triggers in `.github/workflows`. Check it, and add what "
            "a green PR still cannot show: for example a suite that only runs after merge.)", ""]
     for title, names in (("Runs on a pull request (some of these gate the merge, some only label or comment)", before), ("Runs only after merge (push), never on a PR", after),
+                         ("Runs when a tag is pushed (a release), not on a merge or a PR", tagged),
                          ("Reusable workflows (called by the others)", reusable), ("Scheduled", scheduled)):
         if names:
             out.append(f"{title}: " + ", ".join(names) + ".")

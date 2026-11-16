@@ -117,7 +117,7 @@ for just those 10. State the slice size against the digest's own `total_count`.
      conflict): cite the pair and path as a "review together" note, not a warning
      on par with a real file overlap.
    - **Historical risk**: for any PR (or overlapping pair) classified
-     `ADMISSION_CRITICAL` (the pack's `critical` file class), or named in a `file_overlaps`/`package_overlaps`
+     `CRITICAL` (the pack's `critical` file class), or named in a `file_overlaps`/`package_overlaps`
      entry, `mnemosyne_triple_query` for a `caused_gate_failure` predicate on
      that package. A real past incident (PR#, date) is a specific, citable
      post-merge-risk finding — stronger than the generic "core engine

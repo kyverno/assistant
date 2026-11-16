@@ -333,6 +333,21 @@ class Setup(unittest.TestCase):
             self._restore(saved)
 
 
+class Workflows(unittest.TestCase):
+    RELEASE = "name: Release\non:\n  workflow_dispatch:\n  push:\n    tags:\n      - \"v*\"\njobs: {}\n"
+
+    def test_a_push_that_only_matches_tags_is_a_release_not_a_merge(self):
+        self.assertEqual(init.workflow_info("release.yml", self.RELEASE)[1], {"tag_push", "workflow_dispatch"})
+        facts = init.ci_facts({"release.yml": self.RELEASE})
+        self.assertIn("Runs when a tag is pushed", facts)
+        self.assertNotIn("Runs only after merge", facts)
+
+    def test_a_push_to_a_branch_stays_a_push_even_when_it_also_matches_tags(self):
+        both = "name: B\non:\n  push:\n    branches: [main]\n    tags: [\"v*\"]\n"
+        self.assertEqual(init.workflow_info("b.yml", both)[1], {"push"})
+        self.assertEqual(init.workflow_info("c.yml", "name: C\non: [push, pull_request]\n")[1], {"push", "pull_request"})
+
+
 class Description(unittest.TestCase):
     def test_the_pull_request_tells_the_author_what_to_check_and_what_to_add(self):
         p = init.propose("o/r", TREE, "", "", [])

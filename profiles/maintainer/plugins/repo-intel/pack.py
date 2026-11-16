@@ -41,7 +41,7 @@ _ROOT_KEYS = ("name", "repositories", "agent_docs", "instructions_dir", "codeown
 _READINESS_KEYS = ("ready_labels", "attention_labels", "infra_checks", "checks_file")
 
 # Highest tier first: a file that matches several is reported as the first.
-_TIERS = (("generated", "GENERATED"), ("api_surface", "API_SURFACE"), ("critical", "ADMISSION_CRITICAL"),
+_TIERS = (("generated", "GENERATED"), ("api_surface", "API_SURFACE"), ("critical", "CRITICAL"),
           ("test_only", "TEST_ONLY"))
 
 
@@ -279,7 +279,7 @@ class Rules:
         }
 
     def classify(self, path: str) -> str:
-        """'GENERATED' | 'API_SURFACE' | 'ADMISSION_CRITICAL' | 'TEST_ONLY' | 'STANDARD'."""
+        """'GENERATED' | 'API_SURFACE' | 'CRITICAL' | 'TEST_ONLY' | 'STANDARD'."""
         if not _any(path, self.generated_exceptions) and _any(path, self.generated):
             return "GENERATED"
         for key, tier in _TIERS[1:]:

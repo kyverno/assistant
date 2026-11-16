@@ -65,7 +65,7 @@ spec = importlib.util.spec_from_file_location('repo_intel', d + '/__init__.py', 
 m = importlib.util.module_from_spec(spec); sys.modules['repo_intel'] = m; spec.loader.exec_module(m)
 from repo_intel import pack, sequencer
 rules = pack.load('/fixtures/other-org.yaml')
-assert rules.gate.name == 'release-gate' and rules.classify('core/x.go') == 'ADMISSION_CRITICAL'
+assert rules.gate.name == 'release-gate' and rules.classify('core/x.go') == 'CRITICAL'
 r = sequencer.sequence([{'number': 1, 'changed_files': ['gen/out.go']}, {'number': 2, 'changed_files': ['schema/a.proto']}], 'main', rules=rules)
 assert [p['pr'] for t in r['tiers'] for p in t['prs']] == [2, 1], r
 PYEOF"
