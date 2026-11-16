@@ -1,0 +1,6 @@
+# The Agent Policy Fabric commit the access-rules stack is built from and tested against (github.com/NVIDIA/agent-policy-fabric,
+# tag v0.0.1 points at it too). .github/workflows/apf-images.yml builds the three images from exactly this commit.
+# Change it only after running the repository-scoping checks against the new commit.
+APF_COMMIT=fb961f7cc78e3d5149f0505ca624d064be1866f8
+APF_IMAGE_PREFIX=ghcr.io/kyverno/assistant-apf
+APF_IMAGE_TAG=fb961f7cc78e

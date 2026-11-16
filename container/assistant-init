@@ -726,9 +726,10 @@ def wait_for_merge(urls: list[str]) -> dict[str, str]:
     return states
 
 
-def publish(target: str, files: dict[str, str], branch: str, title: str, body: str) -> str:
+def publish(target: str, files: dict[str, str], branch: str, title: str, body: str, append: tuple[str, ...] = ()) -> str:
     """Add `files` (path -> content) to `target` (owner/repo) on a branch and open a pull request; from your fork when you
-    cannot push. Never overwrites a file that exists."""
+    cannot push. Never overwrites a file that exists, except that a path named in `append` has its content added to the end of
+    the existing file (and is created when there is none)."""
     say(f"checking {target}")
     existing = open_pr(target, branch)
     if existing:
@@ -758,11 +759,17 @@ def publish(target: str, files: dict[str, str], branch: str, title: str, body: s
             git("checkout", "--quiet", "-B", branch)
         for path, content in files.items():
             dest = os.path.join(work, path)
-            if os.path.exists(dest):
+            if os.path.exists(dest) and path not in append:
                 raise GhError(f"{target} already has {path}; not overwriting it")
             os.makedirs(os.path.dirname(dest), exist_ok=True)
-            with open(dest, "x") as f:
-                f.write(content)
+            if os.path.exists(dest):
+                with open(dest) as f:
+                    old = f.read()
+                with open(dest, "a") as f:
+                    f.write(("" if old.endswith("\n") else "\n") + "\n" + content)
+            else:
+                with open(dest, "x") as f:
+                    f.write(content)
             git("add", path)
         git("commit", "--quiet", "-s", "-m", title)
         say(f"pushing {branch}")
@@ -809,12 +816,13 @@ loaded, ask it for `repo_pack`. To change it later, edit the file in an ordinary
 """
 
 
-def create_shared_repo(owner: str, files: dict[str, str], body: str = "Adds `assistant-org.yaml`, written by `assistant init`.") -> str:
+def create_shared_repo(owner: str, files: dict[str, str], body: str = "Adds `assistant-org.yaml`, written by `assistant init`.",
+                       branch: str = "add-assistant-org-pack", title: str = "Add the assistant organisation pack") -> str:
     private = choose(f"Create {owner}/.github as", [Option("Public (recommended: anyone's assistant can read the pack)", value=False),
                                                       Option("Private (the token must be able to read it)", value=True)]).value
     gh("repo", "create", f"{owner}/.github", "--private" if private else "--public", "--description",
        "Organisation defaults", "--add-readme")
-    return publish(f"{owner}/.github", files, "add-assistant-org-pack", "Add the assistant organisation pack", body)
+    return publish(f"{owner}/.github", files, branch, title, body)
 
 
 FACTS_STUB = """# What the assistant should know about {name}
@@ -897,6 +905,89 @@ def setup_status(repo: str) -> dict:
     has_ci = isinstance(flows, list) and any(f.get("name") in ("pr-management.yaml", "pr-management.yml") for f in flows)
     return {"pack": "found" if has_pack else open_pr(repo, PACK_BRANCH),
             "ci": "found" if has_ci else open_pr(repo, CI_BRANCH)}
+
+
+ACCESS_BRANCH = "add-assistant-access-rules"
+ACCESS_DOCS_URL = "https://github.com/kyverno/assistant/blob/main/docs/access-rules.md"
+ACCESS_OWNER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
+ACCESS_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$")
+
+
+def access_entries(text: str) -> list[str]:
+    """The entries of an access-rules answer (`acme/*, acme/api`), or raises ValueError naming the first one that is not
+    `owner/name` or `owner/*`. The same rules container/assistant-access applies when it reads the file."""
+    entries = [e for e in re.split(r"[ ,]+", text.strip()) if e]
+    if not entries:
+        raise ValueError("give at least one repository")
+    seen = set()
+    for e in entries:
+        owner, sep, name = e.partition("/")
+        if not sep or not ACCESS_OWNER.match(owner) or not (name == "*" or (ACCESS_NAME.match(name) and name not in (".", ".."))):
+            raise ValueError(f"'{e}' is not owner/name or owner/*")
+        if e.lower() in seen:
+            raise ValueError(f"'{e}' is listed twice")
+        seen.add(e.lower())
+    return entries
+
+
+def access_block(repos: list[str]) -> str:
+    return ("access:\n"
+            "  # The repositories the assistant may reach on GitHub, and nothing else. Enforced when a maintainer starts the\n"
+            "  # assistant with the launcher (docs/access-rules.md). `owner/*` is every repository of the owner.\n"
+            "  repos:\n" + "".join(f"    - {r}\n" for r in repos))
+
+
+def access_status(repo: str) -> str:
+    """For the access rules: 'found', a pull request URL that is open for them, or '' (none published)."""
+    owner = repo.split("/")[0]
+    text = api(f"repos/{owner}/.github/contents/{PACK}", raw=True)
+    if isinstance(text, str) and re.search(r"(?m)^access\s*:", text):
+        return "found"
+    return open_pr(f"{owner}/.github", ACCESS_BRANCH) if api(f"repos/{owner}/.github") is not None else ""
+
+
+def set_access(repo: str) -> str:
+    """Ask which repositories the assistant may reach and open a pull request that adds them to <owner>/.github/assistant-org.yaml
+    (creating the repository and the file when there are none). Returns the pull request URL, or '' when nothing was opened."""
+    owner = repo.split("/")[0]
+    print("\n" + bold("Access rules") + dim(f"  which repositories the assistant may reach, for everyone of {owner} who uses it"))
+    print("  It is enforced when a maintainer starts the assistant with the launcher; GitHub's own organisation settings on tokens are")
+    print("  the only thing that holds on a machine you do not control (" + ACCESS_DOCS_URL + ").")
+    default = f"{owner}/*"
+    while True:
+        answer = ask("Repositories (owner/name or owner/*, space-separated)", default)
+        try:
+            repos = access_entries(answer or default)
+            break
+        except ValueError as exc:
+            print(red(f"  {exc}"))
+    foreign = [r for r in repos if r.split("/")[0].lower() != owner.lower()]
+    listed = {r.lower() for r in repos}
+    if f"{owner}/*".lower() not in listed and repo.lower() not in listed:
+        print(yellow(f"  Note: {repo} is not in this list, so the assistant could not be started on it."))
+    block = access_block(repos)
+    print("\n  This goes into " + bold(f"{owner}/.github/{PACK}") + ":\n")
+    print("".join("    " + line + "\n" for line in block.splitlines()))
+    if foreign:
+        print(dim("  (" + ", ".join(foreign) + " belong to other owners: the rules are read from " + owner + "/.github, and apply to " + owner + "'s repositories.)"))
+    if not confirm("Open a pull request that adds it?", default=False):
+        print("Nothing was written.")
+        return ""
+    body = (f"## What this adds\n\nThe `access:` section of `{PACK}`: the repositories the maintainer assistant may reach on GitHub.\n\n"
+            + "".join(f"- `{r}`\n" for r in repos)
+            + "\nWhen a maintainer of this organisation starts the assistant with the launcher, it reads this file from the default "
+              "branch, signs the rules and runs the assistant behind a policy service that refuses every GitHub call outside these "
+              "repositories. A call to any other repository is denied, GraphQL is denied (it cannot be limited to a repository), and "
+              "so is a tool the rules do not cover.\n\n"
+              "## Limits\n\n- It is enforced on each maintainer's machine, which they control: `--no-access` skips it. Restrict the "
+              "tokens in the organisation's GitHub settings for something a maintainer cannot skip.\n"
+              "- It covers `api.github.com` and the GitHub MCP server, not `git clone` of a public repository.\n\n"
+              f"Reference: {ACCESS_DOCS_URL}\n")
+    existing = api(f"repos/{owner}/.github")
+    if existing is None:
+        files = {PACK: block}
+        return create_shared_repo(owner, files, body, ACCESS_BRANCH, "Add the assistant access rules")
+    return publish(f"{owner}/.github", {PACK: block}, ACCESS_BRANCH, "Add the assistant access rules", body, append=(PACK,))
 
 
 def codeowner_team(repo: str) -> str:
@@ -1023,10 +1114,15 @@ def setup(repo: str) -> int:
         state = st[key]
         print(f"  {green('✓') if state == 'found' else yellow('•')} {label[key]}: "
               + ("found" if state == "found" else f"pull request open: {state}" if state else "not set up"))
+    acc = access_status(repo)
+    print(f"  {green('✓') if acc == 'found' else yellow('•')} Access rules: "
+          + ("found" if acc == "found" else f"pull request open: {acc}" if acc else "none published (the assistant can reach whatever the token can)"))
     if st["ci"] == "found":
         finish_ci(repo)
     missing = [k for k in ("pack", "ci") if not st[k]]
     if not missing:
+        if not acc and interactive():
+            print(dim(f"Set access rules with `assistant setup {repo} --access`."))
         return 0
     if not interactive():
         print(dim(f"Run `assistant setup {repo}` in a terminal to set up what is missing."))
@@ -1036,9 +1132,17 @@ def setup(repo: str) -> int:
         options.append(Option("Write the organisation pack", "file classes and guides read from the repository; opens a pull request", "pack", True))
     if "ci" in missing:
         options.append(Option("Adopt the PR automation", "opens a pull request; it only previews until you switch it on", "ci", True))
+    if not acc:
+        options.append(Option("Limit which repositories the assistant may reach", "asks which; opens a pull request to <owner>/.github", "access", False))
     picked = [o.value for o in menu(f"Set up {repo} now? (space ticks, enter confirms; none ticked skips)", options, multi=True)]
     code = 0
     opened: dict[str, str] = {}            # kind -> pull request URL
+    if "access" in picked:
+        url = set_access(repo)
+        if url:
+            opened["access"] = url
+            print("\n" + bold("Next: review it, then merge it") + f"\n  {url}")
+            print("  After the merge, the next time a maintainer starts the assistant it applies the rules.")
     if "pack" in picked:
         before = len(OPENED)
         code = main([repo]) or code
@@ -1075,7 +1179,7 @@ def setup(repo: str) -> int:
             states = wait_for_merge(list(opened.values()))
             for kind, url in opened.items():
                 state = states.get(url, "OPEN")
-                what = {"pack": "The organisation pack", "ci": "The PR automation"}[kind]
+                what = {"pack": "The organisation pack", "ci": "The PR automation", "access": "The access rules"}[kind]
                 if state == "MERGED":
                     print(green(f"✓ {what} is merged."))
                 elif state == "CLOSED":
@@ -1094,6 +1198,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--yes", action="store_true", help="accept what was inferred, without asking")
     ap.add_argument("--dry-run", action="store_true", help="print the pack and stop; write nothing anywhere")
     ap.add_argument("--setup", action="store_true", help="say what the repository lacks (pack, PR automation) and offer to set it up")
+    ap.add_argument("--access", action="store_true", help="with --setup: go straight to setting the access rules")
     ap.add_argument("--dump", action="store_true", help=argparse.SUPPRESS)       # the inputs as JSON, for tests
     ap.add_argument("--no-facts", action="store_true", help="leave out assistant-org-facts.md, the stub of questions to fill in")
     args = ap.parse_args(argv)
@@ -1104,6 +1209,21 @@ def main(argv: Optional[list[str]] = None) -> int:
             print(red("setup takes one repository, as owner/repo"), file=sys.stderr)
             return 2
         try:
+            if args.access:
+                if api(f"repos/{args.repos[0]}") is None:
+                    print(red(f"{args.repos[0]} was not found, or your gh login cannot see it."), file=sys.stderr)
+                    return 1
+                if not interactive():
+                    print(red("Setting access rules asks questions: run it in a terminal."), file=sys.stderr)
+                    return 1
+                if access_status(args.repos[0]) == "found":
+                    print(yellow(f"{args.repos[0].split('/')[0]} already publishes access rules; edit {PACK} in <owner>/.github to change them."))
+                    return 0
+                url = set_access(args.repos[0])
+                if url:
+                    print("\n" + bold("Next: review it, then merge it") + f"\n  {url}")
+                    print("  After the merge, the next time a maintainer starts the assistant it applies the rules.")
+                return 0 if url else 1
             return setup(args.repos[0])
         except GhError as exc:
             print(red(str(exc)), file=sys.stderr)

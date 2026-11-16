@@ -1,0 +1,540 @@
+#!/usr/bin/env python3
+"""assistant-access: the access rules an organisation sets for the assistant, and the signed APF bundle that enforces them.
+
+    assistant-access discover OWNER            fetch OWNER's rules from OWNER/.github (prints them as JSON)
+    assistant-access check FILE                validate the `access:` section of an assistant-org.yaml
+    assistant-access compile --out DIR [--rules JSON | --file FILE]
+                                               write the unsigned APF bundle (template, rules, annotators, sandbox policy)
+
+The rules live in the `access:` section of `<owner>/.github/assistant-org.yaml`, the organisation pack:
+
+    access:
+      repos:
+        - acme/*              every repository of acme
+        - partner/shared-lib  one repository
+
+They are read only from `<owner>/.github`, never from a repository's own pack: a repository's pack replaces the shared one, so
+reading `access` there would let a repository loosen its owner's rules. Python 3 standard library only (and `gh`, optionally).
+
+Exit status of `discover`: 0 rules found, 3 none published, 2 could not tell (network, server error, malformed). Anything that is
+not a clean "none published" must stop the launcher, because a failure is not permission to run unrestricted.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+PACK = "assistant-org.yaml"
+MAX_BYTES = 256 * 1024
+MAX_REPOS = 200
+
+OWNER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
+NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$")
+ACCESS_KEYS = ("repos",)
+
+# The GitHub MCP tools the assistant may call (container/providers/repo-github.yaml), by what they take. A tool in none of
+# these lists gets no permit, and APF denies it. The shapes come from github/github-mcp-server (pkg/github/__toolsnaps__).
+REPO_TOOLS = (               # owner and repo, always sent
+    "get_file_contents", "get_repository_tree", "list_issues", "issue_read", "issue_write", "add_issue_comment",
+    "update_issue_comment", "list_pull_requests", "pull_request_read", "pull_request_review_write",
+    "add_comment_to_pending_review", "add_reply_to_pull_request_comment", "update_pull_request_branch",
+    "update_pull_request", "create_pull_request", "request_copilot_review", "list_commits", "get_commit", "list_branches",
+    "list_tags", "get_tag", "list_releases", "get_latest_release", "get_release_by_tag", "list_label", "get_label",
+    "label_write", "sub_issue_write", "actions_list", "actions_get", "get_job_logs", "get_discussion",
+    "get_discussion_comments", "list_code_scanning_alerts", "get_code_scanning_alert", "list_dependabot_alerts",
+    "get_dependabot_alert", "list_secret_scanning_alerts", "get_secret_scanning_alert", "get_code_quality_finding",
+    "list_repository_collaborators", "discussion_comment_write",
+)
+OWNER_TOOLS = (              # owner always, repo sometimes
+    "list_discussion_categories", "list_discussions", "list_issue_types", "list_issue_fields",
+)
+PROJECT_TOOLS = ("projects_get", "projects_list", "projects_write")      # a project belongs to an owner
+ORG_TOOLS = ("get_team_members",)                                          # takes `org`
+LEVEL_TOOLS = ("repository_ruleset_read", "custom_properties_read")        # a repository, or an organisation, by `level`
+SEARCH_TOOLS = ("search_code", "search_issues", "search_pull_requests", "search_commits", "search_repositories")
+OPEN_TOOLS = (               # name no repository and return nothing from one
+    "get_me", "get_teams", "search_users", "get_global_security_advisory", "list_global_security_advisories",
+)
+# Also in the assistant's tool list but not shaped like any of the above, and not in the open-source server to read the
+# shape from, so they stay denied under access rules: check_dependency_vulnerabilities, semantic_issue_similarity_search.
+
+
+class AccessError(RuntimeError):
+    pass
+
+
+class Unknown(AccessError):
+    """Could not tell whether rules are published (network, server error): never read as 'none'."""
+
+
+# -- reading the `access:` section ----------------------------------------------------------------------------------
+
+def _strip(line: str) -> str:
+    """The line without a trailing comment (a # that starts a word), and without trailing space."""
+    out = []
+    quote = ""
+    for i, ch in enumerate(line):
+        if quote:
+            if ch == quote:
+                quote = ""
+        elif ch in "'\"":
+            quote = ch
+        elif ch == "#" and (i == 0 or line[i - 1] in " \t"):
+            break
+        out.append(ch)
+    return "".join(out).rstrip()
+
+
+def _scalar(text: str) -> str:
+    text = text.strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in "'\"":
+        text = text[1:-1]
+    return text
+
+
+def read_access(text: str, source: str = "the file") -> dict | None:
+    """The `access:` section of a pack as {"repos": [...]}, or None when the pack has none.
+
+    Only the small shape documented above is understood, and anything else in the section is an error: rules that were
+    half-read would be rules the admin did not write."""
+    lines = text.splitlines()
+    start = None
+    for i, raw in enumerate(lines):
+        if re.match(r"^access\s*:", raw):
+            if start is not None:
+                raise AccessError(f"{source}: `access:` appears twice")
+            start = i
+    if start is None:
+        return None
+    head = _strip(lines[start]).split(":", 1)[1].strip()
+    if head:
+        raise AccessError(f"{source}: `access:` must be followed by an indented block, not `{head}`")
+    block = []
+    for raw in lines[start + 1:]:
+        stripped = _strip(raw)
+        if not stripped.strip():
+            continue
+        if not raw[:1].isspace():
+            break                      # the next top-level key
+        block.append(stripped)
+    if not block:
+        raise AccessError(f"{source}: `access:` is empty (give it `repos:`, or remove it)")
+    indent = len(block[0]) - len(block[0].lstrip())
+    repos: list[str] | None = None
+    i = 0
+    while i < len(block):
+        line = block[i]
+        if len(line) - len(line.lstrip()) != indent:
+            raise AccessError(f"{source}: unexpected line in `access:`: {line.strip()!r}")
+        key, sep, rest = line.strip().partition(":")
+        if not sep or key not in ACCESS_KEYS:
+            raise AccessError(f"{source}: unknown key {key!r} in `access:` (known: {', '.join(ACCESS_KEYS)})")
+        if repos is not None:
+            raise AccessError(f"{source}: `{key}:` appears twice in `access:`")
+        rest = rest.strip()
+        items: list[str] = []
+        if rest:
+            if not (rest.startswith("[") and rest.endswith("]")):
+                raise AccessError(f"{source}: `{key}:` must be a list")
+            items = [_scalar(p) for p in rest[1:-1].split(",") if p.strip()]
+            i += 1
+        else:
+            i += 1
+            while i < len(block):
+                cur = block[i]
+                cur_indent = len(cur) - len(cur.lstrip())
+                if cur_indent < indent or (cur_indent == indent and not cur.lstrip().startswith("- ")):
+                    break
+                if not cur.lstrip().startswith("- "):
+                    raise AccessError(f"{source}: expected a list item under `{key}:`, got {cur.strip()!r}")
+                items.append(_scalar(cur.lstrip()[2:]))
+                i += 1
+        repos = items
+    return {"repos": validate_repos(repos or [], source)}
+
+
+def validate_repos(repos: list[str], source: str = "access.repos") -> list[str]:
+    if not repos:
+        raise AccessError(f"{source}: `repos:` is empty. List at least one `owner/name` or `owner/*`; to allow everything, leave `access:` out")
+    if len(repos) > MAX_REPOS:
+        raise AccessError(f"{source}: more than {MAX_REPOS} entries; use `owner/*` for a whole organisation")
+    seen = set()
+    for entry in repos:
+        owner, sep, name = entry.partition("/")
+        if not sep or not OWNER.match(owner) or not (name == "*" or (NAME.match(name) and name not in (".", ".."))):
+            raise AccessError(f"{source}: {entry!r} is not `owner/name` or `owner/*`")
+        key = entry.lower()
+        if key in seen:
+            raise AccessError(f"{source}: {entry!r} is listed twice")
+        seen.add(key)
+    return list(repos)
+
+
+# -- fetching it ------------------------------------------------------------------------------------------------------
+
+def _gh_token() -> str:
+    if shutil.which("gh") is None:
+        return ""
+    try:
+        out = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return out.stdout.strip() if out.returncode == 0 else ""
+
+
+def fetch_pack(owner: str) -> str | None:
+    """The text of `<owner>/.github/assistant-org.yaml` on its default branch, or None when it is not there.
+
+    Fetched with curl, not urllib: curl uses the system's certificate store, and a python.org Python on macOS has none until
+    its certificate installer has been run, which would stop the launcher on those machines. Uses the person's gh login when
+    there is one, so a private `.github` repository is found too (without a login only a public one is). Only 404 and 410 mean
+    'not published'. A 401 is retried without the token (an expired login must not hide a public file), and 403 (a rate limit, or
+    SAML single sign-on the token is not authorised for) is not read as 'none' either: every other failure is Unknown."""
+    if not OWNER.match(owner):
+        raise AccessError(f"{owner!r} is not a GitHub owner name")
+    if shutil.which("curl") is None:
+        raise Unknown("curl is needed to read the access rules")
+    url = f"https://api.github.com/repos/{owner}/.github/contents/{PACK}"
+    base = ["curl", "-sS", "-i", "-m", "20", "--max-filesize", str(MAX_BYTES), "-H", "Accept: application/vnd.github.raw+json",
+            "-H", "User-Agent: assistant-access", "-H", "X-GitHub-Api-Version: 2022-11-28"]
+    token = os.environ.get("ASSISTANT_ACCESS_TOKEN") or _gh_token()
+    attempts = [token, ""] if token else [""]
+    for token in attempts:
+        cmd, stdin = list(base), None
+        if token:
+            cmd += ["-K", "-"]              # the token goes in through stdin, so it never shows in a process list
+            stdin = f'header = "Authorization: Bearer {token}"\n'.encode()
+        try:
+            out = subprocess.run(cmd + [url], input=stdin, capture_output=True, timeout=30)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise Unknown(f"could not reach GitHub for {owner}/.github/{PACK}: {exc}") from exc
+        if out.returncode != 0:
+            why = out.stderr.decode("utf-8", "replace").strip() or f"curl exited {out.returncode}"
+            raise Unknown(f"could not read {owner}/.github/{PACK}: {why}")
+        if token and out.stdout.startswith(b"HTTP/") and out.stdout.split(b"\r\n", 1)[0].split()[1:2] == [b"401"]:
+            continue
+        break
+    head, sep, body = out.stdout.partition(b"\r\n\r\n")
+    while head.startswith(b"HTTP/") and b" 100 " in head.split(b"\r\n", 1)[0]:     # skip an interim 100 Continue
+        head, sep, body = body.partition(b"\r\n\r\n")
+    if not sep:
+        raise Unknown(f"GitHub's answer for {owner}/.github/{PACK} could not be read")
+    lines = head.decode("latin-1").split("\r\n")
+    try:
+        code = int(lines[0].split()[1])
+    except (IndexError, ValueError) as exc:
+        raise Unknown(f"GitHub's answer for {owner}/.github/{PACK} could not be read") from exc
+    if code in (404, 410):
+        return None
+    if code != 200:
+        raise Unknown(f"GitHub answered {code} for {owner}/.github/{PACK}")
+    if len(body) > MAX_BYTES:
+        raise Unknown(f"{owner}/.github/{PACK} is larger than {MAX_BYTES} bytes")
+    try:
+        return body.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise Unknown(f"{owner}/.github/{PACK} is not UTF-8 text") from exc
+
+
+# -- the rules --------------------------------------------------------------------------------------------------------
+
+def split(repos: list[str]) -> tuple[list[str], list[tuple[str, str]]]:
+    """(owners allowed whole, [(owner, repo)] allowed one by one), without the explicit repos an owner entry already covers."""
+    owners = []
+    for r in repos:
+        if r.endswith("/*") and r.split("/")[0] not in owners:
+            owners.append(r.split("/")[0])
+    low = {o.lower() for o in owners}
+    explicit = [tuple(r.split("/")) for r in repos if not r.endswith("/*") and r.split("/")[0].lower() not in low]
+    return owners, explicit  # type: ignore[return-value]
+
+
+def _case_variants(name: str) -> list[str]:
+    """What a client may send for a name. GitHub ignores case; Cedar compares exactly, so the lower-case spelling is
+    accepted as well as the one the admin wrote, and any other spelling is denied (the safe side)."""
+    return [name] if name == name.lower() else [name, name.lower()]
+
+
+def _eq(var: str, name: str) -> str:
+    return "(" + " || ".join(f'{var} == "{v}"' for v in _case_variants(name)) + ")"
+
+
+def owner_clause(var: str, owners: list[str]) -> str:
+    return "(" + " || ".join(_eq(var, o) for o in owners) + ")" if owners else "false"
+
+
+def repo_clause(ovar: str, rvar: str, owners: list[str], explicit: list[tuple[str, str]]) -> str:
+    parts = [owner_clause(ovar, owners)] if owners else []
+    parts += [f"({_eq(ovar, o)} && {_eq(rvar, r)})" for o, r in explicit]
+    return "(" + " || ".join(parts) + ")"
+
+
+def any_owner_clause(var: str, repos: list[str]) -> str:
+    return owner_clause(var, sorted({r.split("/")[0] for r in repos}))
+
+
+def actions(names: tuple[str, ...]) -> str:
+    return "[" + ", ".join(f'APF::Action::"{n}"' for n in names) + "]"
+
+
+HEADER = "# SPDX-License-Identifier: Apache-2.0\n# Written by assistant-access from the organisation's `access:` rules. Do not edit; change the rules and run it again.\n"
+API = 'context has target_host && context.target_host == "api.github.com"'
+
+
+def grants_rule(repos: list[str]) -> str:
+    owners, explicit = split(repos)
+    ro = repo_clause("context.args.owner", "context.args.repo", owners, explicit)
+    ro_parent = repo_clause("context.args.parent_owner", "context.args.parent_repo", owners, explicit)
+    ro_item = repo_clause("context.args.item_owner", "context.args.item_repo", owners, explicit)
+    wild_owner = owner_clause("context.args.owner", owners)
+    anyown = any_owner_clause("context.args.owner", repos)
+    anyorg = any_owner_clause("context.args.org", repos)
+    cedar = f"""    // Tools that act on one repository: owner and repo must be allowed, repo must be a plain name.
+    @id("access/repo-scoped")
+    permit (principal, action in {actions(REPO_TOOLS)}, resource)
+    when {{
+      context.args has owner && context.args has repo &&
+      {ro} &&
+      context.annotations.repo_arg_safe
+    }};
+
+    // Tools that take an owner and sometimes a repo. Without a repo they cover the whole owner, so the owner must be allowed whole.
+    @id("access/owner-scoped")
+    permit (principal, action in {actions(OWNER_TOOLS)}, resource)
+    when {{
+      context.args has owner &&
+      ((context.args has repo && {ro} && context.annotations.repo_arg_safe) ||
+       (!(context.args has repo) && {wild_owner}))
+    }};
+
+    // Projects belong to an owner, not a repository; any owner in the rules will do.
+    @id("access/projects")
+    permit (principal, action in {actions(PROJECT_TOOLS)}, resource)
+    when {{ context.args has owner && {anyown} }};
+
+    // A project item can point at an issue in another repository; that repository must be allowed too.
+    @id("access/projects-foreign-item")
+    forbid (principal, action == APF::Action::"projects_write", resource)
+    when {{
+      (context.args has item_owner || context.args has item_repo) &&
+      !(context.args has item_owner && context.args has item_repo && {ro_item})
+    }};
+
+    // A sub-issue parent can live in another repository.
+    @id("access/issue-foreign-parent")
+    forbid (principal, action == APF::Action::"issue_write", resource)
+    when {{
+      (context.args has parent_owner || context.args has parent_repo) &&
+      !(context.args has parent_owner && context.args has parent_repo && {ro_parent})
+    }};
+
+    @id("access/org-scoped")
+    permit (principal, action in {actions(ORG_TOOLS)}, resource)
+    when {{ context.args has org && {anyorg} }};
+
+    // A repository, or an organisation: the call says which. Enterprise level is never allowed.
+    @id("access/level-scoped")
+    permit (principal, action in {actions(LEVEL_TOOLS)}, resource)
+    when {{
+      !(context.args has enterprise) &&
+      ((context.args has owner && context.args has repo && {ro} && context.annotations.repo_arg_safe) ||
+       (!(context.args has owner) && context.args has org && {anyorg}))
+    }};
+
+    // Search: the query must open with an allowed scope and add no other.
+    @id("access/search-scoped")
+    permit (principal, action in {actions(SEARCH_TOOLS)}, resource)
+    when {{
+      context.annotations.search_query_scoped &&
+      !context.annotations.search_extra_scope
+    }};
+
+    // search_issues and search_pull_requests also take owner and repo, which the server turns into one more scope.
+    @id("access/search-owner-repo")
+    forbid (principal, action in {actions(SEARCH_TOOLS)}, resource)
+    when {{
+      (context.args has owner || context.args has repo) &&
+      !(context.args has owner && context.args has repo && {ro} && context.annotations.repo_arg_safe)
+    }};
+
+    // Tools that name no repository and read nothing from one.
+    @id("access/open")
+    permit (principal, action in {actions(OPEN_TOOLS)}, resource);
+"""
+    return (HEADER + "apiVersion: nvidia.agent-policy-fabric.policy/v1alpha1\nkind: PolicyRule\nmetadata:\n  name: github-grants\n\n"
+            "spec:\n  description: GitHub MCP tools, limited to the repositories the organisation allows. A tool with no permit here is denied.\n"
+            "  language: cedar\n  role: capability\n  definition: |\n" + cedar)
+
+
+def rest_rule(repos: list[str]) -> str:
+    owners, explicit = split(repos)
+    allowed_paths = [f'context.target_path like "/repos/{o}/*"' for o in owners]
+    for o, r in explicit:
+        allowed_paths += [f'context.target_path == "/repos/{o}/{r}"', f'context.target_path like "/repos/{o}/{r}/*"']
+    for o in sorted({r.split("/")[0] for r in repos}):
+        allowed_paths += [f'context.target_path == "/orgs/{o}"', f'context.target_path like "/orgs/{o}/*"']
+    paths = "\n        || ".join(allowed_paths)
+    cedar = f"""    // GraphQL reaches any repository through node(id:) and viewer {{ repositories }}, and the request body is only text to
+    // this layer, so it cannot be limited to an owner. Deny it.
+    @id("access-rest/deny-graphql")
+    forbid (principal, action, resource)
+    when {{
+      !context.has_tool_name && {API} &&
+      context has target_path && context.target_path like "/graphql*"
+    }};
+
+    // Path tricks that would let an allowed prefix point somewhere else.
+    @id("access-rest/deny-path-tricks")
+    forbid (principal, action, resource)
+    when {{
+      !context.has_tool_name && {API} &&
+      context has target_path &&
+      (context.target_path like "*..*" || context.target_path like "*%*" || context.target_path like "*//*")
+    }};
+
+    // Everything else on the REST API must be under an allowed repository or organisation, or on the short list.
+    @id("access-rest/deny-foreign-path")
+    forbid (principal, action, resource)
+    when {{
+      !context.has_tool_name && {API} &&
+      context has target_path &&
+      !(
+        {paths}
+        || context.target_path == "/zen" || context.target_path == "/rate_limit" || context.target_path == "/user"
+      )
+    }};
+"""
+    return (HEADER + "apiVersion: nvidia.agent-policy-fabric.policy/v1alpha1\nkind: PolicyRule\nmetadata:\n  name: github-rest-scope\n\n"
+            "spec:\n  description: Limit api.github.com REST paths to the allowed repositories; deny GraphQL, which cannot be scoped by text.\n"
+            "  language: cedar\n  role: control\n  definition: |\n" + cedar)
+
+
+def baseline_rule() -> str:
+    return (HEADER + "apiVersion: nvidia.agent-policy-fabric.policy/v1alpha1\nkind: PolicyRule\nmetadata:\n  name: baseline\n\n"
+            "spec:\n  description: Lets every request reach the forbids; the access rules above only take things away.\n"
+            "  language: cedar\n  role: control\n  definition: |\n    @id(\"baseline-allow\")\n    permit (principal, action, resource);\n")
+
+
+def annotator(repos: list[str]) -> str:
+    owners, explicit = split(repos)
+    alts = []
+    for o in owners:
+        alts.append(rf"(?:org|user):{re.escape(o)}")
+        alts.append(rf"repo:{re.escape(o)}/[A-Za-z0-9_][A-Za-z0-9._-]{{0,99}}")
+    for o, r in explicit:
+        alts.append(rf"repo:{re.escape(o)}/{re.escape(r)}")
+    scoped = r"(?is)^(?:" + "|".join(alts) + r")(?:\s.*)?$"
+    return (HEADER + "apiVersion: nvidia.agent-policy-fabric.policy/v1alpha1\nkind: PolicyAnnotator\nmetadata:\n  name: github-args\n\n"
+            "spec:\n  description: Shape checks on GitHub tool arguments that Cedar cannot express (regular expressions).\n  annotations:\n"
+            "    # A repo name is one path segment: no slash, no traversal.\n    - name: repo_arg_safe\n      output: bool\n      set_true_if: any\n"
+            "      rules:\n        - field: args.repo\n          op: regex_match\n          pattern: '^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$'\n"
+            "    # A search query must open with a scope qualifier for an allowed owner or repository.\n    - name: search_query_scoped\n"
+            "      output: bool\n      set_true_if: any\n      rules:\n        - field: args.query\n          op: regex_match\n"
+            f"          pattern: '{scoped}'\n"
+            "    # A second scope qualifier anywhere after the first would widen the search elsewhere. Any whitespace, so tabs and\n"
+            "    # newlines do not hide one.\n    - name: search_extra_scope\n      output: bool\n      set_true_if: any\n      rules:\n"
+            "        - field: args.query\n          op: regex_match\n          pattern: '(?is).+\\s-?(?:repo|org|user|owner):'\n")
+
+
+def sandbox_policy() -> str:
+    """APF's own sandbox-policy document. The assistant keeps OpenShell's native policy (it carries the MCP versions this
+    document cannot), so this one only has to exist and be valid: the policy gateway names it at startup."""
+    return (HEADER + "apiVersion: nvidia.agent-policy-fabric.sandbox/v1alpha1\nkind: SandboxPolicy\nmetadata:\n  name: default\n\n"
+            "spec:\n  filesystem:\n    include_workdir: true\n    read_only: [/usr, /lib, /proc, /dev/urandom, /app, /etc, /var/log]\n"
+            "    read_write: [/sandbox, /tmp, /dev/null]\n  landlock:\n    compatibility: best_effort\n  process:\n    run_as_user: sandbox\n"
+            "    run_as_group: sandbox\n  network_policies:\n    github_rest:\n      name: github_rest\n      endpoints:\n"
+            "        - host: api.github.com\n          port: 443\n          protocol: rest\n          enforcement: enforce\n"
+            "          rules:\n            - allow: { method: GET, path: \"/**\" }\n")
+
+
+MEMBERS = ("sandbox/default-policy.yaml", "annotators/github-args.yaml", "rules/baseline.yaml", "rules/github-grants.yaml",
+           "rules/github-rest-scope.yaml")
+
+
+def template(revision: int) -> str:
+    rows = "".join(f"  - path: {m}\n    sha256: REPLACE_WITH_DIGEST\n" for m in MEMBERS)
+    return (HEADER + "apiVersion: nvidia.agent-policy-fabric.policy/v1alpha1\nkind: PolicyBundle\nmetadata: {}\n\n"
+            f"id: assistant-access\ndescription: \"Repositories the assistant may reach, set by the organisation\"\npolicy_revision: {revision}\n"
+            "not_before: \"2026-01-01T00:00:00Z\"\nexpires_at: \"2099-12-31T00:00:00Z\"\n\nmanifest:\n" + rows)
+
+
+def compile_bundle(repos: list[str], out: Path, revision: int = 1) -> None:
+    """The unsigned bundle: the template (apf-compile fills in the digests and signs) and its members."""
+    repos = validate_repos(repos)
+    files = {
+        "sandbox/default-policy.yaml": sandbox_policy(),
+        "annotators/github-args.yaml": annotator(repos),
+        "rules/baseline.yaml": baseline_rule(),
+        "rules/github-grants.yaml": grants_rule(repos),
+        "rules/github-rest-scope.yaml": rest_rule(repos),
+        "bundle.template.yaml": template(revision),
+    }
+    shutil.rmtree(out, ignore_errors=True)
+    for rel, text in files.items():
+        path = out / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+
+# -- command line -----------------------------------------------------------------------------------------------------
+
+def rules_from(args: argparse.Namespace) -> list[str]:
+    if args.rules:
+        data = json.loads(args.rules)
+        return validate_repos(list(data["repos"]), "rules")
+    text = Path(args.file).read_text(encoding="utf-8")
+    found = read_access(text, args.file)
+    if found is None:
+        raise AccessError(f"{args.file} has no `access:` section")
+    return found["repos"]
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(prog="assistant-access", description=__doc__.split("\n\n")[0])
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    d = sub.add_parser("discover")
+    d.add_argument("owner")
+    c = sub.add_parser("check")
+    c.add_argument("file")
+    k = sub.add_parser("compile")
+    k.add_argument("--out", required=True)
+    k.add_argument("--rules", help='JSON as printed by `discover`: {"repos": [...]}')
+    k.add_argument("--file", help="an assistant-org.yaml with an `access:` section")
+    k.add_argument("--revision", type=int, default=1)
+    args = ap.parse_args(argv)
+    try:
+        if args.cmd == "discover":
+            text = fetch_pack(args.owner)
+            found = read_access(text, f"{args.owner}/.github/{PACK}") if text is not None else None
+            if found is None:
+                return 3
+            print(json.dumps(found))
+            return 0
+        if args.cmd == "check":
+            found = read_access(Path(args.file).read_text(encoding="utf-8"), args.file)
+            if found is None:
+                print(f"{args.file}: no `access:` section; the assistant would run without access rules", file=sys.stderr)
+                return 3
+            print(json.dumps(found))
+            return 0
+        if not args.rules and not args.file:
+            ap.error("compile needs --rules or --file")
+        compile_bundle(rules_from(args), Path(args.out), args.revision)
+        return 0
+    except Unknown as exc:
+        print(f"assistant-access: {exc}", file=sys.stderr)
+        return 2
+    except (AccessError, OSError, ValueError, KeyError) as exc:
+        print(f"assistant-access: {exc}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

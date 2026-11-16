@@ -1,0 +1,174 @@
+# Builds the three images the access-rules stack runs (container/apf, docs/access-rules.md) from NVIDIA's Agent Policy Fabric,
+# at the exact commit pinned in container/apf/VERSION, and publishes them to the GitHub Container Registry:
+#
+#   ghcr.io/<owner>/assistant-apf-policy-service:<commit>    the policy service
+#   ghcr.io/<owner>/assistant-apf-policy-gateway:<commit>    the policy gateway (the decision point OpenShell's requests go to)
+#   ghcr.io/<owner>/assistant-apf-compile:<commit>           apf-compile, which signs and verifies a bundle
+#
+# NVIDIA publishes no images, so this is the only place they come from. <commit> is the first 12 characters of the pinned APF
+# commit (APF_IMAGE_TAG in container/apf/VERSION); the launcher asks for exactly that tag, so changing VERSION and publishing again
+# is how the stack moves to a new APF. Run it by hand from the Actions tab, or by changing container/apf/VERSION on main. Each
+# architecture is built on a native runner, because APF is compiled from Rust. A fixable CRITICAL vulnerability in any image stops
+# the publish before the tag exists. The published images are signed (cosign, keyless).
+#
+# One-time setup by an org admin: allow this repository to publish packages, and after the first publish set each package's
+# visibility to public so that `container/assistant` can pull them without logging in.
+name: apf-images
+
+on:
+  push:
+    branches: [main]
+    paths: ["container/apf/VERSION"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apf-images
+  cancel-in-progress: false
+
+jobs:
+  pin:
+    name: read the pin
+    runs-on: ubuntu-24.04
+    outputs:
+      commit: ${{ steps.pin.outputs.commit }}
+      tag: ${{ steps.pin.outputs.tag }}
+      prefix: ${{ steps.pin.outputs.prefix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: container/apf/VERSION
+      - name: Read container/apf/VERSION
+        id: pin
+        run: |
+          set -eu
+          commit="$(sed -n 's/^APF_COMMIT=//p' container/apf/VERSION)"
+          tag="$(sed -n 's/^APF_IMAGE_TAG=//p' container/apf/VERSION)"
+          [[ "${commit}" =~ ^[0-9a-f]{40}$ ]] || { echo "APF_COMMIT is not a full commit hash: ${commit}"; exit 1; }
+          [ "${tag}" = "${commit:0:12}" ] || { echo "APF_IMAGE_TAG (${tag}) is not the first 12 characters of APF_COMMIT"; exit 1; }
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          {
+            echo "commit=${commit}"
+            echo "tag=${tag}"
+            echo "prefix=ghcr.io/${owner}/assistant-apf"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build ${{ matrix.image }} ${{ matrix.arch }}
+    needs: pin
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, amd64]
+        image: [policy-service, policy-gateway, compile]
+        include:
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+          - arch: amd64
+            runner: ubuntu-24.04
+          - image: policy-service
+            dockerfile: deploy/docker/apf-policy-service/Dockerfile
+            target: runtime
+          - image: compile
+            dockerfile: deploy/docker/apf-policy-service/Dockerfile
+            target: demo
+          - image: policy-gateway
+            dockerfile: deploy/docker/apf-policy-gateway/Dockerfile
+            target: ""
+    steps:
+      # Exactly the pinned commit: fetched by hash, then checked, so a moved tag or a force push cannot change what is built.
+      - name: Check out the pinned Agent Policy Fabric commit
+        env:
+          COMMIT: ${{ needs.pin.outputs.commit }}
+        run: |
+          set -eu
+          git init -q apf
+          git -C apf remote add origin https://github.com/NVIDIA/agent-policy-fabric.git
+          git -C apf fetch -q --depth 1 origin "${COMMIT}"
+          git -C apf checkout -q --detach FETCH_HEAD
+          [ "$(git -C apf rev-parse HEAD)" = "${COMMIT}" ] || { echo "fetched a different commit than ${COMMIT}"; exit 1; }
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: apf
+          file: apf/${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
+          platforms: linux/${{ matrix.arch }}
+          push: true
+          provenance: false
+          tags: ${{ needs.pin.outputs.prefix }}-${{ matrix.image }}:${{ needs.pin.outputs.tag }}-${{ matrix.arch }}
+
+  publish:
+    name: publish ${{ matrix.image }}
+    needs: [pin, build]
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [policy-service, policy-gateway, compile]
+    permissions:
+      contents: read
+      packages: write
+      id-token: write       # keyless signing (OIDC)
+    steps:
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The gate: no tag exists until both architectures have been scanned. Trivy runs as a container pinned by digest (0.76.0),
+      # as in container-image.yml.
+      - name: Scan for critical vulnerabilities
+        env:
+          IMAGE: ${{ needs.pin.outputs.prefix }}-${{ matrix.image }}
+          TAG: ${{ needs.pin.outputs.tag }}
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for arch in amd64 arm64; do
+            docker run --rm -e TRIVY_USERNAME -e TRIVY_PASSWORD \
+              aquasec/trivy@sha256:2416d1f74045b57274df1a340eee6b510cacd73c66a6ccb8da092b117eb7d222 \
+              image --scanners vuln --severity CRITICAL --ignore-unfixed --exit-code 1 "${IMAGE}:${TAG}-${arch}"
+          done
+
+      - name: Combine the two architectures into one image
+        id: publish
+        env:
+          IMAGE: ${{ needs.pin.outputs.prefix }}-${{ matrix.image }}
+          TAG: ${{ needs.pin.outputs.tag }}
+        run: |
+          docker buildx imagetools create -t "${IMAGE}:${TAG}" "${IMAGE}:${TAG}-amd64" "${IMAGE}:${TAG}-arm64"
+          docker buildx imagetools inspect "${IMAGE}:${TAG}"
+          digest="$(docker buildx imagetools inspect "${IMAGE}:${TAG}" --format '{{json .Manifest}}' | jq -r .digest)"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+
+      # Verify with:
+      #   cosign verify ghcr.io/<owner>/assistant-apf-<name>:<commit> \
+      #     --certificate-identity-regexp '^https://github.com/<owner>/assistant/\.github/workflows/apf-images\.yml@' \
+      #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+
+      - name: Sign the image
+        env:
+          IMAGE: ${{ needs.pin.outputs.prefix }}-${{ matrix.image }}
+          DIGEST: ${{ steps.publish.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"

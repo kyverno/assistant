@@ -25,6 +25,8 @@
 #   --yes             do not ask for confirmation when the container is created
 #   --no-attach       set everything up but do not open the chat
 #   --reset           forget the stored GitHub token and ask for it again
+#   --no-access       run the maintainer assistant without the access rules its organisation publishes; without it, a published
+#                     rule set stops this mode, which cannot enforce it (use OpenShell, docs/access-rules.md)
 #
 # The dashboard works as with OpenShell: http://127.0.0.1:9219/maintainer?profile=maintainer (ASSISTANT_DASHBOARD_PORT changes
 # the port). It listens on 127.0.0.1 in the container; a small relay passes it to a port Docker publishes on 127.0.0.1
@@ -48,6 +50,7 @@ BUILD=0
 RESET=0
 UPGRADE=0
 NO_ATTACH=0
+NO_ACCESS=0
 ALLOW_TERMINAL=0
 ASSUME_YES=0
 BACKUP_DIR=""
@@ -65,12 +68,13 @@ while [ $# -gt 0 ]; do
     --allow-terminal) ALLOW_TERMINAL=1; shift ;;
     --yes) ASSUME_YES=1; shift ;;
     --no-attach) NO_ATTACH=1; shift ;;
+    --no-access) NO_ACCESS=1; shift ;;
     --reset) RESET=1; shift ;;
     --push-to-fork|--no-push)
       echo "$1 needs OpenShell: its proxy keeps the push token out of the sandbox and limits which repositories a push can reach." >&2
       echo "Without OpenShell the assistant hands you patches instead (see the workspace skill)." >&2
       exit 2 ;;
-    -h|--help) sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
@@ -157,10 +161,24 @@ instance_exists() { container_exists; }
 instance_exec() { docker exec "$NAME" "$@"; }
 ensure_image
 
+# The organisation's access rules (docs/access-rules.md) are enforced by a gateway this mode does not have: if the owner publishes
+# any, stop rather than run without them.
+REPO="${ASSISTANT_REPO:-}"
+if [ "$KIND" = maintainer ] && [ "$NO_ACCESS" != 1 ]; then
+  repo_from_instance
+  ask_repo || exit 1
+  access_discover "$REPO" || exit 1
+  if [ -n "$ACCESS_RULES" ]; then
+    fail "${REPO%%/*} publishes access rules ($(access_repos "$ACCESS_RULES")), and this mode cannot enforce them"
+    info "run without --no-openshell, or add --no-access to go without them"
+    exit 1
+  fi
+fi
+
 step "3. Keys"
 info "secrets file: $SECRETS_FILE"
 [ "$RESET" = 1 ] && secrets_unset "$TOKEN_KEY"
-REPO="${ASSISTANT_REPO:-}"
+REPO="${REPO:-${ASSISTANT_REPO:-}}"
 LOGIN="${!LOGIN_VAR:-}"
 if [ -n "$(secrets_get "$TOKEN_KEY")" ]; then
   pass "GitHub token already in the secrets file (use --reset to replace it)"
