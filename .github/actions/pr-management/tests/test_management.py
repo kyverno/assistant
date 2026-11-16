@@ -259,6 +259,227 @@ class AutomationTests(unittest.TestCase):
                 config.write_text(json.dumps({**data, "infra_checks": infra}))
                 self.run_action(mode="validate", success=False)
 
+    def test_only_the_latest_run_of_each_check_decides(self):
+        run = lambda name, conclusion, started, status="COMPLETED": {
+            "name": name, "conclusion": conclusion, "status": status, "startedAt": at(started)}
+        # (name, contexts, blocked, ready)
+        cases = (
+            ("later run passed after an earlier failure",
+             [run("markers", "FAILURE", 3), run("markers", "SUCCESS", 2), run("markers", "SUCCESS", 1)], False, True),
+            ("order in the rollup does not matter",
+             [run("markers", "SUCCESS", 1), run("markers", "FAILURE", 3)], False, True),
+            ("later run failed after an earlier pass",
+             [run("markers", "SUCCESS", 3), run("markers", "FAILURE", 1)], True, False),
+            ("another check still fails", [run("markers", "FAILURE", 3), run("markers", "SUCCESS", 1),
+                                           run("build", "FAILURE", 2)], True, False),
+            ("queued re-run is not hidden by the old result",
+             [run("markers", "FAILURE", 3), {"name": "markers", "status": "QUEUED", "conclusion": None}], False, False),
+            ("an older run still running keeps the PR pending",
+             [run("markers", "SUCCESS", 1), run("markers", None, 3, status="IN_PROGRESS")], False, False),
+            ("once that older run finishes, the newest run decides",
+             [run("markers", "SUCCESS", 1), run("markers", "FAILURE", 3)], False, True),
+            ("DCO is deduplicated too", [run("DCO", "FAILURE", 3), run("DCO", "SUCCESS", 1)], False, True),
+            ("commit statuses are deduplicated by context",
+             [{"context": "legacy", "state": "FAILURE", "createdAt": at(3)},
+              {"context": "legacy", "state": "SUCCESS", "createdAt": at(1)}], False, True),
+            ("an entry with no name still counts as pending", [run("markers", "SUCCESS", 1), {}], False, False),
+        )
+        for name, contexts, blocked, ready in cases:
+            with self.subTest(case=name):
+                self.contexts(*contexts)
+                self.run_action()
+                self.assertEqual(self.added("needs-author-action"), blocked)
+                self.assertEqual(self.added("ready-for-review"), ready)
+                (self.work / "calls.jsonl").unlink(missing_ok=True)
+
+    def enable_nudge(self, value=True):
+        config = self.work / ".github/pr-management.json"
+        data = json.loads(config.read_text())
+        data["nudge_plain_comments"] = value
+        config.write_text(json.dumps(data))
+
+    def nudges(self):
+        return [call for call in self.mutations if call[:2] == ["pr", "comment"] and "pr-readiness-check-nudge" in " ".join(call)]
+
+    def test_plain_maintainer_comment_is_nudged_once_without_changing_labels(self):
+        def comment(days, id="IC_1", assoc="MEMBER", login="maintainer", kind="User", text="please check this"):
+            return {"id": id, "url": f"https://github.com/kyverno/example/pull/1#issuecomment-{id}", "bodyText": text,
+                    "author": {"login": login, "__typename": kind}, "authorAssociation": assoc, "createdAt": at(days)}
+
+        def review(days, oid=SHA, body="looks off", state="COMMENTED", id="PRR_1", inline=0):
+            return {"id": id, "url": f"https://github.com/kyverno/example/pull/1#pullrequestreview-{id}",
+                    "author": {"login": "maintainer", "__typename": "User"}, "authorAssociation": "MEMBER",
+                    "state": state, "submittedAt": at(days), "bodyText": body, "commit": {"oid": oid} if oid else None,
+                    "inlineComments": {"totalCount": inline}}
+
+        unknown_inline = review(2)
+        del unknown_inline["inlineComments"]
+
+        reply = comment(1, id="IC_reply", assoc="CONTRIBUTOR", login="contributor")
+        inline_reply = connection([{"isResolved": True, "comments": connection([
+            {"author": {"login": "contributor"}, "createdAt": at(1)}])}])
+        inline_by_other = connection([{"isResolved": True, "comments": connection([
+            {"author": {"login": "someone-else"}, "createdAt": at(1)}])}])
+        # (name, reviews, comments, committed days ago, nudged, extra PR fields)
+        cases = (
+            ("unanswered plain comment", [], [comment(2)], 9, True, {}),
+            ("author replied afterwards", [], [comment(2), reply], 9, False, {}),
+            ("author pushed afterwards", [], [comment(2)], 1, False, {}),
+            ("review that only comments", [review(2)], [], 9, True, {}),
+            ("author pushed after the reviewed commit", [review(2, oid="b" * 40)], [], 9, False, {}),
+            ("reviewed commit no longer exists", [review(2, oid=None)], [], 9, False, {}),
+            ("review without a body", [review(2, body="")], [], 9, False, {}),
+            ("approval is not a comment", [review(2, state="APPROVED")], [], 9, False, {}),
+            ("not a maintainer", [], [comment(2, assoc="CONTRIBUTOR")], 9, False, {}),
+            ("bot", [], [comment(2, login="coderabbitai[bot]", kind="Bot")], 9, False, {}),
+            ("the author's own comment", [], [comment(2, login="contributor", assoc="OWNER")], 9, False, {}),
+            # Gaps found by going through the cases.
+            ("summary of a review that has inline comments", [review(2, inline=3)], [], 9, False, {}),
+            ("summary of a review with one inline comment", [review(2, inline=1)], [], 9, False, {}),
+            ("review whose inline-comment count is unknown", [unknown_inline], [], 9, False, {}),
+            ("a plain comment next to a review with inline comments", [review(2, inline=3)], [comment(2)], 9, True, {}),
+            ("review body answered only by inline replies", [review(2)], [], 9, False, {"reviewThreads": inline_reply}),
+            ("an inline reply by someone else is not the author's", [review(2)], [], 9, True,
+             {"reviewThreads": inline_by_other}),
+            ("same reviewer approved afterwards", [review(1, state="APPROVED", body="")], [comment(2)], 9, False, {}),
+            ("another reviewer approved afterwards",
+             [{**review(1, state="APPROVED", body=""), "author": {"login": "other", "__typename": "User"}}],
+             [comment(2)], 9, True, {}),
+            ("Prow command", [], [comment(2, text="/retest")], 9, False, {}),
+            ("Prow command after whitespace", [], [comment(2, text="  \n/lgtm")], 9, False, {}),
+            ("bare LGTM", [], [comment(2, text="LGTM!")], 9, False, {}),
+            ("bare thanks", [], [comment(2, text="Thanks.")], 9, False, {}),
+            ("LGTM with a request after it", [], [comment(2, text="LGTM but please rename the flag")], 9, True, {}),
+            ("comment older than the window", [], [comment(9)], 20, False, {}),
+            ("comment inside the window", [], [comment(6)], 20, True, {}),
+        )
+        self.enable_nudge()
+        for name, reviews, comments, committed, nudged, extra in cases:
+            with self.subTest(case=name):
+                (self.work / "calls.jsonl").unlink(missing_ok=True)
+                pr = self.fixture["readiness_pr"]
+                pr["reviews"], pr["comments"] = connection(reviews), connection(comments)
+                pr["reviewThreads"] = connection([])
+                pr.update(extra)
+                pr["commits"]["nodes"][0]["commit"]["committedDate"] = at(committed)
+                self.run_action()
+                self.assertEqual(len(self.nudges()), 1 if nudged else 0)
+                # Never a label change beyond the normal ready path.
+                self.assertTrue(self.added("ready-for-review"))
+                self.assertFalse(self.added("needs-author-action"))
+                self.assertFalse(any("hold" in " ".join(call) and "--add-label" in call for call in self.mutations))
+                (self.work / "calls.jsonl").unlink(missing_ok=True)
+
+    def test_nudge_names_the_reviewer_links_the_comment_and_offers_both_options(self):
+        self.enable_nudge()
+        pr = self.fixture["readiness_pr"]
+        pr["comments"] = connection([{
+            "id": "IC_1", "url": "https://github.com/kyverno/example/pull/1#issuecomment-1",
+            "author": {"login": "maintainer", "__typename": "User"}, "authorAssociation": "MEMBER", "createdAt": at(2)}])
+        pr["commits"]["nodes"][0]["commit"]["committedDate"] = at(9)
+        self.run_action()
+        body = " ".join(self.nudges()[0])
+        self.assertIn(f"<!-- pr-readiness-check-nudge: {SHA} -->", body)
+        self.assertIn("@maintainer", body)
+        self.assertIn("issuecomment-1", body)
+        self.assertIn("Request changes", body)
+        self.assertIn("`hold`", body)
+
+    def test_nudge_quotes_a_sanitised_excerpt_of_the_comment(self):
+        self.enable_nudge()
+        pr = self.fixture["readiness_pr"]
+        pr["commits"]["nodes"][0]["commit"]["committedDate"] = at(9)
+
+        def nudge_for(text):
+            pr["comments"] = connection([{
+                "id": "IC_1", "url": "https://github.com/kyverno/example/pull/1#issuecomment-1", "bodyText": text,
+                "author": {"login": "maintainer", "__typename": "User"}, "authorAssociation": "MEMBER",
+                "createdAt": at(2)}])
+            self.run_action()
+            posted = self.nudges()
+            (self.work / "calls.jsonl").unlink(missing_ok=True)
+            return posted[0][posted[0].index("--body") + 1]
+
+        body = nudge_for("@alice @org/team please look, see #123 and kyverno/kyverno#9\n\n<!-- pr-readiness-check-nudge: X -->")
+        quote = [line for line in body.splitlines() if line.startswith("> ")]
+        self.assertEqual(len(quote), 1)
+        for forbidden in ("@alice", "@org", "#123", "#9", "<", ">"):
+            self.assertNotIn(forbidden, quote[0][2:])
+        self.assertIn("alice org/team please look, see 123 and kyverno/kyverno9", quote[0])
+        # The quote ends at its own paragraph: the question starts on a new line, after a blank one.
+        self.assertNotIn("This PR is ready", quote[0])
+        self.assertIn("\n\nThis PR is ready for review", body)
+        # Only the bot's own marker line carries a comment marker, and the mention in the greeting is the reviewer's.
+        self.assertEqual(body.count("<!--"), 1)
+        self.assertTrue(body.splitlines()[1].startswith("@maintainer,"))
+
+        long_quote = [line for line in nudge_for("word " * 100).splitlines() if line.startswith("> ")][0]
+        self.assertTrue(long_quote.endswith("…"))
+        self.assertEqual(len(long_quote[2:]), 101)
+        self.assertNotIn("…", [line for line in nudge_for("x" * 100).splitlines() if line.startswith("> ")][0])
+
+        self.assertNotIn("\n> ", nudge_for("   "))
+
+    def test_nudge_is_posted_once_per_head_commit_whatever_the_comment(self):
+        self.enable_nudge()
+        pr = self.fixture["readiness_pr"]
+        pr["comments"] = connection([{
+            "id": "IC_1", "url": "https://github.com/kyverno/example/pull/1#issuecomment-1",
+            "author": {"login": "maintainer", "__typename": "User"}, "authorAssociation": "MEMBER", "createdAt": at(2)}])
+        pr["commits"]["nodes"][0]["commit"]["committedDate"] = at(9)
+        # Posted earlier for a different comment on this same commit: maintainers talking to each other must not
+        # trigger a nudge per message.
+        self.fixture["comment_bodies"] = f"<!-- pr-readiness-check-nudge: {SHA} -->"
+        self.run_action()
+        self.assertEqual(self.nudges(), [])
+        (self.work / "calls.jsonl").unlink()
+        # A marker for an older head does not suppress it.
+        self.fixture["comment_bodies"] = f"<!-- pr-readiness-check-nudge: {'b' * 40} -->"
+        self.run_action()
+        self.assertEqual(len(self.nudges()), 1)
+        self.assertTrue(any("--paginate" in call for call in self.calls))
+
+    def test_a_sweep_nudges_every_pr_that_needs_it(self):
+        self.enable_nudge()
+        self.env["GITHUB_EVENT_NAME"] = "schedule"
+        self.fixture["discovery"] = {
+            "pageInfo": {"hasNextPage": False, "endCursor": None},
+            "nodes": [{"number": n, "isDraft": False, "closingIssuesReferences": connection([])} for n in range(1, 13)],
+        }
+        pr = self.fixture["readiness_pr"]
+        pr["comments"] = connection([{
+            "id": "IC_1", "url": "https://github.com/kyverno/example/pull/1#issuecomment-1", "bodyText": "please check",
+            "author": {"login": "maintainer", "__typename": "User"}, "authorAssociation": "MEMBER", "createdAt": at(2)}])
+        pr["commits"]["nodes"][0]["commit"]["committedDate"] = at(9)
+        self.run_action()
+        # No cap: every one of the 12 PRs is nudged, each once, and none is held back for a later sweep.
+        self.assertEqual(len(self.nudges()), 12)
+        self.assertEqual(len([c for c in self.mutations if "--add-label" in c and "ready-for-review" in c]), 12)
+
+    def test_nudge_is_off_by_default_and_never_on_a_blocked_pr(self):
+        pr = self.fixture["readiness_pr"]
+        pr["comments"] = connection([{
+            "id": "IC_1", "url": "https://github.com/kyverno/example/pull/1#issuecomment-1",
+            "author": {"login": "maintainer", "__typename": "User"}, "authorAssociation": "MEMBER", "createdAt": at(2)}])
+        pr["commits"]["nodes"][0]["commit"]["committedDate"] = at(9)
+        self.run_action()
+        self.assertEqual(self.nudges(), [])
+        (self.work / "calls.jsonl").unlink()
+        self.enable_nudge()
+        self.contexts({"name": "build", "conclusion": "FAILURE", "status": "COMPLETED"})
+        self.run_action()
+        self.assertEqual(self.nudges(), [])
+        self.assertTrue(self.added("needs-author-action"))
+
+    def test_nudge_setting_must_be_a_boolean(self):
+        for value in ("yes", 1, None):
+            with self.subTest(value=value):
+                self.enable_nudge(value)
+                self.run_action(mode="validate", success=False)
+                self.assertEqual(self.calls, [])
+        self.enable_nudge(True)
+        self.run_action(mode="validate")
+
     def test_pending_and_empty_ci_never_ready(self):
         for contexts in ([], [{"name": "unit", "status": "IN_PROGRESS", "conclusion": None}],
                          [{"context": "legacy", "state": "PENDING"}], [{}],
@@ -572,6 +793,51 @@ class AutomationTests(unittest.TestCase):
         self.run_action(shell="handle_needs_author 1")
         self.assertTrue(any(call[:2] == ["pr", "comment"] for call in self.mutations))
         self.assertFalse(any("--add-label" in call for call in self.mutations))
+
+
+    def test_observed_marker_is_visible_text_and_is_minimized(self):
+        self.fixture["stale_pr"] = stale()
+        pr = self.fixture["stale_pr"]
+        pr["labels"] = connection(labels("needs-author-action"))
+        pr["timelineItems"]["nodes"].append({
+            "__typename": "PullRequestCommit", "commit": {"oid": SHA, "committedDate": at(40)},
+        })
+        self.run_action(shell="handle_needs_author 1")
+        posted = [c for c in self.calls if c[:2] == ["pr", "comment"]]
+        self.assertEqual(len(posted), 1)
+        persisted = json.loads((self.work / "fixture.json").read_text())
+        body = persisted["stale_pr"]["comments"]["nodes"][-1]["body"]
+        self.assertIn("<!-- pr-stale-author-action: observed", body)
+        self.assertIn("Tracking the latest push for the stale sweep.", body)
+        self.assertTrue(any(c[:2] == ["api", "graphql"] and any("minimizeComment" in a for a in c) and "id=IC_node4242" in c
+                            for c in self.calls))
+
+    def test_failing_to_minimize_the_marker_never_fails_the_sweep(self):
+        for failure in ("minimize_failure", "node_lookup_failure"):
+            with self.subTest(failure=failure):
+                self.fixture["stale_pr"] = stale()
+                pr = self.fixture["stale_pr"]
+                pr["labels"] = connection(labels("needs-author-action"))
+                pr["timelineItems"]["nodes"].append({
+                    "__typename": "PullRequestCommit", "commit": {"oid": SHA, "committedDate": at(40)},
+                })
+                self.fixture[failure] = True
+                result = self.run_action(shell="handle_needs_author 1")
+                self.assertTrue(any(c[:2] == ["pr", "comment"] for c in self.calls))
+                self.assertIn("::warning::could not", result.stdout + result.stderr)
+                (self.work / "calls.jsonl").unlink(missing_ok=True)
+                self.fixture.pop(failure)
+
+    def test_observed_marker_dry_run_makes_no_calls_to_minimize(self):
+        self.fixture["stale_pr"] = stale()
+        pr = self.fixture["stale_pr"]
+        pr["labels"] = connection(labels("needs-author-action"))
+        pr["timelineItems"]["nodes"].append({
+            "__typename": "PullRequestCommit", "commit": {"oid": SHA, "committedDate": at(40)},
+        })
+        self.run_action(dry=True, shell="handle_needs_author 1")
+        self.assertEqual(self.mutations, [])
+        self.assertFalse(any(any("minimizeComment" in a for a in c) for c in self.calls))
 
 
 if __name__ == "__main__":

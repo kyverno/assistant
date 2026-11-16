@@ -287,10 +287,28 @@ late_commit_observed_at() {
     printf '%s' "$observed"
     return 0
   fi
-  local marker="<!-- pr-stale-author-action: observed $oid $now -->"
-  printf '%s\n' "$marker" > body.md
-  act gh pr comment "$n" --repo "$repo" --body-file body.md >&2 || return 1
+  local marker="<!-- pr-stale-author-action: observed $oid $now -->" url
+  # Visible text, so the comment never renders as "No description provided."; it is minimized right after.
+  {
+    printf '%s\n' "$marker"
+    printf 'Tracking the latest push for the stale sweep.\n'
+  } > body.md
+  url=$(act gh pr comment "$n" --repo "$repo" --body-file body.md) || return 1
+  [[ -n "$url" ]] && echo "$url" >&2
+  minimize_comment "$url" >&2
   printf '%s' "$now"
+}
+
+# Collapses the bot's own state comment. Cosmetic only: a failure here must never fail the sweep or change what it does.
+minimize_comment() {
+  local url="$1" id node
+  [[ "$url" =~ \#issuecomment-([0-9]+)$ ]] || return 0
+  id="${BASH_REMATCH[1]}"
+  node=$(gh api "repos/$repo/issues/comments/$id" --jq .node_id 2> /dev/null) && [[ -n "$node" ]] \
+    || { echo "::warning::could not look up comment $id to minimize it."; return 0; }
+  act gh api graphql -f query='mutation($id: ID!) { minimizeComment(input: {subjectId: $id, classifier: RESOLVED}) { minimizedComment { isMinimized } } }' \
+    -f id="$node" > /dev/null || echo "::warning::could not minimize comment $id."
+  return 0
 }
 
 force_push_after() {

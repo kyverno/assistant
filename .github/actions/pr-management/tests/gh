@@ -27,6 +27,10 @@ if args[:2] == ["api", "graphql"]:
     query = next(a[6:] for a in args if a.startswith("query="))
     if fixture.get("graphql_errors"):
         emit({"data": None, "errors": [{"message": "denied"}]})
+    if "minimizeComment" in query:
+        if fixture.get("minimize_failure"):
+            fail("minimize denied")
+        emit({"data": {"minimizeComment": {"minimizedComment": {"isMinimized": True}}}})
     if "search(" in query:
         emit({"data": {"search": fixture["discovery"]}})
     number = next((int(a[7:]) for a in args if a.startswith("number=")), None)
@@ -68,6 +72,11 @@ if args[:1] == ["api"]:
             fail("approval lookup failed")
         print(fixture.get("gated_count", 0))
         sys.exit(0)
+    if "/issues/comments/" in endpoint:
+        if fixture.get("node_lookup_failure"):
+            fail("comment lookup failed")
+        print("IC_node4242")
+        sys.exit(0)
     if "/pulls/" in endpoint:
         emit(fixture["live_pr"])
     if "/comments" in endpoint:
@@ -106,6 +115,8 @@ if args[:1] == ["pr"] and args[1] in {"edit", "comment", "close"}:
                 "createdAt": now, "body": body,
             })
         fixture_path.write_text(json.dumps(fixture))
+    if args[1] == "comment":
+        print("https://github.com/kyverno/example/pull/1#issuecomment-4242")
     sys.exit(0)
 
 fail(f"Unexpected gh invocation: {args}")
