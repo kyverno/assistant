@@ -49,9 +49,9 @@ sandbox. Kyverno is the first project to use it.
 ## Contents
 
 [What this is](#what-this-is) · [Key features](#key-features) · [The two assistants](#the-two-assistants) ·
-[The dashboard](#the-dashboard) · [Get started](#get-started) · [The maintainer assistant](#the-maintainer-assistant) ·
-[The contributor assistant](#the-contributor-assistant) · [Shared CI actions](#shared-ci-actions) ·
-[Prepare your repository](#prepare-your-repository) · [Built on Hermes](#built-on-hermes) ·
+[The dashboard](#the-dashboard) · [Get started](#get-started) · [Prepare your repository](#prepare-your-repository) ·
+[The maintainer assistant](#the-maintainer-assistant) · [The contributor assistant](#the-contributor-assistant) ·
+[Shared CI actions](#shared-ci-actions) · [Built on Hermes](#built-on-hermes) ·
 [Protected by OpenShell](#protected-by-openshell) · [Capabilities](#capabilities) ·
 [What is verified, and the limits](#what-is-verified-and-the-limits) · [Roadmap](#roadmap) · [Documentation](#documentation)
 
@@ -232,6 +232,182 @@ no API key to buy, paste or leak: sign in once and go. Which models you can pick
 All the options, per platform, plus upgrading, removing, tokens and troubleshooting:
 [`docs/getting-started.md`](docs/getting-started.md).
 
+## Prepare your repository
+
+The assistants are only as sharp as what your repository tells them. Preparing it takes one command and two pull requests you
+review. None of it is needed to start: without it the assistant still runs, and tells you which signals it is missing. All of
+it makes the answers better.
+
+### The quick way: one command
+
+From the first release after v0.2.0; needs Docker, `gh` (signed in) and Python 3:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kyverno/assistant/main/install.sh | sh -s -- setup owner/repo
+```
+
+With the `assistant` alias from [Run it](#run-it) it is `assistant setup owner/repo`. The first run of the maintainer
+assistant offers the same thing. It:
+
+1. **Looks** at the repository and says what is missing: an organisation pack, the PR automation, the labels, whether the automation is switched on.
+2. **Offers each as a checkbox.** Nothing is done without your yes, and each one opens a **pull request** in your repository (from your fork if you cannot push). It never overwrites a file.
+3. **Tells you how to make the pull request useful**: how to edit it, what to check, where the reference is.
+4. **Can wait** until you merge, then run the Sync labels workflow, check the labels exist, and (if you tick it) switch the automation on.
+
+It is safe to run again: it reports what is done and offers only what is left. `assistant-init` alone (the pack only) runs
+with no Docker: `curl -fsSL https://raw.githubusercontent.com/kyverno/assistant/main/container/assistant-init | python3 - owner/repo`.
+The sections below say what each part is, so you can review it, change it, or do it by hand.
+
+| You get | Lives in | What it gives the assistant |
+|---|---|---|
+| **PR automation** (CI) | 4 workflows and 3 config files in `.github/` | The labels it reads to build a queue: who is waiting on a maintainer, who on the author, what is stale |
+| **Organisation pack** | `.github/assistant-org.yaml` (and `.github/assistant-org-facts.md`) | What is generated, public API, critical and test-only here, which labels mean "ready", and what CI and releases do |
+| **Your own knowledge files** | `CODEOWNERS`, `AGENTS.md`, `labels.yml` | Who owns a path, how the code works, what each label means |
+
+### 1. The PR automation (CI)
+
+Deterministic GitHub Actions that need **no model, no container and no secret of yours**. They run on GitHub with the
+workflow's own token, and **preview** (print what they would do, change nothing) until an admin switches them on.
+
+**What it does**
+- **Path labels**: labels each PR from the files it changes (rules you write in `.github/labels.yml`), and flags merge conflicts.
+- **Readiness**: marks a PR `ready-for-review` or `needs-author-action` from its checks and review threads (DCO and CI are built in).
+- **Stale handling**: warns, then closes, PRs the author has left quiet (14 days, with a warning at 7). It never merges anything.
+- **Config check**: validates the config on every PR, with no token.
+
+**What the adoption pull request adds**
+
+| File | Purpose |
+|---|---|
+| `.github/workflows/pr-management.yaml` | readiness (hourly and on PR events) and stale (daily) |
+| `.github/workflows/pr-labelling.yaml` | path labels and the merge-conflict label |
+| `.github/workflows/sync-labels.yaml` | creates the labels, run by hand once |
+| `.github/workflows/check-pr-management.yaml` | validates the config on every PR |
+| `.github/pr-management.json` | reviewer team, exempt labels, timings |
+| `.github/pr-readiness-checks.yml` | which failing checks block a PR, and which are not the author's to fix |
+| `.github/labels.yml` | the label catalogue and path rules |
+
+The workflows are short callers pinned by full commit SHA to a shared workflow in this repository, so the logic never changes
+under you. If the repository already has a labeler or stale bot, the pull request lists it: keep one owner for each job.
+
+**What you can customise**
+
+| In | You can change |
+|---|---|
+| `.github/pr-management.json` | `fallback_reviewers` (the `@org/team` it mentions), `exempt_labels` (never stale, for example `no-stale`, `hold`), `close_days`, `warning_days`, `backlog_days`, `milestone_prefix`, `labels_file` |
+| `.github/labels.yml` | path rules for your areas (`area/...`), colours, descriptions, your own labels. The five lifecycle labels below must stay |
+| `.github/pr-readiness-checks.yml` | turn a built-in check off (`dco`, `ci`, `infra_checks`, `conflicts`, `threads`, `unanswered`), replace one, or add your own |
+| The workflow files | schedules, and the pin (`scripts/adopt-ci.sh --update-pin` moves it) |
+
+**Turning it on.** After you merge: run **Sync labels** (the launcher does this for you, with dry run off), read a few
+preview runs, then set the repository variable `PR_AUTOMATION_LIVE=true` (`gh variable set PR_AUTOMATION_LIVE --body true --repo owner/repo`; needs admin).
+The first live stale run can mark old quiet PRs stale; they cannot close until at least 7 days after the warning. Set it to
+`false` to go back to preview. An organisation that restricts which actions may run must allow `kyverno/assistant@*`,
+`actions/labeler@*` and `eps1lon/actions-label-merge-conflict@*`. Full steps, files and permissions:
+[`docs/adopting-actions.md`](docs/adopting-actions.md). Without the launcher: `scripts/adopt-ci.sh` from a checkout, or copy
+[`adopt-ci-templates/`](adopt-ci-templates/) by hand.
+
+### Labels: what is added, and how they help
+
+Five **lifecycle labels** are required. The adoption pull request adds them to `.github/labels.yml`, and Sync labels creates
+them in GitHub. They never delete a label you already have.
+
+| Label | Set when | How it helps the assistant |
+|---|---|---|
+| `ready-for-review` | Checks pass and threads are resolved: ready for a maintainer | The review queue starts here: "what should I review next" is the PRs that carry it |
+| `needs-author-action` | The PR is waiting on its author (a failing check, an unresolved thread, an unanswered review) | Not in the review queue, which is the PRs marked ready; it is where the stale-PR follow-up starts |
+| `workflow-approval-required` | CI workflows need a maintainer to approve a run | CI has not run yet, so the PR counts as waiting, not as clean |
+| `stale` | No author activity; will be closed if it stays quiet | The set the assistant helps you decide on: close, reassign, or find help |
+| `merge-conflicts` | The PR has merge conflicts | Waiting on the author |
+
+Beyond these, your **path labels** (`area/docs`, `area/api`, ...) come from the rules in `.github/labels.yml`. They group work by
+area, and the assistant reads each label's description, not just its name. Your own labels (`no-stale`, `hold`, ...) are yours:
+list the ones that mean "ready" or "waiting on the author" in the pack (`readiness`), and the assistant will use them too.
+Without these labels the assistant still works, but has no readiness signal to go on and says so.
+
+### 2. The organisation pack
+
+One small file holds everything specific to your organisation, never code. Publish it as `.github/assistant-org.yaml` in the
+repository itself, or once for all your repositories as `assistant-org.yaml` at the root of `<owner>/.github`. The repository's
+file replaces the shared one (nothing is merged). The assistant reads it from the default branch, so a pull request cannot
+change its own rules. A running assistant checks GitHub for changes at most every ten minutes, and keeps the last good copy if
+GitHub cannot be reached. A file it cannot read is an error, never a silent "no pack".
+
+**Write it with `init`.** `assistant setup` (or `assistant init`) reads the repository with your own `gh` login and proposes what is
+generated, API surface and test-only, the guides it finds, CODEOWNERS, label prefixes, review bots and the ready labels. It asks
+you to confirm the file classes and to pick the critical code, writes `assistant-org-facts.md` with a draft of how CI runs, and opens
+a pull request whose description says what to check. `--dry-run` only prints.
+
+**What you can put in it** (the pull request ends with a comment listing the ones `init` could not know):
+
+| Key | What it tells the assistant |
+|---|---|
+| `maintainer.file_classes` | Globs for `generated`, `api_surface`, `critical` and `test_only` (and `generated_exceptions`). Highest tier wins. Drives risk and ordering |
+| `maintainer.branch_gates` | A check that blocks every merge (a shared end-to-end suite): its status, the issue label that reports it red, a bypass label |
+| `maintainer.generated_inputs` | What feeds the generated files, so a PR touching an input merges before one touching the output |
+| `maintainer.dependency_bots` | Dependency bumps that need regenerated output in the same PR |
+| `maintainer.approval_bots`, `review_bots` | Bots whose approval counts as one signal, and bots whose comments are labelled as a bot's |
+| `maintainer.milestones` | How milestones are named, and the labels that mark urgency toward one |
+| `readiness` | `ready_labels`, `attention_labels`, `infra_checks` (failures that are not the author's to fix), `checks_file` |
+| `agent_docs`, `instructions_dir`, `codeowners`, `labels` | Where your guides, owners file and label catalogue are |
+| `assistant-org-facts.md` | Prose, in your words: how CI and releases work, flaky checks, review norms |
+| `ladder`, `entry_labels`, ... | Only the contributor assistant reads these |
+
+**Making a good one**
+1. **Start from `init`**, then read every glob. A glob that matches the wrong files is worse than none.
+2. **Keep `critical` short.** Name the code that costs the most when it is wrong (a schema migration, the core engine, the release workflow). If everything is critical, nothing stands out.
+3. **List `api_surface`**: what users call (commands, public tools, API folders). `init` finds it only where a folder says so.
+4. **Say what a green PR cannot show** in the facts: a suite that runs only after merge, a release made by a tag, no CI on PRs at all. The assistant repeats what you write, so write only what is true.
+5. **Add `infra_checks` and `branch_gates`** if a check often fails for reasons that are not the author's, or one check blocks everyone.
+6. **Check it.** Ask the assistant for `repo_pack`: it returns the rules exactly as loaded, or the error that names the key. Then ask for a queue and read the file classification in the answer.
+7. **Keep it alive.** Add to the facts' "Where the assistant keeps getting it wrong" whenever it does.
+
+A mistake in the pack is an error that names the key. The full reference, every key with an example, is in
+[`docs/organisation-pack.md`](docs/organisation-pack.md). Kyverno's own pack, with real gates and generated inputs, is in
+[`container/org/kyverno/`](container/org/kyverno/) as a worked example. To bake a pack into an image you build, see the same page.
+
+### 3. Keep your own knowledge files accurate
+
+It grounds its answers in what your repository says about itself, so the better those files are, the less it guesses:
+
+| File | What the assistant uses it for |
+|---|---|
+| `CODEOWNERS` | Who owns a changed path; who to hand a stale PR to. Read live, last match wins, as GitHub does |
+| `AGENTS.md` (root and per package), `ARCHITECTURE.md` | Grounding an issue or a PR in the real code before classifying it. It finds them with code search when it needs them |
+| `.github/labels.yml` | What each label means (it reads the label *descriptions*, not just the names) |
+| Your milestones | Release proximity in the ranking |
+
+If a package has no doc, it says its knowledge there is only what the code, owners and history show.
+
+### 4. Create a token
+
+A fine-grained personal access token for the **one repository**, from your own account: Contents **Read**, Pull requests
+**Read and write**, Issues **Read and write**, Checks **Read**, and Code scanning, Dependabot and Secret scanning alerts
+**Read**; organisation Members **Read** if CODEOWNERS uses teams. No Contents write and no Administration: GitHub itself then
+refuses to merge. Or let the launcher use your `gh` sign-in. Step by step: [`docs/setup.md`](docs/setup.md#1-create-a-github-token).
+
+### For organisations: publish an assistant policy
+
+An organisation decides which repositories its people may point the assistant at, and which kind of token they may use, by
+publishing `assistant-policy.yaml` at the root of its `.github` repository (an [example](container/assistant-policy.yaml) is
+in this repository). When someone enters `acme/api`, the launcher looks for `acme/.github/assistant-policy.yaml` and asks
+`Use it?`: answer `n` to go without, or type another location (an https URL or a file). The answer is remembered, and they are
+asked again only if the organisation changes the file. Set `ASSISTANT_POLICY` to a file or https URL to skip the questions, or
+bake the file into your own image.
+
+| Key | Meaning |
+|---|---|
+| `repos` | The `owner/repo` patterns (`acme/*`, `acme/api`) the assistant may be started on. Anything else is refused. An owner is never a wildcard |
+| `default_repo` | Offered when the launcher asks which repository to work on |
+| `fork_repos` | Which fork repositories `--push-to-fork` allows |
+| `token` | `fine-grained` refuses a token that can act beyond selected repositories (the `gh` sign-in, a classic token) and does not offer the `gh` sign-in. `any` accepts either |
+
+A policy that cannot be read or is malformed stops the launcher: it never falls back to no limits. The check runs on the
+person's machine, so it stops mistakes, not someone who edits their own copy; what the agent can do once it is running is
+limited by OpenShell's policies, not by this file. The published image ships Kyverno's policy as the fallback (default
+repository, fork names, no limit on repositories).
+
+
 ## The maintainer assistant
 
 It works your pull-request queue and issue backlog the way a careful co-maintainer would: it finds what is ready, works
@@ -366,106 +542,6 @@ the actions themselves need no checkout. `scripts/adopt-ci.sh` is a helper that 
 name. It runs from a checkout of this repository, or with no clone through the launcher (`assistant setup owner/repo`, which also
 offers the organisation pack); you can also copy the files from [`adopt-ci-templates/`](adopt-ci-templates/) by hand. Steps, files and permissions:
 [`docs/adopting-actions.md`](docs/adopting-actions.md).
-
-## Prepare your repository
-
-The assistants are only as sharp as what your repository tells them, so do this **before** you run the installer, or let the
-first run offer it. Three things make them effective (the contributor assistant reads the same files), and organisations can
-add a fourth.
-
-**The quick way, one command** (from the first release after v0.2.0; needs Docker, `gh` and Python 3):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/kyverno/assistant/main/install.sh | sh -s -- setup owner/repo
-```
-
-It shows what the repository lacks (an organisation pack, the PR automation), offers to set up each with a checkbox, opens a
-pull request for it, tells you how to edit that pull request, can wait until you merge it, and then creates the labels and
-switches the automation on. With the `assistant` alias from [Run it](#run-it) it is `assistant setup owner/repo`. Steps 1 and 2
-below say what it does, and how to do each by hand.
-
-### 1. Adopt the shared CI and labels first
-
-The queue and stale-PR skills read the labels the actions maintain: `ready-for-review`, `needs-author-action`,
-`workflow-approval-required`, `stale`, `merge-conflicts`, and path labels from your `.github/labels.yml`. A repository that
-already runs them hands the assistant its signals for free. Without them it still runs, but it has no readiness labels to go
-on and says so. See [Shared CI actions](#shared-ci-actions) above. `assistant setup owner/repo` does this and step 2 for you.
-
-### 2. Write your organisation pack
-
-The easy way, with no clone and no Docker: `curl -fsSL https://raw.githubusercontent.com/kyverno/assistant/main/container/assistant-init | python3 - owner/repo` (or several repositories; with a checkout, `container/assistant init`). It reads each repository with your own `gh` login,
-proposes what is generated, API surface and test-only in your files, asks you to confirm those and to pick the critical code, takes guides, owners, labels and review bots as the repository states them, shows the file, and opens a pull request that adds it. For several repositories it asks whether to write one shared pack or
-one per repository. Nothing is written until you confirm, and `--dry-run` only prints. The written pack is yours to edit.
-To write it by hand instead:
-
-Everything specific to your organisation lives in one small file, never in code. Publish it as `.github/assistant-org.yaml`
-in the repository itself (and optionally `.github/assistant-org-facts.md`), or once for all your repositories as
-`assistant-org.yaml` at the root of `<owner>/.github`. The published image reads it from there: no clone, no build. `org.yaml` says which paths are generated, API surface, critical or test-only, whether you have a merge gate, and which
-labels mean "ready". `facts.md` is optional prose in your own words. About ten lines get you started:
-
-```yaml
-name: acme
-readiness:
-  ready_labels: [ready-for-review]
-  attention_labels: [needs-author-action]
-maintainer:
-  file_classes:
-    generated: ["**/zz_generated.*.go", "config/crds/**/*.yaml"]
-    critical:  ["pkg/engine/**", "pkg/webhooks/**"]
-    test_only: ["*_test.go", "test/**"]
-```
-
-Without a pack the assistant still works: it reads every file as ordinary, mentions no gate, and tells you which signals it
-is missing. A mistake in the pack is an error that names the key. Reference: [`docs/organisation-pack.md`](docs/organisation-pack.md);
-Kyverno's is in [`container/org/kyverno/`](container/org/kyverno/), as a worked example.
-
-For the repository you point it at, the assistant reads `<owner>/<repo>/.github/assistant-org.yaml` first and, if there is none,
-`<owner>/.github/assistant-org.yaml`. The repository's own file replaces the shared one: nothing is merged. Both are read from the
-default branch, so a pull request cannot change its own rules. It remembers a pack for ten minutes and keeps the last good copy if
-GitHub cannot be reached. A file it cannot read is an error, never a silent "no pack". The published image also carries Kyverno's
-pack, used only for the `kyverno` organisation. To bake your own into an image instead, see
-[`docs/organisation-pack.md`](docs/organisation-pack.md).
-
-### 3. Keep your own knowledge files accurate
-
-It grounds its answers in what your repository says about itself, so the better those files are, the less it guesses:
-
-| File | What the assistant uses it for |
-|---|---|
-| `CODEOWNERS` | Who owns a changed path; who to hand a stale PR to. Read live, last match wins, as GitHub does |
-| `AGENTS.md` (root and per package), `ARCHITECTURE.md` | Grounding an issue or a PR in the real code before classifying it. It finds them with code search when it needs them |
-| `.github/labels.yml` | What each label means (it reads the label *descriptions*, not just the names) |
-| Your milestones | Release proximity in the ranking |
-
-If a package has no doc, it says its knowledge there is only what the code, owners and history show.
-
-### 4. Create a token
-
-A fine-grained personal access token for the **one repository**, from your own account: Contents **Read**, Pull requests
-**Read and write**, Issues **Read and write**, Checks **Read**, and Code scanning, Dependabot and Secret scanning alerts
-**Read**; organisation Members **Read** if CODEOWNERS uses teams. No Contents write and no Administration: GitHub itself then
-refuses to merge. Or let the launcher use your `gh` sign-in. Step by step: [`docs/setup.md`](docs/setup.md#1-create-a-github-token).
-
-### For organisations: publish an assistant policy
-
-An organisation decides which repositories its people may point the assistant at, and which kind of token they may use, by
-publishing `assistant-policy.yaml` at the root of its `.github` repository (an [example](container/assistant-policy.yaml) is
-in this repository). When someone enters `acme/api`, the launcher looks for `acme/.github/assistant-policy.yaml` and asks
-`Use it?`: answer `n` to go without, or type another location (an https URL or a file). The answer is remembered, and they are
-asked again only if the organisation changes the file. Set `ASSISTANT_POLICY` to a file or https URL to skip the questions, or
-bake the file into your own image.
-
-| Key | Meaning |
-|---|---|
-| `repos` | The `owner/repo` patterns (`acme/*`, `acme/api`) the assistant may be started on. Anything else is refused. An owner is never a wildcard |
-| `default_repo` | Offered when the launcher asks which repository to work on |
-| `fork_repos` | Which fork repositories `--push-to-fork` allows |
-| `token` | `fine-grained` refuses a token that can act beyond selected repositories (the `gh` sign-in, a classic token) and does not offer the `gh` sign-in. `any` accepts either |
-
-A policy that cannot be read or is malformed stops the launcher: it never falls back to no limits. The check runs on the
-person's machine, so it stops mistakes, not someone who edits their own copy; what the agent can do once it is running is
-limited by OpenShell's policies, not by this file. The published image ships Kyverno's policy as the fallback (default
-repository, fork names, no limit on repositories).
 
 ## Built on Hermes
 
