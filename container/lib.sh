@@ -232,3 +232,67 @@ binaries:
   - /usr/lib/git-core/git-remote-https
 EOF
 }
+
+# --- the Slack review digest (container/assistant --slack, also offered on a maintainer's first run) ---
+# The bot token goes to OpenShell as a provider; where and when to post are not secret and are kept in the sandbox's .env.
+SLACK_PROVIDER=assistant-slack
+SLACK_MANIFEST_URL='https://api.slack.com/apps?new_app=1&manifest_json=%7B%22display_information%22%3A%7B%22name%22%3A%22Assistant%20digest%22%2C%22description%22%3A%22Posts%20the%20daily%20review%20digest%22%7D%2C%22features%22%3A%7B%22bot_user%22%3A%7B%22display_name%22%3A%22assistant%22%2C%22always_online%22%3Afalse%7D%7D%2C%22oauth_config%22%3A%7B%22scopes%22%3A%7B%22bot%22%3A%5B%22chat%3Awrite%22%2C%22im%3Awrite%22%5D%7D%7D%2C%22settings%22%3A%7B%22org_deploy_enabled%22%3Afalse%2C%22socket_mode_enabled%22%3Afalse%2C%22token_rotation_enabled%22%3Afalse%7D%7D'
+
+# This machine's time zone (IANA name), so "09:00" means 09:00 for you and not for the sandbox's clock.
+slack_tz() {
+  local z
+  z=$(readlink /etc/localtime 2>/dev/null | sed -n 's#.*/zoneinfo/##p')
+  [ -z "$z" ] && z=$(cat /etc/timezone 2>/dev/null)
+  [[ "$z" =~ ^[A-Za-z0-9_+/-]+$ ]] || z=UTC
+  echo "$z"
+}
+
+# Asks what the digest needs. Sets SLACK_TOKEN (empty when one is already stored in OpenShell), SLACK_CHANNEL,
+# SLACK_TIME and SLACK_TZ. ASSISTANT_SLACK_TOKEN, ASSISTANT_SLACK_CHANNEL and ASSISTANT_SLACK_TIME skip the questions.
+acquire_slack() {
+  local reply
+  SLACK_TOKEN=""
+  if ! openshell provider get "$SLACK_PROVIDER" >/dev/null 2>&1; then
+    SLACK_TOKEN="${ASSISTANT_SLACK_TOKEN:-}"
+    if [ -z "$SLACK_TOKEN" ]; then
+      info "It needs a Slack bot token. Two minutes:"
+      info "  1. Open this link, pick your workspace, and click Create:"
+      info "     $SLACK_MANIFEST_URL"
+      info "  2. Click Install to Workspace and Allow."
+      info "  3. Under OAuth & Permissions, copy the Bot User OAuth Token (xoxb-...)."
+      info "The token goes to OpenShell, never into the sandbox. If your workspace does not let you add apps, ask an admin."
+      read -r -s -p "  Slack bot token: " SLACK_TOKEN </dev/tty
+      echo
+    fi
+    [ -z "$SLACK_TOKEN" ] && { fail "no Slack token entered (this step needs a terminal to ask for it)"; exit 1; }
+    # Check it before storing it. The token goes in through stdin, so it never shows in a process list.
+    reply=$(printf 'header = "Authorization: Bearer %s"\n' "$SLACK_TOKEN" | curl -s -m 15 -X POST -K - https://slack.com/api/auth.test)
+    case "$reply" in
+      *'"ok":true'*) pass "Slack accepts the token (workspace: $(printf '%s' "$reply" | sed -n 's/.*"team":"\([^"]*\)".*/\1/p'))" ;;
+      *'"ok":false'*) fail "Slack rejected the token: $(printf '%s' "$reply" | sed -n 's/.*"error":"\([^"]*\)".*/\1/p')"; exit 1 ;;
+      *) info "could not check the token with Slack — continuing" ;;
+    esac
+  fi
+  SLACK_CHANNEL="${ASSISTANT_SLACK_CHANNEL:-}"
+  if [ -z "$SLACK_CHANNEL" ]; then
+    info "Where should it post? Your Slack member ID (U...: it sends you a DM; profile menu, Copy member ID) or a"
+    info "channel ID (C...: invite the bot there first with /invite @assistant)."
+    read -r -p "  Member or channel ID: " SLACK_CHANNEL </dev/tty
+  fi
+  [[ "$SLACK_CHANNEL" =~ ^[CDGUW][A-Z0-9]{7,}$ ]] || { fail "'$SLACK_CHANNEL' is not a Slack member or channel ID (it starts with U, W, C, G or D)"; exit 1; }
+  SLACK_TIME="${ASSISTANT_SLACK_TIME:-}"
+  if [ -z "$SLACK_TIME" ]; then
+    read -r -p "  What time, on weekdays, in your time zone ($(slack_tz))? [09:00]: " SLACK_TIME </dev/tty
+    SLACK_TIME="${SLACK_TIME:-09:00}"
+  fi
+  [[ "$SLACK_TIME" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] || { fail "'$SLACK_TIME' is not a time like 09:00 (24 hours)"; exit 1; }
+  # shellcheck disable=SC2034  # used by the launcher that sources this file
+  SLACK_TZ="$(slack_tz)"
+}
+
+# Writes KEY=VALUE lines into the profile's .env inside the sandbox (values are checked by the caller). Needs instance_exec.
+sandbox_env_set() {
+  # shellcheck disable=SC2016  # the variables are expanded by the shell inside the sandbox
+  instance_exec sh -c 'f=/opt/hermes-home/.hermes/profiles/$1/.env; shift
+    for kv in "$@"; do k=${kv%%=*}; { grep -v "^$k=" "$f" 2>/dev/null; echo "$kv"; } > "$f.new"; cat "$f.new" > "$f"; rm -f "$f.new"; done' sh "$HERMES_PROFILE" "$@"
+}

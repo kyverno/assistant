@@ -1,0 +1,27 @@
+# Slack bot token for the daily review digest, held by OpenShell. The sandbox only sees a placeholder in
+# SLACK_BOT_TOKEN; the proxy swaps in the real token on requests to slack.com, and only from Hermes' Python.
+# Only the calls the digest needs: post a message, open a DM, check the token. Reading channels is not allowed.
+id: assistant-slack
+display_name: Slack (assistant)
+description: Slack bot token for the assistant's review digest, injected by the proxy only
+category: messaging
+credentials:
+  - name: bot_token
+    description: Slack bot token (xoxb-...) of an app with the chat:write and im:write scopes
+    env_vars: [SLACK_BOT_TOKEN]
+    required: true
+    auth_style: bearer
+    header_name: authorization
+discovery:
+  credentials: [bot_token]
+endpoints:
+  - host: slack.com
+    port: 443
+    protocol: rest
+    enforcement: enforce
+    rules:
+      - allow: { method: POST, path: "/api/chat.postMessage" }
+      - allow: { method: POST, path: "/api/conversations.open" }
+      - allow: { method: POST, path: "/api/auth.test" }
+binaries:
+  - /opt/hermes-home/.hermes/tools/python-*/bin/python*
