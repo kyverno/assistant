@@ -238,6 +238,54 @@ class Setup(unittest.TestCase):
             init.pr_state, init.time.sleep = saved
         self.assertEqual(states, {"a": "MERGED", "b": "CLOSED"})
 
+    def _sync(self, runs, labels_exist=True):
+        """Run sync_labels against a scripted history of the workflow's runs; returns (result, commands run)."""
+        history = iter(runs)
+        commands = []
+        saved = (init.workflow_runs, init.gh, init.api, init.time.sleep)
+        last = []
+        def listing(repo):
+            nonlocal last
+            last = next(history, last)
+            return last
+        init.workflow_runs = listing
+        init.gh = lambda *a, **k: commands.append(a) or ""
+        init.api = lambda path, raw=False: {"name": "ready-for-review"} if labels_exist else None
+        init.time.sleep = lambda s: None
+        try:
+            return init.sync_labels("o/r"), commands
+        finally:
+            init.workflow_runs, init.gh, init.api, init.time.sleep = saved
+
+    def test_sync_labels_waits_for_the_run_and_checks_the_label_exists(self):
+        run = {"databaseId": 2, "status": "in_progress", "conclusion": None, "url": "u"}
+        ok, commands = self._sync([[{"databaseId": 1, "status": "completed", "conclusion": "success", "url": "old"}],
+                                   [], [run], [{**run, "status": "completed", "conclusion": "success"}]])
+        self.assertTrue(ok)
+        self.assertEqual(commands[0][:2], ("workflow", "run"))
+
+    def test_a_failed_sync_is_reported_not_treated_as_done(self):
+        failed = {"databaseId": 2, "status": "completed", "conclusion": "failure", "url": "u"}
+        self.assertFalse(self._sync([[], [failed]])[0])
+
+    def test_a_sync_that_made_no_label_is_not_treated_as_done(self):
+        done = {"databaseId": 2, "status": "completed", "conclusion": "success", "url": "u"}
+        self.assertFalse(self._sync([[], [done]], labels_exist=False)[0])
+
+    def test_the_automation_is_not_switched_on_when_the_labels_failed(self):
+        commands = []
+        saved = (init.sync_labels, init.gh, init.api, init.menu, init.interactive)
+        init.sync_labels = lambda repo: False
+        init.gh = lambda *a, **k: commands.append(a) or ""
+        init.api = lambda path, raw=False: {"value": "false"} if "variables" in path else None
+        init.interactive = lambda: True
+        init.menu = lambda title, options, multi=False, **k: options          # both items ticked
+        try:
+            init.finish_ci("o/r")
+        finally:
+            init.sync_labels, init.gh, init.api, init.menu, init.interactive = saved
+        self.assertEqual([c for c in commands if c[:2] == ("variable", "set")], [])
+
     def test_the_next_steps_say_how_to_edit_it_and_where_the_reference_is(self):
         import contextlib, io
         out = io.StringIO()

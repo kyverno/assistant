@@ -897,6 +897,53 @@ def adopt_script() -> str:
     return ""
 
 
+SYNC_WORKFLOW = "sync-labels.yaml"
+SYNC_TIMEOUT = 300
+
+
+def workflow_runs(repo: str) -> list[dict]:
+    out = gh("run", "list", "--repo", repo, "--workflow", SYNC_WORKFLOW, "--limit", "10", "--json", "databaseId,status,conclusion,url", check=False)
+    try:
+        return json.loads(out or "[]")
+    except ValueError:
+        return []
+
+
+def sync_labels(repo: str) -> bool:
+    """Start the Sync labels workflow and wait for it, so the labels are known to exist before anything depends on them."""
+    before = {r["databaseId"] for r in workflow_runs(repo)}
+    gh("workflow", "run", SYNC_WORKFLOW, "--repo", repo)
+    run: Optional[dict] = None
+    waited = 0
+    try:
+        while waited <= SYNC_TIMEOUT:
+            new = [r for r in workflow_runs(repo) if r["databaseId"] not in before]
+            run = max(new, key=lambda r: r["databaseId"]) if new else run
+            if run and run["status"] == "completed":
+                break
+            sys.stdout.write("\r\x1b[K" + dim("Syncing labels (Ctrl-C stops waiting; the run goes on)..."))
+            sys.stdout.flush()
+            time.sleep(3)
+            waited += 3
+    except KeyboardInterrupt:
+        pass
+    sys.stdout.write("\r\x1b[K")
+    if run is None:
+        print(yellow("Started Sync labels, but could not find its run. Look in the Actions tab."))
+        return False
+    if run["status"] != "completed":
+        print(yellow(f"Sync labels is still running: {run['url']}"))
+        return False
+    if run.get("conclusion") != "success":
+        print(red(f"Sync labels {run.get('conclusion')}: {run['url']}"))
+        return False
+    if api(f"repos/{repo}/labels/ready-for-review") is None:
+        print(yellow(f"Sync labels finished but ready-for-review does not exist: check {run['url']}"))
+        return False
+    print(green("Labels created") + f" ({run['url']})")
+    return True
+
+
 def finish_ci(repo: str) -> None:
     """The PR automation is adopted: are its labels created, and is it switched on? Offer what is left (only on a terminal)."""
     labels = api(f"repos/{repo}/labels/ready-for-review") is not None
@@ -918,13 +965,16 @@ def finish_ci(repo: str) -> None:
     if live is False:
         options.append(Option("Switch the automation on", "sets PR_AUTOMATION_LIVE=true; the first run can mark old quiet PRs stale", "live", False))
     picked = [o.value for o in menu("Finish the PR automation? (space ticks, enter confirms; none ticked skips)", options, multi=True)]
+    labels_ok = True
     try:
         if "labels" in picked:
-            gh("workflow", "run", "sync-labels.yaml", "--repo", repo)
-            print(green("Started Sync labels") + ": the labels appear in about a minute.")
+            labels_ok = sync_labels(repo)
         if "live" in picked:
-            gh("variable", "set", "PR_AUTOMATION_LIVE", "--body", "true", "--repo", repo)
-            print(green("Switched on") + ": readiness and path labels act on the next PR event, stale in its daily run.")
+            if not labels_ok:
+                print(yellow("Not switching it on: the labels are not there yet. Fix that first, then switch it on."))
+            else:
+                gh("variable", "set", "PR_AUTOMATION_LIVE", "--body", "true", "--repo", repo)
+                print(green("Switched on") + ": readiness and path labels act on the next PR event, stale in its daily run.")
     except GhError as exc:
         print(red(str(exc)), file=sys.stderr)
     for key, command in (("labels", f"gh workflow run sync-labels.yaml --repo {repo}"),
