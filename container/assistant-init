@@ -403,7 +403,7 @@ def workflow_info(path: str, text: str) -> tuple[str, set[str]]:
                     km = re.match(r"\s+([a-z-]+):", nxt)
                     if km:
                         keys.add(km.group(1))
-                if "tags" in keys and not keys & {"branches", "paths"}:
+                if "tags" in keys and not keys & {"branches", "branches-ignore", "paths", "paths-ignore"}:
                     triggers.discard("push")
                     triggers.add("tag_push")
                 break
@@ -920,6 +920,7 @@ def adopt_script() -> str:
     return ""
 
 
+LIFECYCLE_LABELS = ("needs-author-action", "ready-for-review", "workflow-approval-required", "stale", "merge-conflicts")
 SYNC_WORKFLOW = "sync-labels.yaml"
 SYNC_TIMEOUT = 300
 
@@ -961,8 +962,9 @@ def sync_labels(repo: str) -> bool:
     if run.get("conclusion") != "success":
         print(red(f"Sync labels {run.get('conclusion')}: {run['url']}"))
         return False
-    if api(f"repos/{repo}/labels/ready-for-review") is None:
-        print(yellow(f"Sync labels finished but ready-for-review does not exist: check {run['url']}"))
+    missing = [name for name in LIFECYCLE_LABELS if api(f"repos/{repo}/labels/{name}") is None]
+    if missing:
+        print(yellow(f"Sync labels finished but these labels do not exist: {', '.join(missing)}. Check {run['url']}"))
         return False
     print(green("Labels created") + f" ({run['url']})")
     return True
@@ -970,7 +972,7 @@ def sync_labels(repo: str) -> bool:
 
 def finish_ci(repo: str) -> None:
     """The PR automation is adopted: are its labels created, and is it switched on? Offer what is left (only on a terminal)."""
-    labels = api(f"repos/{repo}/labels/ready-for-review") is not None
+    labels = all(api(f"repos/{repo}/labels/{name}") is not None for name in LIFECYCLE_LABELS)
     try:            # reading a repository variable needs admin: without it GitHub refuses, which is not the same as "not set"
         var = api(f"repos/{repo}/actions/variables/PR_AUTOMATION_LIVE")
         live: Optional[bool] = isinstance(var, dict) and var.get("value") == "true"

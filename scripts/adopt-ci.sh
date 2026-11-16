@@ -6,9 +6,8 @@
 #   scripts/adopt-ci.sh --reviewers @your-org/maintainers --dry-run your-org/repo-a
 #   scripts/adopt-ci.sh --update-pin your-org/repo-a    # repos that already use the action: move only its pin
 #
-# Existing files are never overwritten. The action is pinned to the current commit of the source's default branch (or, in a
-# checkout, to its HEAD when that commit is already on it). It runs from a checkout, or from the launcher folder the
-# installer extracts, with no clone.
+# Existing files are never overwritten. The action is pinned to the current commit of the source's default branch (or to
+# --ref, which must be on it). It runs from a checkout, or from the launcher folder the installer extracts, with no clone.
 set -euo pipefail
 
 self=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -78,11 +77,7 @@ on_default_branch() { # SHA
   [[ "$(gh api "repos/${source_repo}/compare/${1}...${source_branch}" --jq .status 2> /dev/null)" =~ ^(ahead|identical)$ ]]
 }
 if [[ -z "$ref" ]]; then
-  if [[ -d "$here/.git" ]] && head=$(git -C "$here" rev-parse HEAD 2> /dev/null) && on_default_branch "$head"; then
-    ref="$head"
-  else
-    ref=$(gh api "repos/${source_repo}/commits/${source_branch}" --jq .sha) || die "cannot read ${source_repo}@${source_branch}"
-  fi
+  ref=$(gh api "repos/${source_repo}/commits/${source_branch}" --jq .sha) || die "cannot read ${source_repo}@${source_branch}"
 fi
 [[ "$ref" =~ ^[0-9a-f]{40}$ ]] || die "--ref must be a full 40-character commit SHA"
 on_default_branch "$ref" || die "commit ${ref} is not on ${source_repo}@${source_branch}; pin a commit that is merged there"

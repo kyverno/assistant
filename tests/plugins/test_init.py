@@ -273,6 +273,19 @@ class Setup(unittest.TestCase):
         done = {"databaseId": 2, "status": "completed", "conclusion": "success", "url": "u"}
         self.assertFalse(self._sync([[], [done]], labels_exist=False)[0])
 
+    def test_one_label_is_not_enough_to_call_the_sync_done(self):
+        done = {"databaseId": 2, "status": "completed", "conclusion": "success", "url": "u"}
+        history = iter([[], [done]])
+        saved = (init.workflow_runs, init.gh, init.api, init.time.sleep)
+        init.workflow_runs = lambda repo: next(history, [done])
+        init.gh = lambda *a, **k: ""
+        init.api = lambda path, raw=False: {"name": "x"} if path.endswith("/ready-for-review") else None
+        init.time.sleep = lambda s: None
+        try:
+            self.assertFalse(init.sync_labels("o/r"))
+        finally:
+            init.workflow_runs, init.gh, init.api, init.time.sleep = saved
+
     def test_the_automation_is_not_switched_on_when_the_labels_failed(self):
         commands = []
         saved = (init.sync_labels, init.gh, init.api, init.menu, init.interactive)
@@ -301,7 +314,7 @@ class Setup(unittest.TestCase):
     def test_a_repository_with_both_is_left_alone(self):
         calls, saved = self._with({f"repos/o/r/contents/.github/{init.PACK}": {"name": "x"},
                                    "repos/o/r/contents/.github/workflows": [{"name": "pr-management.yaml"}],
-                                   "repos/o/r/labels/ready-for-review": {"name": "ready-for-review"},
+                                   **{f"repos/o/r/labels/{n}": {"name": n} for n in init.LIFECYCLE_LABELS},
                                    "repos/o/r/actions/variables/PR_AUTOMATION_LIVE": {"value": "true"}}, tty=True)
         try:
             self.assertEqual(init.setup("o/r"), 0)
@@ -346,6 +359,9 @@ class Workflows(unittest.TestCase):
         both = "name: B\non:\n  push:\n    branches: [main]\n    tags: [\"v*\"]\n"
         self.assertEqual(init.workflow_info("b.yml", both)[1], {"push"})
         self.assertEqual(init.workflow_info("c.yml", "name: C\non: [push, pull_request]\n")[1], {"push", "pull_request"})
+        for ignore in ("branches-ignore: [old]", "paths-ignore: [docs/**]"):
+            text = f"name: D\non:\n  push:\n    tags: [\"v*\"]\n    {ignore}\n"
+            self.assertEqual(init.workflow_info("d.yml", text)[1], {"push"}, ignore)
 
 
 class Description(unittest.TestCase):
