@@ -49,9 +49,9 @@ sandbox. Kyverno is the first project to use it.
 ## Contents
 
 [What this is](#what-this-is) · [Key features](#key-features) · [The two assistants](#the-two-assistants) ·
-[The dashboard](#the-dashboard) · [Get started](#get-started) · [Prepare your repository](#prepare-your-repository) ·
-[The maintainer assistant](#the-maintainer-assistant) · [The contributor assistant](#the-contributor-assistant) ·
-[Shared CI actions](#shared-ci-actions) · [Built on Hermes](#built-on-hermes) ·
+[The dashboard](#the-dashboard) · [Get started](#get-started) · [The maintainer assistant](#the-maintainer-assistant) ·
+[The contributor assistant](#the-contributor-assistant) · [Shared CI actions](#shared-ci-actions) ·
+[Prepare your repository](#prepare-your-repository) · [Built on Hermes](#built-on-hermes) ·
 [Protected by OpenShell](#protected-by-openshell) · [Capabilities](#capabilities) ·
 [What is verified, and the limits](#what-is-verified-and-the-limits) · [Roadmap](#roadmap) · [Documentation](#documentation)
 
@@ -232,6 +232,141 @@ no API key to buy, paste or leak: sign in once and go. Which models you can pick
 All the options, per platform, plus upgrading, removing, tokens and troubleshooting:
 [`docs/getting-started.md`](docs/getting-started.md).
 
+## The maintainer assistant
+
+It works your pull-request queue and issue backlog the way a careful co-maintainer would: it finds what is ready, works
+out the order, explains every call with a link, and does the paperwork.
+
+| The problem | What it does |
+|---|---|
+| "Which PRs can I merge today?" | Fetches the whole candidate set, drops what is not ready, and gives an order with a reason per PR |
+| Merging one PR forces rebases on others | Flags PRs that touch files another PR changes, so you see the rebase coming |
+| PRs that depend on each other | Finds stacked branches, "depends on #N" references and generated-file input/output pairs, and orders them |
+| A red branch gate blocks everything | States it as a fact on every PR it affects, and leaves the bypass decision to you |
+| Dependabot PRs pile up | A verdict per PR (merge now, fix first, your review, wait, close), from who calls the dependency |
+| Issues need triage | Classifies from the real code, finds duplicates and competing PRs, says how far along each fix is |
+| Stale and abandoned PRs | Recommends close, reassign, or take over the branch, with the reason from the linked issue |
+| GitHub Discussions | Reads the thread and drafts a reply; nothing is posted until you say so |
+| "What did we decide last time?" | Remembers past incidents, rejected PRs and your working style between sessions |
+
+Everything it says is linked to the PR, issue, file or run it comes from. When it looked and found nothing, it says "not
+found there" instead of guessing.
+
+### How it thinks
+
+**Code computes the facts, the model makes the judgment, and you make the decision.** Anything that can be computed exactly
+(a dependency, a file overlap, a gate) is computed by a deterministic tool, so the model does not guess it. The model then
+explains and ranks, citing what the tools returned.
+
+| Signal | Where it comes from | What it tells you |
+|---|---|---|
+| Stacked branches | A PR's base branch is another candidate's head | Merge the base first |
+| Generated-file order | One PR changes a generated file's *input*, another its *output* | The input has to land first, or the output goes stale |
+| Explicit references | "Depends on #N", "Blocked by #N", "Stacks on #N", "Parent: #N" in the body | Order, including PRs outside the set (it fetches their state) |
+| Competing PRs | Two PRs close the same issue | Duplicate effort: flagged for you, not ordered |
+| Same-file overlap | Two PRs touch one file | A likely rebase conflict; it can compare the real diff hunks to see if the *lines* collide |
+| Same-package overlap | Same directory, different files | Cannot conflict in git, but worth reviewing together |
+| Rebase flag | A PR touches files an earlier-ranked PR changes | It will need updating after that one merges |
+| Branch gate | An open gate-failure issue for the PR's base branch | Merging is blocked on that branch whatever the files; review is not |
+| File class | Your organisation pack: generated, API surface, critical, test-only | How risky the change is after merge |
+| Past incidents | Its memory of package pairs that broke the post-merge suite before | A specific, citable risk |
+
+Cycles are detected and handed to you by number. Among PRs with no hard dependency between them it ranks with a fixed
+ladder and says which rung decided each position: related PRs stay together; **severity of the closing issue**, judged
+from its content (critical: crash, outage, data loss, security; then high, medium, low); release-urgency labels and
+milestone proximity; bot approval and unresolved threads; the author's relationship to the project; size as a pure
+tiebreak. Anything you said this session overrides the ladder. **Readiness is separate from priority:** a high-severity PR
+with changes requested or a failing check is never listed under "approve now"; the blocker is named instead.
+
+An illustrative queue answer (numbers invented):
+
+```
+Queue for milestone 1.20: 14 of 31 open PRs
+
+Group 1: no hard dependency between these
+  #18102  split admission handlers      closes #17990 (CRITICAL: crash on startup)
+          ✓ checks green · bot-approved · 0 open threads
+          ⚠ #18110 is stacked on this one: merge #18102 first
+  #18077  fix cleanup TTL parsing       closes #17811 (HIGH: regression in 1.19)
+          ✓ ready · touches pkg/cleanup, also changed by #18090 → review together
+Group 2
+  #18110  stacked on #18102             ⏳ waits for #18102
+  #18090  rename policy fields          ⚠ rebase flag: shares api/v1/policy_types.go with #18102
+Gate: main is red (issue #18121). Every PR above is blocked on merge until it clears.
+```
+
+### Talking to it
+
+| Ask | You get |
+|---|---|
+| "What's my review queue for 1.20?" | Asks for a focus if you gave none, then the grouped, ordered queue |
+| "Brief me on #1234" | Short by default; deeper on request: threads, risk, suggested action |
+| "Which Dependabot PRs can I merge today?" | A verdict per PR with call sites, release notes and review findings |
+| "Triage the 10 oldest issues with no PR" | Class, severity, duplicates, competing PRs and progress, grounded in the code |
+| "Which stale PRs should I close?" | Close, reassign or take over, each with the issue state behind it |
+| "Label #1234 area/cli and ask the author to fix DCO" | Applies the label you asked for, and shows you the comment before posting it |
+
+What you ask for explicitly (a label, an approval) it does and reports; anything with words in it (a comment, a review, a
+nudge, a Discussion reply) it drafts and shows you first. Merging stays yours (there is no merge tool), and so does a gate
+bypass: it explains why a PR looks unrelated to the failure and names the label, and you apply it. It orders by what it can
+prove (files, branches, references), not by whether one change semantically breaks another, and it says so when asked.
+
+## The contributor assistant
+
+Contributing to a project you do not know means working blind: you cannot see which docs govern the file you are about to
+change, how the code fits together, who owns it, what earlier PRs in the area decided and why, or whether an issue was left
+alone for a reason. The contributor assistant removes that. It gives the AI, and you, **all the context that is needed**,
+then tells you **what to focus on**, **how to contribute here**, and helps you **actually understand the codebase**, so the
+change you send is one you can explain and defend.
+
+| Context it brings | Where it comes from |
+|---|---|
+| **What the repository says about a path** | The `AGENTS.md` chain from the root down to the folder, the instruction files that apply, the sections of `ARCHITECTURE.md`, `REVIEW.md` and `DEVELOPMENT.md` that matter, the area labels, and who owns it (CODEOWNERS) |
+| **How the code fits together** | A folder's contents, Go imports and exports, **who imports it** (from a clone in the sandbox), its tests, and who changed it recently |
+| **History and precedent** | How the same area was changed before: merged precedents, closed and rejected attempts, open work, and **what the maintainers said and why** |
+| **Each issue's full story** | Who claimed it, which PRs address it, whether it looks fixed already, and so whether it is a good choice |
+| **Where your PR stands** | Review threads from maintainers, humans and bots, failing checks, and what blocks it |
+| **You** | The areas you know, what you struggled with, what review taught you, and your progress along the project's ladder |
+
+| Skill | What it does |
+|---|---|
+| `find-work` | Matches issues to your areas and shows each one's full history *before* recommending it, and how to join work already in progress. It says plainly when an issue is a poor choice |
+| `understand-code` | Explains how a file or folder fits in (governing docs, importers, tests, owners, precedent PRs), then reads the code itself. It finishes by asking you to explain it back |
+| `make-the-change` | Branch, reproduce, change, test and prove it in the sandbox, with signed-off commits and an evidence ledger. It checks the change against the project's own review rules and drafts the PR from the template |
+| `review-loop` | After the PR is open: explains every review comment and failing check, says which look right and which deserve pushback with evidence, and drafts reviews of other people's PRs for you to post |
+| `grow` | The path from first PR to reviewer: what you have done, what the project's ladder asks for, and what to work on next |
+
+**You stay the author.** The AI-assistance line in a PR template and every reply to a reviewer are yours to write; it drafts
+nothing for those. It never claims a test passed that it did not run. Before a PR is drafted it asks you to explain the cause
+and the fix in your own words, because reviewers on these projects read a lot of AI-written PRs and trust the contributor who
+knows why the change is right. It writes to GitHub only a comment and a pull request from your own fork, after you have seen
+the exact text, and it has no tool for approving or merging. Pushing is off unless you start it with `--push-to-fork`.
+
+It also runs entirely inside the OpenShell sandbox, with its coding environment, so cloning, building and testing a project
+never touches the rest of your machine.
+
+**Status:** it works, and it is configured for Kyverno today: its pack carries Kyverno's contribution ladder, and another
+project needs more setup for it than for the maintainer assistant ([`docs/contributor.md`](docs/contributor.md)). Background
+updates (new reviews, failing checks) need the messaging gateway, which the sandbox does not run yet.
+
+## Shared CI actions
+
+Deterministic composite GitHub Actions that need **no model, no container and no secret of yours**: they run on GitHub with
+the workflow's own token, in **preview** (they print what they would do and change nothing) until a repository admin turns
+them on.
+
+| Action | What it does |
+|---|---|
+| [`pr-management`](.github/actions/pr-management/README.md) | Labels PRs from the paths they change; marks each `ready-for-review` or `needs-author-action` from its checks and review threads (DCO and CI built in); flags `workflow-approval-required` and `merge-conflicts`; warns, then closes, PRs an author has left quiet |
+| [`issue-management`](.github/actions/issue-management/README.md) | Labels issues a merged PR may have resolved, warns then closes issues waiting on the reporter, flags idle untriaged issues. Only the reporter rule ever closes anything |
+| `ci-health` (in review) | A read-only report on one workflow's recent runs: shared root causes, flaky and persistent jobs, the commits since the last green run |
+
+You reference an action from a short workflow (`uses: kyverno/assistant/.github/actions/pr-management@<full commit SHA>`), so
+the actions themselves need no checkout. `scripts/adopt-ci.sh` is a helper that opens the adoption PR in each repository you
+name. It runs from a checkout of this repository, or with no clone through the launcher (`assistant setup owner/repo`, which also
+offers the organisation pack); you can also copy the files from [`adopt-ci-templates/`](adopt-ci-templates/) by hand. Steps, files and permissions:
+[`docs/adopting-actions.md`](docs/adopting-actions.md).
+
 ## Prepare your repository
 
 The assistants are only as sharp as what your repository tells them. Preparing it takes one command and two pull requests you
@@ -407,141 +542,6 @@ person's machine, so it stops mistakes, not someone who edits their own copy; wh
 limited by OpenShell's policies, not by this file. The published image ships Kyverno's policy as the fallback (default
 repository, fork names, no limit on repositories).
 
-
-## The maintainer assistant
-
-It works your pull-request queue and issue backlog the way a careful co-maintainer would: it finds what is ready, works
-out the order, explains every call with a link, and does the paperwork.
-
-| The problem | What it does |
-|---|---|
-| "Which PRs can I merge today?" | Fetches the whole candidate set, drops what is not ready, and gives an order with a reason per PR |
-| Merging one PR forces rebases on others | Flags PRs that touch files another PR changes, so you see the rebase coming |
-| PRs that depend on each other | Finds stacked branches, "depends on #N" references and generated-file input/output pairs, and orders them |
-| A red branch gate blocks everything | States it as a fact on every PR it affects, and leaves the bypass decision to you |
-| Dependabot PRs pile up | A verdict per PR (merge now, fix first, your review, wait, close), from who calls the dependency |
-| Issues need triage | Classifies from the real code, finds duplicates and competing PRs, says how far along each fix is |
-| Stale and abandoned PRs | Recommends close, reassign, or take over the branch, with the reason from the linked issue |
-| GitHub Discussions | Reads the thread and drafts a reply; nothing is posted until you say so |
-| "What did we decide last time?" | Remembers past incidents, rejected PRs and your working style between sessions |
-
-Everything it says is linked to the PR, issue, file or run it comes from. When it looked and found nothing, it says "not
-found there" instead of guessing.
-
-### How it thinks
-
-**Code computes the facts, the model makes the judgment, and you make the decision.** Anything that can be computed exactly
-(a dependency, a file overlap, a gate) is computed by a deterministic tool, so the model does not guess it. The model then
-explains and ranks, citing what the tools returned.
-
-| Signal | Where it comes from | What it tells you |
-|---|---|---|
-| Stacked branches | A PR's base branch is another candidate's head | Merge the base first |
-| Generated-file order | One PR changes a generated file's *input*, another its *output* | The input has to land first, or the output goes stale |
-| Explicit references | "Depends on #N", "Blocked by #N", "Stacks on #N", "Parent: #N" in the body | Order, including PRs outside the set (it fetches their state) |
-| Competing PRs | Two PRs close the same issue | Duplicate effort: flagged for you, not ordered |
-| Same-file overlap | Two PRs touch one file | A likely rebase conflict; it can compare the real diff hunks to see if the *lines* collide |
-| Same-package overlap | Same directory, different files | Cannot conflict in git, but worth reviewing together |
-| Rebase flag | A PR touches files an earlier-ranked PR changes | It will need updating after that one merges |
-| Branch gate | An open gate-failure issue for the PR's base branch | Merging is blocked on that branch whatever the files; review is not |
-| File class | Your organisation pack: generated, API surface, critical, test-only | How risky the change is after merge |
-| Past incidents | Its memory of package pairs that broke the post-merge suite before | A specific, citable risk |
-
-Cycles are detected and handed to you by number. Among PRs with no hard dependency between them it ranks with a fixed
-ladder and says which rung decided each position: related PRs stay together; **severity of the closing issue**, judged
-from its content (critical: crash, outage, data loss, security; then high, medium, low); release-urgency labels and
-milestone proximity; bot approval and unresolved threads; the author's relationship to the project; size as a pure
-tiebreak. Anything you said this session overrides the ladder. **Readiness is separate from priority:** a high-severity PR
-with changes requested or a failing check is never listed under "approve now"; the blocker is named instead.
-
-An illustrative queue answer (numbers invented):
-
-```
-Queue for milestone 1.20: 14 of 31 open PRs
-
-Group 1: no hard dependency between these
-  #18102  split admission handlers      closes #17990 (CRITICAL: crash on startup)
-          ✓ checks green · bot-approved · 0 open threads
-          ⚠ #18110 is stacked on this one: merge #18102 first
-  #18077  fix cleanup TTL parsing       closes #17811 (HIGH: regression in 1.19)
-          ✓ ready · touches pkg/cleanup, also changed by #18090 → review together
-Group 2
-  #18110  stacked on #18102             ⏳ waits for #18102
-  #18090  rename policy fields          ⚠ rebase flag: shares api/v1/policy_types.go with #18102
-Gate: main is red (issue #18121). Every PR above is blocked on merge until it clears.
-```
-
-### Talking to it
-
-| Ask | You get |
-|---|---|
-| "What's my review queue for 1.20?" | Asks for a focus if you gave none, then the grouped, ordered queue |
-| "Brief me on #1234" | Short by default; deeper on request: threads, risk, suggested action |
-| "Which Dependabot PRs can I merge today?" | A verdict per PR with call sites, release notes and review findings |
-| "Triage the 10 oldest issues with no PR" | Class, severity, duplicates, competing PRs and progress, grounded in the code |
-| "Which stale PRs should I close?" | Close, reassign or take over, each with the issue state behind it |
-| "Label #1234 area/cli and ask the author to fix DCO" | Applies the label you asked for, and shows you the comment before posting it |
-
-What you ask for explicitly (a label, an approval) it does and reports; anything with words in it (a comment, a review, a
-nudge, a Discussion reply) it drafts and shows you first. Merging stays yours (there is no merge tool), and so does a gate
-bypass: it explains why a PR looks unrelated to the failure and names the label, and you apply it. It orders by what it can
-prove (files, branches, references), not by whether one change semantically breaks another, and it says so when asked.
-
-## The contributor assistant
-
-Contributing to a project you do not know means working blind: you cannot see which docs govern the file you are about to
-change, how the code fits together, who owns it, what earlier PRs in the area decided and why, or whether an issue was left
-alone for a reason. The contributor assistant removes that. It gives the AI, and you, **all the context that is needed**,
-then tells you **what to focus on**, **how to contribute here**, and helps you **actually understand the codebase**, so the
-change you send is one you can explain and defend.
-
-| Context it brings | Where it comes from |
-|---|---|
-| **What the repository says about a path** | The `AGENTS.md` chain from the root down to the folder, the instruction files that apply, the sections of `ARCHITECTURE.md`, `REVIEW.md` and `DEVELOPMENT.md` that matter, the area labels, and who owns it (CODEOWNERS) |
-| **How the code fits together** | A folder's contents, Go imports and exports, **who imports it** (from a clone in the sandbox), its tests, and who changed it recently |
-| **History and precedent** | How the same area was changed before: merged precedents, closed and rejected attempts, open work, and **what the maintainers said and why** |
-| **Each issue's full story** | Who claimed it, which PRs address it, whether it looks fixed already, and so whether it is a good choice |
-| **Where your PR stands** | Review threads from maintainers, humans and bots, failing checks, and what blocks it |
-| **You** | The areas you know, what you struggled with, what review taught you, and your progress along the project's ladder |
-
-| Skill | What it does |
-|---|---|
-| `find-work` | Matches issues to your areas and shows each one's full history *before* recommending it, and how to join work already in progress. It says plainly when an issue is a poor choice |
-| `understand-code` | Explains how a file or folder fits in (governing docs, importers, tests, owners, precedent PRs), then reads the code itself. It finishes by asking you to explain it back |
-| `make-the-change` | Branch, reproduce, change, test and prove it in the sandbox, with signed-off commits and an evidence ledger. It checks the change against the project's own review rules and drafts the PR from the template |
-| `review-loop` | After the PR is open: explains every review comment and failing check, says which look right and which deserve pushback with evidence, and drafts reviews of other people's PRs for you to post |
-| `grow` | The path from first PR to reviewer: what you have done, what the project's ladder asks for, and what to work on next |
-
-**You stay the author.** The AI-assistance line in a PR template and every reply to a reviewer are yours to write; it drafts
-nothing for those. It never claims a test passed that it did not run. Before a PR is drafted it asks you to explain the cause
-and the fix in your own words, because reviewers on these projects read a lot of AI-written PRs and trust the contributor who
-knows why the change is right. It writes to GitHub only a comment and a pull request from your own fork, after you have seen
-the exact text, and it has no tool for approving or merging. Pushing is off unless you start it with `--push-to-fork`.
-
-It also runs entirely inside the OpenShell sandbox, with its coding environment, so cloning, building and testing a project
-never touches the rest of your machine.
-
-**Status:** it works, and it is configured for Kyverno today: its pack carries Kyverno's contribution ladder, and another
-project needs more setup for it than for the maintainer assistant ([`docs/contributor.md`](docs/contributor.md)). Background
-updates (new reviews, failing checks) need the messaging gateway, which the sandbox does not run yet.
-
-## Shared CI actions
-
-Deterministic composite GitHub Actions that need **no model, no container and no secret of yours**: they run on GitHub with
-the workflow's own token, in **preview** (they print what they would do and change nothing) until a repository admin turns
-them on.
-
-| Action | What it does |
-|---|---|
-| [`pr-management`](.github/actions/pr-management/README.md) | Labels PRs from the paths they change; marks each `ready-for-review` or `needs-author-action` from its checks and review threads (DCO and CI built in); flags `workflow-approval-required` and `merge-conflicts`; warns, then closes, PRs an author has left quiet |
-| [`issue-management`](.github/actions/issue-management/README.md) | Labels issues a merged PR may have resolved, warns then closes issues waiting on the reporter, flags idle untriaged issues. Only the reporter rule ever closes anything |
-| `ci-health` (in review) | A read-only report on one workflow's recent runs: shared root causes, flaky and persistent jobs, the commits since the last green run |
-
-You reference an action from a short workflow (`uses: kyverno/assistant/.github/actions/pr-management@<full commit SHA>`), so
-the actions themselves need no checkout. `scripts/adopt-ci.sh` is a helper that opens the adoption PR in each repository you
-name. It runs from a checkout of this repository, or with no clone through the launcher (`assistant setup owner/repo`, which also
-offers the organisation pack); you can also copy the files from [`adopt-ci-templates/`](adopt-ci-templates/) by hand. Steps, files and permissions:
-[`docs/adopting-actions.md`](docs/adopting-actions.md).
 
 ## Built on Hermes
 
