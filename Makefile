@@ -12,7 +12,7 @@ SHELL_SCRIPTS := install.sh scripts/adopt-ci.sh container/assistant container/as
 	container/setup-profile.sh container/restore-state.sh container/verify-image.sh container/hooks/require-sandbox-terminal.sh \
 	container/assistant-workspace container/toolchains/go.sh container/toolchains/node.sh container/toolchains/kyverno-tools.sh tests/image/run.sh
 
-.PHONY: help lint lint-shell lint-dockerfile lint-providers image test unit image-check scan check run
+.PHONY: help lint lint-shell lint-dockerfile lint-providers image test unit context image-check scan check run
 
 help: ## Show available development commands
 	@awk 'BEGIN { FS = ":.*## " } /^[a-zA-Z0-9_-]+:.*## / { printf "  %-18s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -36,6 +36,9 @@ test: image ## Build and run the Dockerfile's offline integration checks
 
 unit: ## Run the plugin and hook tests (Python and PyYAML only)
 	python3 -m unittest discover -s tests/plugins && python3 -m unittest discover -s tests/hooks
+
+context: ## Show what each profile loads into the model's context (LIVE=1 also measures the GitHub tools)
+	python3 scripts/measure-context.py $(if $(LIVE),--live)
 
 image-check: image ## Build the image and run tests/image/run.sh against it
 	tests/image/run.sh $(IMAGE):$(TAG)
