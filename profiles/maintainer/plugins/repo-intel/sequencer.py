@@ -47,7 +47,7 @@ CROSS_REF_PATTERN = re.compile(
 )
 
 
-_TIER_RANK = {"GENERATED": 0, "API_SURFACE": 1, "ADMISSION_CRITICAL": 2, "TEST_ONLY": 3, "STANDARD": 4}
+_TIER_RANK = {"GENERATED": 0, "API_SURFACE": 1, "CRITICAL": 2, "TEST_ONLY": 3, "STANDARD": 4}
 
 
 # --- PR model ---------------------------------------------------------------------------

@@ -44,6 +44,12 @@ _REMOTE_TTL = 600
 _remote_seen: Dict[str, float] = {}
 
 
+def name_of(repo: Optional[str] = None) -> Optional[str]:
+    repo = repo or github.secret("ASSISTANT_REPO") or ""
+    name = repo.split("/", 1)[1] if "/" in repo else ""
+    return name or None
+
+
 def owner_of(repo: Optional[str] = None) -> Optional[str]:
     repo = repo or github.secret("ASSISTANT_REPO") or ""
     owner = repo.split("/", 1)[0].lower() if "/" in repo else ""
@@ -81,42 +87,54 @@ def candidate_paths(owner: Optional[str] = None) -> list:
     return paths
 
 
-def _remote_file(client: "github.Client", owner: str, name: str) -> Optional[bytes]:
+def _remote_file(client: "github.Client", repo: str, name: str) -> Optional[bytes]:
     try:
-        item = client.rest(f"repos/{owner}/.github/contents/{name}")
+        item = client.rest(f"repos/{repo}/contents/{name}")
     except github.GitHubError as exc:
         if str(exc).startswith("GitHub 404"):
             return None
         cls = OrgFileUnavailable if _transient(str(exc)) else OrgFileError
-        raise cls(f"could not read {owner}/.github/{name}: {exc}") from exc
+        raise cls(f"could not read {repo}/{name}: {exc}") from exc
     if not isinstance(item, dict) or item.get("encoding") != "base64" or item.get("size", 0) > 256 * 1024:
-        raise OrgFileError(f"{owner}/.github/{name} is not a file of a usable size")
+        raise OrgFileError(f"{repo}/{name} is not a file of a usable size")
     return base64.b64decode(item.get("content", ""))
 
 
-def remote_path(owner: Optional[str], client: Optional["github.Client"] = None) -> Optional[Path]:
-    """The organisation's own pack from `<owner>/.github`, written under Hermes' home, or None when it publishes none.
-    A fetch that fails falls back to the last good copy; with none, it is an error rather than 'no pack'."""
-    if not owner or not re.fullmatch(r"[a-z0-9][a-z0-9-]*", owner):
-        return None
-    dest = hermes_home() / "org-cache" / owner
-    target = dest / "org.yaml"
-    if time.time() - _remote_seen.get(owner, 0) < _REMOTE_TTL:
+def _fetch_location(key: Path, client: "github.Client", repo: str, pack_file: str) -> Optional[Path]:
+    """One published location, written under Hermes' home: the cached org.yaml, or None when nothing is published there.
+    A fetch that fails for a transient reason falls back to the last good copy; with none, or for anything else, it is an
+    error."""
+    target = key / "org.yaml"
+    if time.time() - _remote_seen.get(str(key), 0) < _REMOTE_TTL:
         return target if target.is_file() else None
-    client = client or github.Client()
     try:
-        body = _remote_file(client, owner, REMOTE_PACK)
+        body = _remote_file(client, repo, pack_file)
     except OrgFileUnavailable:
         if target.is_file():
             return target
         raise
-    _remote_seen[owner] = time.time()
+    _remote_seen[str(key)] = time.time()
     if body is None:
-        shutil.rmtree(dest, ignore_errors=True)
+        shutil.rmtree(key, ignore_errors=True)
         return None
-    dest.mkdir(parents=True, exist_ok=True)
+    key.mkdir(parents=True, exist_ok=True)
     target.write_bytes(body)
     return target
+
+
+def remote_path(owner: Optional[str], name: Optional[str] = None, client: Optional["github.Client"] = None) -> Optional[Path]:
+    """The pack the organisation published for this repository, or None when it publishes none. The repository's own
+    `.github/assistant-org.yaml` wins outright (it replaces the shared one, nothing is merged); else the owner's
+    `.github` repository (`<owner>/.github`, at its root). Both are read from the default branch."""
+    if not owner or not re.fullmatch(r"[a-z0-9][a-z0-9-]*", owner):
+        return None
+    client = client or github.Client()
+    cache = hermes_home() / "org-cache" / owner
+    if name and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name):
+        own = _fetch_location(cache / name, client, f"{owner}/{name}", f".github/{REMOTE_PACK}")
+        if own is not None:
+            return own
+    return _fetch_location(cache / ".org", client, f"{owner}/.github", REMOTE_PACK)
 
 
 def _read_org(p: Path) -> Dict[str, Any]:
@@ -133,7 +151,7 @@ def _read_org(p: Path) -> Dict[str, Any]:
 
 def load_org(path: Optional[str] = None, repo: Optional[str] = None) -> Dict[str, Any]:
     """The organisation file for `repo` (default: ASSISTANT_REPO): the pack baked into the image if it covers that owner,
-    else the owner's `.github/assistant-org.yaml`, else the home copy."""
+    else the one published in the repository or in `<owner>/.github`, else the home copy."""
     if path:
         if Path(path).is_file():
             return _read_org(Path(path))
@@ -144,15 +162,15 @@ def load_org(path: Optional[str] = None, repo: Optional[str] = None) -> Dict[str
     for p in first:
         if p.is_file():
             return _read_org(p)
-    remote = remote_path(owner)
+    remote = remote_path(owner, name_of(repo))
     if remote is not None:
         return _read_org(remote)
     for p in paths:
         if p not in first and p.is_file():
             return _read_org(p)
     raise OrgFileError(
-        f"no organisation pack for {owner or 'this repository'}: it publishes none at {owner or '<owner>'}/.github/{REMOTE_PACK} "
-        "(see docs/organisation-pack.md)")
+        f"no organisation pack for {repo or 'this repository'}: none at {repo or '<owner>/<repo>'}/.github/{REMOTE_PACK} "
+        f"or {owner or '<owner>'}/.github/{REMOTE_PACK} (see docs/organisation-pack.md)")
 
 
 # -- globs, label rules, CODEOWNERS -----------------------------------------------------

@@ -43,7 +43,7 @@ class Maintainer(Env):
         def get(url):
             calls.append(url)
             name = url.rsplit("/", 1)[1]
-            value = files.get(name)
+            value = files.get("repo:" + name if "/repos/acme/api/" in url else name)
             if isinstance(value, Exception):
                 raise value
             return value
@@ -63,10 +63,26 @@ class Maintainer(Env):
         rules_ = pack.load(repo="acme/api")
         self.assertEqual(rules_.gate.name, "release-gate")
         self.assertIn("rel-N", rules_.facts)
-        self.assertTrue(all("/repos/acme/.github/contents/" in c for c in calls))
+        self.assertTrue(any("/repos/acme/.github/contents/" in c for c in calls))
         n = len(calls)
         pack.load(repo="acme/api")
         self.assertEqual(len(calls), n)                                  # remembered, not fetched on every call
+
+    def test_the_repository_own_pack_replaces_the_shared_one(self):
+        own = OTHER.replace(b"release-gate", b"own-gate")
+        self.serve({"repo:assistant-org.yaml": own, "assistant-org.yaml": OTHER})
+        self.assertEqual(pack.load(repo="acme/api").gate.name, "own-gate")
+        self.assertEqual(pack.load(repo="acme/web").gate.name, "release-gate")      # another repository: the shared pack
+
+    def test_a_repository_with_its_own_pack_needs_no_shared_one(self):
+        self.serve({"repo:assistant-org.yaml": OTHER})
+        self.assertEqual(pack.load(repo="acme/api").gate.name, "release-gate")
+        self.assertEqual(pack.load(repo="acme/web").source, None)
+
+    def test_an_unreadable_repository_pack_is_an_error_even_with_a_shared_one(self):
+        self.serve({"repo:assistant-org.yaml": pack.PackError("HTTP 403"), "assistant-org.yaml": OTHER})
+        with self.assertRaises(pack.PackError):
+            pack.load(repo="acme/api")
 
     def test_an_organisation_with_no_pack_gets_none(self):
         self.serve({})
@@ -124,6 +140,7 @@ class Maintainer(Env):
     def test_repo_pack_says_where_it_looked_when_there_is_none(self):
         self.serve({})
         out = json.loads(pack_tools.handle_repo_pack({"repo": "acme/api"}))
+        self.assertIn("acme/api/.github/assistant-org.yaml", out["looked_in"])
         self.assertIn("acme/.github/assistant-org.yaml", out["looked_in"])
         self.assertIn("private", out["looked_in"])
 
@@ -142,7 +159,7 @@ class FakeClient:
     def rest(self, path):
         import base64
         name = path.rsplit("/", 1)[1]
-        value = self.files.get(name)
+        value = self.files.get("repo:" + name if path.startswith("repos/acme/api/") else name)
         if isinstance(value, Exception):
             raise value
         if value is None:
@@ -162,6 +179,7 @@ class Contributor(Env):
         self.assertEqual(rules.load_org(repo="kyverno/kyverno")["name"], "kyverno")
         with self.assertRaises(rules.OrgFileError) as ctx:
             rules.load_org(repo="acme/api")
+        self.assertIn("acme/api/.github/assistant-org.yaml", str(ctx.exception))
         self.assertIn("acme/.github/assistant-org.yaml", str(ctx.exception))
 
     def test_another_organisation_publishes_its_own(self):
@@ -173,6 +191,13 @@ class Contributor(Env):
         except rules.OrgFileError as exc:
             self.fail(str(exc))
         self.assertEqual(org["name"], "acme")
+
+    def test_the_repository_own_pack_replaces_the_shared_one(self):
+        text = KYVERNO.read_text().replace("repositories:", "x_unused:")
+        self.use({"repo:assistant-org.yaml": text.replace("name: kyverno", "name: own").encode(),
+                  "assistant-org.yaml": text.replace("name: kyverno", "name: shared").encode()})
+        self.assertEqual(rules.load_org(repo="acme/api")["name"], "own")
+        self.assertEqual(rules.load_org(repo="acme/web")["name"], "shared")
 
     def test_an_unreadable_pack_is_an_error_not_no_pack(self):
         self.use({"assistant-org.yaml": github.GitHubError("GitHub 403 for contents: forbidden")})

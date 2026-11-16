@@ -1,26 +1,64 @@
 # The organisation pack
 
 Everything the assistant knows about **your** organisation comes from one pack, and nothing about any organisation is
-written in code or in a skill. You publish it as two files at the root of your organisation's `.github` repository
-(`<owner>/.github`), and the published image reads them at run time. This page is the reference for what goes in it.
-The [README](../README.md#2-write-your-organisation-pack) has the short version.
+written in code or in a skill. You publish it in one of two places, and the published image reads it at run time:
 
 ```
-acme/.github/
-├── assistant-org.yaml          the rules: which files are generated or critical, your merge gate, which labels mean "ready"
-└── assistant-org-facts.md      optional prose for the maintainer assistant (codegen, CI, label meanings), in your own words
+acme/api/.github/assistant-org.yaml            this repository only
+acme/.github/assistant-org.yaml                every repository of the owner without its own
 ```
+
+A repository's own file replaces the shared one; they are not merged. Each can have `assistant-org-facts.md` next to it,
+optional prose for the maintainer assistant (codegen, CI, label meanings), in your own words.
 
 The file format is the one below; `container/org/kyverno/` is the worked example (its files are `org.yaml` and `facts.md`).
-Anyone who can push to your `.github` repository can change the rules, so protect it like the rest of your configuration.
+Whoever can push to the default branch of either place can change the rules, so protect it like the rest of your configuration.
+Both are read from the default branch, so a pull request cannot change its own rules.
 To bake a pack into an image you build instead, put it in `container/org/acme/` and run `container/assistant --build --org acme`;
 a baked pack is read-only to the agent.
+
+## Writing it with `assistant init`
+
+```bash
+container/assistant init acme/api                 # one repository
+container/assistant init acme/api acme/web        # asks: one shared pack, or one per repository
+container/assistant init acme/api --yes --dry-run # take the inferred answers and only print the file
+```
+
+It runs on your machine with your `gh` login and Python 3, and needs no clone, no Docker and no image:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kyverno/assistant/main/container/assistant-init | python3 - acme/api
+```
+
+(Pin a release tag instead of `main` if you want to read the exact script first; with a checkout, `container/assistant init acme/api` does the same.) It reads the repository's file tree, `.gitattributes` (`linguist-generated`), `CODEOWNERS`, labels and recent reviews, and offers
+only what exists. It asks little: the file classes (generated, API surface, critical, test-only), then what to do with the result. Guides, owners, labels, review bots and ready labels are taken as the repository states them, the pack goes in the repository itself (`--location org` for a shared `<owner>/.github`), and you correct anything in the pull request:
+
+| Written to the pack | From |
+|---|---|
+| `maintainer.file_classes`: generated, API surface, test-only (pre-ticked) and critical (you choose; it is never guessed, because owning a folder is not how risky it is) | File names, `.gitattributes`, folder names, and a code search for files that say `DO NOT EDIT` (a folder where at least 80% of the files do is offered whole, and the few hand-written files in it as exceptions) |
+| `agent_docs`, `instructions_dir`: the repository's own guides (`AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `RELEASING.md`, ...) | File names |
+| `codeowners`, `labels` (catalogue file, `area/` and `kind/` prefixes), `readiness.checks_file` | Where the repository keeps them |
+| `readiness` ready and waiting-on-the-author labels, `review_bots` | Label names, bots that reviewed recent PRs |
+
+Label meanings need no entry: the assistant reads each label's description from GitHub live, so write them there (or in
+`.github/labels.yml`). It also adds `assistant-org-facts.md` (leave it out with `--no-facts`): a **draft of how CI runs before and after merge**, read from the
+triggers in `.github/workflows` (check it), then a short list of questions (how a release is
+made, which branches matter, failures that are not the author's fault, what a reviewer looks for first) for you to fill in. The pull request it opens says what to check before merging and what init could not know, and the pack ends with a comment listing the keys you can still add. It ends by
+listing what it **could not** work out: merge gates (`branch_gates` needs a check name, a label and a bypass label), critical code, and
+the release process and review norms. Put the last of those in `assistant-org-facts.md`, or in `CONTRIBUTING.md` or `RELEASING.md`
+if they belong there too.
+
+Keys: up and down (or `j`, `k`) move, space ticks, `a` all, `n` none, `/` filters a long list, enter confirms. Without a terminal it
+takes the suggestions. It adds the files in a pull request (from your fork if you cannot push), signed off, and never overwrites an
+existing file. If a shared pack already exists it says so before asking anything, and offers a pack for just that repository that
+overrides it. With a shared pack it offers to create `<owner>/.github` if it does not exist.
 
 ## Where the assistant reads it from
 
 | How you run it | Where the pack comes from |
 |---|---|
-| The published image | `<owner>/.github/assistant-org.yaml`, for the owner of the repository you point it at, remembered for ten minutes, with the last good copy kept if GitHub cannot be reached. The image also bakes Kyverno's pack, used only for the owners its `repositories:` lists |
+| The published image | The repository's own `.github/assistant-org.yaml`, else `<owner>/.github/assistant-org.yaml`, for the repository you point it at, remembered for ten minutes, with the last good copy kept if GitHub cannot be reached. The image also bakes Kyverno's pack, used only for the owners its `repositories:` lists |
 | An image you build | The copy baked in at `/opt/kyverno/.../org/`, which the sandbox policy keeps read-only. It is read first, for the owners its `repositories:` lists (every owner when it lists none). Choose it with `--org` when you build |
 | `scripts/install.sh` on your host | Copied into the profile on every run, from `container/org/$ASSISTANT_ORG`, or else `container/org/<owner of ASSISTANT_REPO>/`. Edit it there: the copy in the profile is overwritten. With neither, it installs with no pack and says so, and removes a pack left in the profile by an earlier install for another repository |
 
@@ -28,8 +66,8 @@ a baked pack is read-only to the agent.
 
 | Situation | Result |
 |---|---|
-| No pack (nothing published at `<owner>/.github`, or a private `.github` the token cannot see: GitHub answers "not found" for both, and `repo_pack` says so) | The tools still run. Every file reads `STANDARD`, no PR is gate-blocked, no label means "ready". `repo_pack` says `pack: none`, and the assistant tells you which signals it is therefore missing. |
-| The published pack cannot be read (a private `.github` the token cannot see, a network error with no earlier copy) | An error that names the file and the HTTP status, not "no pack". |
+| No pack (nothing published in the repository or at `<owner>/.github`, or a private one the token cannot see: GitHub answers "not found" for both, and `repo_pack` says so) | The tools still run. Every file reads `STANDARD`, no PR is gate-blocked, no label means "ready". `repo_pack` says `pack: none`, and the assistant tells you which signals it is therefore missing. |
+| The published pack cannot be read (GitHub answers 403, the file is oversized, or a network or server error with no earlier copy) | An error that names the file and the HTTP status, not "no pack". A private `.github` the token cannot see is not this case: GitHub answers 404, which reads as "no pack" (first row). |
 | A key it does not know (a typo), a wrong type, a malformed `repositories:` list, or a file that is not a mapping | An error that names the key, from `repo_pack` and the tools that need it. It never ignores it silently and never crashes. |
 | A bad gate (no bypass label, a marker regex without a `(?P<branch>...)` group) | An error that names the gate and the problem. |
 | A rule that matches nothing | Nothing happens. Check with `repo_pack`, which returns exactly what was loaded. |

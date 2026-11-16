@@ -1,0 +1,1251 @@
+#!/usr/bin/env python3
+"""assistant init: write the organisation pack for your repositories, by asking instead of by hand.
+
+    container/assistant init [owner/repo ...] [--location repo|org] [--yes] [--dry-run]
+
+It reads each repository with your own `gh` login (its file tree, .gitattributes, CODEOWNERS and labels), proposes the
+pack, lets you change it (arrow keys, space, enter), shows the file, and opens a pull request that adds it. Nothing is
+written to a repository until you say so. Python 3 standard library only; the only other tool it needs is `gh`. It needs no
+clone and no Docker: `curl -fsSL https://raw.githubusercontent.com/kyverno/assistant/main/container/assistant-init | python3 - owner/repo`.
+"""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import json
+import os
+import re
+import select
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from dataclasses import dataclass, field
+from typing import Iterator, Optional
+
+PACK = "assistant-org.yaml"
+USE_COLOR = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
+
+
+# -- terminal ------------------------------------------------------------------------------------------------------
+
+def style(text: str, code: str) -> str:
+    return f"\x1b[{code}m{text}\x1b[0m" if USE_COLOR else text
+
+
+def bold(t): return style(t, "1")
+def dim(t): return style(t, "2")
+def cyan(t): return style(t, "36")
+def green(t): return style(t, "32")
+def yellow(t): return style(t, "33")
+def red(t): return style(t, "31")
+
+
+def use_terminal() -> None:
+    """Run as `curl ... | python3 - owner/repo`, stdin is the script, not the keyboard: read keys from the terminal instead."""
+    if not sys.stdin.isatty() and sys.stdout.isatty():
+        try:
+            sys.stdin = open("/dev/tty")
+        except OSError:
+            pass
+
+
+def interactive() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+_ESC = {"[A": "up", "[B": "down", "[C": "right", "[D": "left", "OA": "up", "OB": "down", "[H": "home", "[F": "end",
+        "[5~": "pageup", "[6~": "pagedown", "[1~": "home", "[4~": "end"}
+
+
+def read_key(fd: int) -> str:
+    """One key press as a name: up, down, pageup, pagedown, home, end, enter, space, esc, backspace, or the character."""
+    ch = os.read(fd, 1)
+    if ch == b"\x1b":
+        seq = b""
+        while select.select([fd], [], [], 0.05)[0] and len(seq) < 4:
+            seq += os.read(fd, 1)
+            if len(seq) >= 2 and (seq[-1:].isalpha() or seq[-1:] == b"~"):
+                break
+        return _ESC.get(seq.decode("ascii", "ignore"), "esc")
+    if ch in (b"\r", b"\n"):
+        return "enter"
+    if ch == b" ":
+        return "space"
+    if ch == b"\x03":
+        raise KeyboardInterrupt
+    if ch in (b"\x7f", b"\x08"):
+        return "backspace"
+    return ch.decode("utf-8", "ignore")
+
+
+@contextlib.contextmanager
+def raw_keys() -> Iterator[int]:
+    import termios
+    import tty
+
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    sys.stdout.write("\x1b[?25l")
+    sys.stdout.flush()
+    try:
+        tty.setcbreak(fd)
+        yield fd
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        sys.stdout.write("\x1b[?25h")
+        sys.stdout.flush()
+
+
+@dataclass
+class Option:
+    label: str
+    detail: str = ""
+    value: object = None
+    checked: bool = False
+
+
+def _window(count: int, cursor: int, size: int) -> tuple[int, int]:
+    start = max(0, min(cursor - size // 2, count - size))
+    return start, min(count, start + size)
+
+
+def menu(title: str, options: list[Option], multi: bool = False, hint: str = "", rows: int = 12) -> list[Option]:
+    """Choose from a list. Single choice: up and down, enter. Several: space toggles, `a` selects all, `n` none, and `/`
+    filters a long list. Without a terminal it returns the preselected options (or the first, for a single choice)."""
+    if not options:
+        return []
+    if not interactive():
+        picked = [o for o in options if o.checked]
+        return picked if multi else (picked[:1] or options[:1])
+    cursor, flt, filtering, drawn = 0, "", False, 0
+    keys = ("up/down move · space select · a all · n none · / filter · enter confirm" if multi
+            else "up/down move · enter choose")
+    with raw_keys() as fd:
+        while True:
+            shown = [o for o in options if flt.lower() in (o.label + " " + o.detail).lower()] or []
+            cursor = max(0, min(cursor, len(shown) - 1))
+            lines = [bold(title)] + ([dim(hint)] if hint else [])
+            if filtering or flt:
+                lines.append(cyan("filter: ") + flt + ("▏" if filtering else ""))
+            lo, hi = _window(len(shown), cursor, rows)
+            if lo:
+                lines.append(dim(f"  ↑ {lo} more"))
+            for i in range(lo, hi):
+                o = shown[i]
+                box = ("[x] " if o.checked else "[ ] ") if multi else ""
+                row = f"{box}{o.label}" + (dim(f"  {o.detail}") if o.detail else "")
+                lines.append(cyan("❯ ") + bold(row) if i == cursor else "  " + row)
+            if hi < len(shown):
+                lines.append(dim(f"  ↓ {len(shown) - hi} more"))
+            if not shown:
+                lines.append(dim("  nothing matches"))
+            lines.append(dim(keys if not filtering else "type to filter · enter or esc to stop filtering"))
+            if drawn:
+                sys.stdout.write(f"\x1b[{drawn}A")
+            sys.stdout.write("\r\x1b[J" + "\n".join(lines) + "\n")
+            sys.stdout.flush()
+            drawn = len(lines)
+            key = read_key(fd)
+            if filtering:
+                if key in ("enter", "esc"):
+                    filtering = False
+                elif key == "backspace":
+                    flt = flt[:-1]
+                elif len(key) == 1 and key.isprintable():
+                    flt += key
+                continue
+            if key in ("up", "k"):
+                cursor = max(0, cursor - 1)
+            elif key in ("down", "j"):
+                cursor = min(len(shown) - 1, cursor + 1)
+            elif key == "pageup":
+                cursor = max(0, cursor - rows)
+            elif key == "pagedown":
+                cursor = min(len(shown) - 1, cursor + rows)
+            elif key == "home":
+                cursor = 0
+            elif key == "end":
+                cursor = len(shown) - 1
+            elif key == "/" and (multi or len(options) > rows):
+                filtering = True
+            elif key == "esc" and flt:
+                flt = ""
+            elif multi and key == "space" and shown:
+                shown[cursor].checked = not shown[cursor].checked
+            elif multi and key == "a":
+                for o in shown:
+                    o.checked = True
+            elif multi and key == "n":
+                for o in shown:
+                    o.checked = False
+            elif key == "enter":
+                chosen = [o for o in options if o.checked] if multi else ([shown[cursor]] if shown else [])
+                sys.stdout.write(f"\x1b[{drawn}A\r\x1b[J")
+                summary = ", ".join(o.label for o in chosen) if chosen else "none"
+                sys.stdout.write(f"{bold(title)} {green(summary if len(summary) < 100 else str(len(chosen)) + ' selected')}\n")
+                return chosen
+
+
+def choose(title: str, options: list[Option], hint: str = "") -> Option:
+    return menu(title, options, multi=False, hint=hint)[0]
+
+
+def confirm(question: str, default: bool = True) -> bool:
+    if not interactive():
+        return default
+    yes, no = Option("Yes", value=True), Option("No", value=False)
+    return bool(choose(question, [yes, no] if default else [no, yes]).value)
+
+
+def ask(prompt: str, default: str = "") -> str:
+    if not interactive():
+        return default
+    suffix = f" [{default}]" if default else ""
+    try:
+        return input(f"{bold(prompt)}{suffix}: ").strip() or default
+    except EOFError:
+        return default
+
+
+# -- GitHub, through the user's own gh login -----------------------------------------------------------------------
+
+class GhError(RuntimeError):
+    pass
+
+
+def gh(*args: str, check: bool = True) -> str:
+    try:
+        r = subprocess.run(["gh", *args], capture_output=True, text=True, timeout=120)
+    except FileNotFoundError:
+        raise GhError("the GitHub CLI (gh) is not installed: https://cli.github.com") from None
+    if r.returncode and check:
+        raise GhError((r.stderr or r.stdout).strip().splitlines()[-1] if (r.stderr or r.stdout).strip() else f"gh {args[0]} failed")
+    return r.stdout
+
+
+def api(path: str, raw: bool = False) -> Optional[object]:
+    """GET a GitHub API path. None for 404, so a missing file is an answer, not an error."""
+    args = ["api", path]
+    if raw:
+        args += ["-H", "Accept: application/vnd.github.raw"]
+    try:
+        out = gh(*args)
+    except GhError as exc:
+        if "404" in str(exc) or "Not Found" in str(exc):
+            return None
+        raise
+    return out if raw else json.loads(out or "null")
+
+
+# -- what the repository says about itself -------------------------------------------------------------------------
+
+@dataclass
+class Candidate:
+    glob: str
+    detail: str = ""
+    picked: bool = True
+
+
+@dataclass
+class Proposal:
+    repo: str
+    generated: list[Candidate] = field(default_factory=list)
+    api_surface: list[Candidate] = field(default_factory=list)
+    critical: list[Candidate] = field(default_factory=list)
+    test_only: list[Candidate] = field(default_factory=list)
+    ready_labels: list[Candidate] = field(default_factory=list)
+    attention_labels: list[Candidate] = field(default_factory=list)
+    generated_exceptions: list[Candidate] = field(default_factory=list)
+    agent_docs: list[Candidate] = field(default_factory=list)
+    review_bots: list[Candidate] = field(default_factory=list)
+    instructions_dir: Optional[str] = None
+    codeowners_file: Optional[str] = None
+    labels_source: Optional[str] = None
+    checks_file: Optional[str] = None
+    area_prefixes: list[str] = field(default_factory=list)
+    kind_prefixes: list[str] = field(default_factory=list)
+    ci_facts: str = ""
+    has_pack: bool = False
+    truncated: bool = False
+
+
+def glob_regex(glob: str) -> re.Pattern:
+    """The pack's glob language: `*` within a directory, `**` across directories, `**/` for zero or more."""
+    out, i = "", 0
+    while i < len(glob):
+        c = glob[i]
+        if c == "*":
+            if glob[i:i + 2] == "**":
+                i += 2
+                if glob[i:i + 1] == "/":
+                    i += 1
+                    out += "(?:.*/)?"
+                else:
+                    out += ".*"
+                continue
+            out += "[^/]*"
+        elif c == "?":
+            out += "[^/]"
+        else:
+            out += re.escape(c)
+        i += 1
+    return re.compile(out + r"\Z")
+
+
+def matches(glob: str, paths: list[str]) -> int:
+    rx = glob_regex(glob)
+    return sum(1 for p in paths if rx.match(p))
+
+
+_GENERATED = [
+    ("**/zz_generated.*", "Go code generators"), ("**/*.pb.*", "protobuf"),
+    ("**/*_generated.*", "generated"), ("**/*.generated.*", "generated"), ("**/dist/**", "build output"), ("package-lock.json", "lockfile"), ("yarn.lock", "lockfile"),
+    ("pnpm-lock.yaml", "lockfile"), ("Cargo.lock", "lockfile"), ("poetry.lock", "lockfile"), ("go.sum", "lockfile"),
+    ("**/*.min.js", "minified"), ("**/crds/**", "CRDs"), ("docs/api/**", "generated API docs"),
+]
+_API_DIRS = ("api", "apis", "proto", "protos", "openapi", "swagger", "schema", "schemas", "sdk")
+_TESTS = [
+    ("**/*_test.go", "Go tests"), ("**/*.test.ts", "TypeScript tests"), ("**/*.test.tsx", "TypeScript tests"),
+    ("**/*.test.js", "JavaScript tests"), ("**/*.spec.ts", "TypeScript specs"), ("**/*.spec.js", "JavaScript specs"),
+    ("**/test_*.py", "Python tests"), ("**/*_test.py", "Python tests"), ("tests/**", "tests folder"),
+    ("test/**", "test folder"), ("**/__tests__/**", "Jest tests"), ("**/testdata/**", "test data"),
+]
+# The repository's own writing about itself, which the assistant reads before judging a change.
+_DOCS = [
+    ("AGENTS.md", "agent guide"), ("**/AGENTS.md", "agent guide per package"), ("CLAUDE.md", "agent guide"),
+    ("ARCHITECTURE.md", "architecture"), ("CONTRIBUTING.md", "contribution rules"), (".github/CONTRIBUTING.md", "contribution rules"),
+    ("DEVELOPMENT.md", "development"), ("RELEASING.md", "release process"), ("RELEASE.md", "release process"),
+    ("MAINTAINERS.md", "who maintains what"), ("GOVERNANCE.md", "governance"), ("REVIEW.md", "review rules"),
+    (".github/copilot-instructions.md", "Copilot instructions"), (".github/instructions/*.instructions.md", "path instructions"),
+    ("docs/context/**", "agent context"),
+]
+_READY = re.compile(r"ready[- ]for[- ]review|^ready$|awaiting[- ]review|needs[- ]review|review[- ]requested", re.I)
+_ATTENTION = re.compile(r"needs?[- ](author|changes|info|rebase|update)|author[- ]action|waiting[- ](on[- ])?author|"
+                        r"changes[- ]requested|awaiting[- ](author|response)|merge[- ]conflict|^stale$|^hold$|do[- ]not[- ]merge|"
+                        r"workflow[- ]approval", re.I)
+
+
+def attribute_globs(text: str) -> list[str]:
+    """Patterns the repository itself marks `linguist-generated` in .gitattributes."""
+    found = []
+    for line in text.splitlines():
+        parts = line.split("#", 1)[0].split()
+        if len(parts) >= 2 and any(a in ("linguist-generated", "linguist-generated=true") for a in parts[1:]):
+            pat = parts[0].lstrip("/")
+            found.append(pat + "**" if pat.endswith("/") else pat if "*" in pat or "." in pat.split("/")[-1] else pat + "/**")
+    return found
+
+
+def codeowner_globs(text: str, dirs: set[str]) -> list[tuple[str, str]]:
+    """(glob, owners) for each CODEOWNERS line that names a folder."""
+    found = []
+    for line in text.splitlines():
+        parts = line.split("#", 1)[0].split()
+        if len(parts) < 2 or parts[0] in ("*", "/*"):
+            continue
+        pat = parts[0].lstrip("/")
+        if pat.endswith("/"):
+            glob = pat + "**"
+        elif pat.endswith("/**") or pat.endswith("**"):
+            glob = pat
+        elif "*" not in pat and pat in dirs:
+            glob = pat + "/**"
+        else:
+            continue
+        found.append((glob, " ".join(parts[1:3])))
+    return found
+
+
+_BEFORE = {"pull_request", "pull_request_target", "merge_group"}
+_AFTER = {"push", "release"}
+
+
+def workflow_info(path: str, text: str) -> tuple[str, set[str]]:
+    """(display name, trigger names) of a workflow file, without a YAML parser: reads the `name:` and the `on:` block."""
+    name = next((m.group(1).strip().strip("'\"") for m in (re.match(r"name:\s*(.+)", ln) for ln in text.splitlines()) if m),
+                os.path.basename(path))
+    lines = text.splitlines()
+    triggers: set[str] = set()
+    for i, ln in enumerate(lines):
+        m = re.match(r"""["']?on["']?:\s*(.*)$""", ln)
+        if not m:
+            continue
+        rest = m.group(1).split("#", 1)[0].strip()
+        if rest:
+            triggers = set(re.findall(r"[a-z_]+", rest.strip("[]")))
+            break
+        indent = None
+        for nxt in lines[i + 1:]:
+            if not nxt.strip() or nxt.lstrip().startswith("#"):
+                continue
+            cur = len(nxt) - len(nxt.lstrip())
+            if cur == 0:
+                break
+            indent = cur if indent is None else indent
+            km = re.match(r"\s{%d}([a-z_]+):" % indent, nxt) if cur == indent else None
+            if km:
+                triggers.add(km.group(1))
+        break
+    if "push" in triggers:
+        # A push that only matches tags is a release, not a merge: look at the keys indented under `push:`.
+        for i, ln in enumerate(lines):
+            if re.match(r"\s+push:\s*(#.*)?$", ln):
+                base = len(ln) - len(ln.lstrip())
+                keys = set()
+                for nxt in lines[i + 1:]:
+                    if not nxt.strip() or nxt.lstrip().startswith("#"):
+                        continue
+                    if len(nxt) - len(nxt.lstrip()) <= base:
+                        break
+                    km = re.match(r"\s+([a-z-]+):", nxt)
+                    if km:
+                        keys.add(km.group(1))
+                if "tags" in keys and not keys & {"branches", "branches-ignore", "paths", "paths-ignore"}:
+                    triggers.discard("push")
+                    triggers.add("tag_push")
+                break
+    return name, triggers
+
+
+def ci_facts(workflows: dict[str, str]) -> str:
+    """A draft 'CI before and after merge' section from what triggers each workflow. The user checks it."""
+    before, after, scheduled, reusable, tagged = [], [], [], [], []
+    for path in sorted(workflows):
+        name, trig = workflow_info(path, workflows[path])
+        label = name if name == os.path.basename(path) else f"{name} ({os.path.basename(path)})"
+        if trig & _BEFORE:
+            before.append(label)
+        elif "workflow_call" in trig and not trig & _AFTER:
+            reusable.append(label)
+        elif trig & _AFTER:
+            after.append(label)
+        elif "tag_push" in trig:
+            tagged.append(label)
+        elif "schedule" in trig:
+            scheduled.append(label)
+    if not (before or after or scheduled or reusable or tagged):
+        return ""
+    out = ["## CI before and after merge", "(Drafted by `assistant init` from the triggers in `.github/workflows`. Check it, and add what "
+           "a green PR still cannot show: for example a suite that only runs after merge.)", ""]
+    for title, names in (("Runs on a pull request (some of these gate the merge, some only label or comment)", before), ("Runs only after merge (push), never on a PR", after),
+                         ("Runs when a tag is pushed (a release), not on a merge or a PR", tagged),
+                         ("Reusable workflows (called by the others)", reusable), ("Scheduled", scheduled)):
+        if names:
+            out.append(f"{title}: " + ", ".join(names) + ".")
+    return "\n".join(out) + "\n"
+
+
+def header_globs(paths: list[str], hits: list[str]) -> tuple[list[tuple[str, int, int]], list[str]]:
+    """From files that say 'DO NOT EDIT': the folders that are almost entirely generated (glob, hits, files) and the
+    hand-written files inside them. A folder qualifies when at least 80% of its files (and at least 3) are hits."""
+    hit_set = set(hits)
+    skip = ("vendor/", "node_modules/", "third_party/")
+    dirs = sorted({"/".join(h.split("/")[:i]) for h in hits for i in range(1, len(h.split("/")))}, key=lambda d: d.count("/"))
+    chosen: list[tuple[str, int, int]] = []
+    exceptions: list[str] = []
+    for d in dirs:
+        if d.startswith(skip) or any(d == c[0] or d.startswith(c[0] + "/") for c in chosen):
+            continue
+        files = [x for x in paths if x.startswith(d + "/")]
+        got = [x for x in files if x in hit_set]
+        if len(got) >= 3 and len(got) >= 0.8 * len(files):
+            chosen.append((d, len(got), len(files)))
+            miss = [x for x in files if x not in hit_set and x.endswith((".go", ".ts", ".js", ".py", ".java", ".rs"))]
+            if len(miss) <= 3:
+                exceptions += miss
+    return chosen, exceptions
+
+
+def propose(repo: str, paths: list[str], attributes: str, codeowners: str, labels: list[str],
+            hits: Optional[list[str]] = None, workflows: Optional[dict[str, str]] = None) -> Proposal:
+    p = Proposal(repo)
+    dirs = {"/".join(path.split("/")[:i]) for path in paths for i in range(1, len(path.split("/")))}
+    covered: set[str] = set()
+
+    def add(target: list[Candidate], glob: str, detail: str, picked: bool = True) -> None:
+        """Offer a glob only if it matches something no earlier glob of this kind already covers."""
+        rx = glob_regex(glob)
+        files = {path for path in paths if rx.match(path)}
+        if files and not files <= covered:
+            covered.update(files)
+            target.append(Candidate(glob, f"{detail} · {len(files)} file{'' if len(files) == 1 else 's'}", picked))
+
+    for glob in attribute_globs(attributes):
+        add(p.generated, glob, ".gitattributes")
+    folders, exceptions = header_globs(paths, hits or [])
+    for d, n, total in folders:
+        add(p.generated, d + "/**", f"{n} of {total} files say DO NOT EDIT")
+    p.generated_exceptions = [Candidate(x, "hand-written inside a generated folder") for x in exceptions]
+    p.ci_facts = ci_facts(workflows or {})
+    for glob, why in _GENERATED:
+        add(p.generated, glob, why)
+    covered.clear()
+    for d in sorted(d for d in dirs if d.split("/")[-1] in _API_DIRS and d.count("/") <= 1 and not d.startswith(("docs", "test", "examples"))):
+        add(p.api_surface, d + "/**", "folder name")
+    covered.clear()
+    for glob, owners in codeowner_globs(codeowners, dirs)[:15]:
+        add(p.critical, glob, f"CODEOWNERS: {owners}", picked=False)       # who owns a folder is not how risky it is
+    covered.clear()
+    for glob, why in _TESTS:
+        add(p.test_only, glob, why)
+    covered.clear()
+    for glob, why in _DOCS:
+        add(p.agent_docs, glob, why)
+    if any(path.startswith(".github/instructions/") for path in paths):
+        p.instructions_dir = ".github/instructions"
+    p.codeowners_file = next((f for f in (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS") if f in paths), None)
+    p.labels_source = next((f for f in (".github/labels.yml", ".github/labels.yaml") if f in paths), None)
+    p.checks_file = ".github/pr-readiness-checks.yml" if ".github/pr-readiness-checks.yml" in paths else None
+    p.area_prefixes = ["area/"] if any(n.startswith("area/") for n in labels) else []
+    p.kind_prefixes = ["kind/"] if any(n.startswith("kind/") for n in labels) else []
+    for name in labels:
+        (p.ready_labels if _READY.search(name) else p.attention_labels if _ATTENTION.search(name) else []).append(
+            Candidate(name, "label"))
+    return p
+
+
+def recent_review_bots(repo: str) -> list[str]:
+    """Logins of bots that reviewed the last pull requests, as the pack writes them (no `[bot]` suffix)."""
+    owner, name = repo.split("/")
+    query = ("query($o:String!,$n:String!){repository(owner:$o,name:$n){pullRequests(last:30,orderBy:{field:UPDATED_AT,direction:ASC})"
+             "{nodes{reviews(first:20){nodes{author{login __typename}}}}}}}")
+    try:
+        data = json.loads(gh("api", "graphql", "-f", f"query={query}", "-F", f"o={owner}", "-F", f"n={name}", check=False) or "{}")
+        prs = data["data"]["repository"]["pullRequests"]["nodes"]
+    except (ValueError, KeyError, TypeError):
+        return []
+    found: dict[str, int] = {}
+    for pr in prs:
+        for r in (pr.get("reviews") or {}).get("nodes", []):
+            a = r.get("author") or {}
+            if a.get("__typename") == "Bot" and a.get("login"):
+                login = a["login"].removesuffix("[bot]")
+                found[login] = found.get(login, 0) + 1
+    return [k for k, _ in sorted(found.items(), key=lambda kv: -kv[1])]
+
+
+def workflow_texts(repo: str, paths: list[str], branch: str) -> dict[str, str]:
+    """The text of every workflow file, in one GraphQL request."""
+    files = [x for x in paths if re.fullmatch(r"\.github/workflows/[^/]+\.ya?ml", x)][:100]
+    if not files:
+        return {}
+    owner, name = repo.split("/")
+    fields = " ".join(f'f{i}: object(expression: {json.dumps(branch + ":" + f)}) {{ ... on Blob {{ text }} }}' for i, f in enumerate(files))
+    query = f"query($o:String!,$n:String!){{repository(owner:$o,name:$n){{ {fields} }}}}"
+    try:
+        data = json.loads(gh("api", "graphql", "-f", f"query={query}", "-F", f"o={owner}", "-F", f"n={name}", check=False) or "{}")
+        repo_data = data["data"]["repository"]
+    except (ValueError, KeyError, TypeError):
+        return {}
+    return {f: (repo_data.get(f"f{i}") or {}).get("text") or "" for i, f in enumerate(files)}
+
+
+def header_hits(repo: str) -> list[str]:
+    """Paths of files that contain 'DO NOT EDIT', by GitHub code search (up to 300; empty if search is unavailable)."""
+    out = gh("api", "-X", "GET", "search/code", "-f", f'q="DO NOT EDIT" repo:{repo}', "-F", "per_page=100", "--paginate",
+             "--jq", ".items[].path", check=False)
+    docs = (".md", ".txt", ".rst", ".adoc")          # a guide that mentions the phrase is not generated code
+    return list(dict.fromkeys(x for x in out.split("\n") if x and not x.endswith(docs)))[:300]
+
+
+def snapshot(repo: str) -> dict:
+    """Everything the proposal is made from, read from GitHub. `--dump` saves it so a proposal can be reproduced offline."""
+    meta = api(f"repos/{repo}")
+    if not meta:
+        raise GhError(f"{repo}: not found, or your gh login cannot see it")
+    branch = meta["default_branch"]
+    tree = api(f"repos/{repo}/git/trees/{branch}?recursive=1") or {}
+    paths = [t["path"] for t in tree.get("tree", []) if t["type"] == "blob"]
+    owners_path = next((x for x in (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS") if x in paths), None)
+    text = lambda name: (api(f"repos/{repo}/contents/{name}", raw=True) or "") if name in paths else ""   # noqa: E731
+    labels = [n for n in gh("api", f"repos/{repo}/labels?per_page=100", "--paginate", "--jq", ".[].name", check=False).split("\n") if n]
+    return {"repo": repo, "paths": paths, "truncated": bool(tree.get("truncated")), "attributes": text(".gitattributes"),
+            "codeowners": text(owners_path) if owners_path else "", "labels": labels, "hits": header_hits(repo),
+            "workflows": workflow_texts(repo, paths, branch), "review_bots": recent_review_bots(repo)}
+
+
+def from_snapshot(snap: dict) -> Proposal:
+    p = propose(snap["repo"], snap["paths"], snap["attributes"], snap["codeowners"], snap["labels"], snap.get("hits"), snap.get("workflows"))
+    p.has_pack = f".github/{PACK}" in snap["paths"]
+    p.truncated = snap.get("truncated", False)
+    p.review_bots = [Candidate(login, "reviewed recent pull requests") for login in snap.get("review_bots", [])]
+    p.all_labels = snap["labels"]      # type: ignore[attr-defined]
+    p.top_dirs = sorted({x.split("/")[0] for x in snap["paths"] if "/" in x})   # type: ignore[attr-defined]
+    return p
+
+
+def load(repo: str) -> Proposal:
+    return from_snapshot(snapshot(repo))
+
+
+# -- the pack ------------------------------------------------------------------------------------------------------
+
+def quote(s: str) -> str:
+    return json.dumps(s)
+
+
+DOCS_URL = "https://github.com/kyverno/assistant/blob/main/docs/organisation-pack.md"
+
+MORE_KEYS = f"""
+# More you can add. init left these out because only you know them (reference: {DOCS_URL}):
+#   maintainer.branch_gates              a check that blocks every merge: name, status_context, failure_issue_label, bypass_label
+#   maintainer.file_classes.critical     the code that costs the most when it is wrong
+#   maintainer.generated_inputs          what feeds the generated files: paths, dependency_modules
+#   maintainer.dependency_bots           dependency bumps that need regenerated output: codegen_module_globs, codegen_kind_label
+#   maintainer.approval_bots             bots whose approval counts as one review signal
+#   maintainer.milestones                title_format, open_milestone_label, issue_urgency_labels
+#   readiness.infra_checks               check names whose failure is not the author's to fix
+#   ladder, entry_labels, ...            only the contributor assistant reads these"""
+
+
+def render(name: str, chosen: dict) -> str:
+    """The pack as YAML, in the form docs/organisation-pack.md describes. Only what was chosen is written."""
+    def flow(v) -> str:
+        return "[" + ", ".join(quote(x) for x in v) + "]"
+
+    out = ["# Organisation pack for the maintainer assistant, written by `assistant init`. Edit it freely;",
+           "# the reference is docs/organisation-pack.md in kyverno/assistant.", f"name: {quote(name)}"]
+    if chosen.get("agent_docs"):
+        out += ["\n# The repository's own guides, read before judging a change.", "agent_docs:"] + [f"  - {quote(x)}" for x in chosen["agent_docs"]]
+    if chosen.get("instructions_dir"):
+        out.append(f"instructions_dir: {quote(chosen['instructions_dir'])}")
+    if chosen.get("codeowners"):
+        out.append(f"codeowners: {quote(chosen['codeowners'])}")
+    labels = {k: chosen[k] for k in ("labels_source", "area_prefixes", "kind_prefixes") if chosen.get(k)}
+    if labels:
+        out.append("\nlabels:")
+        if "labels_source" in labels:
+            out.append(f"  source: {quote(labels['labels_source'])}")
+        for key in ("area_prefixes", "kind_prefixes"):
+            if key in labels:
+                out.append(f"  {key}: {flow(labels[key])}")
+    if chosen.get("review_bots"):
+        out.append(f"\nreview_bots: {flow(chosen['review_bots'])}")
+    readiness = {k: chosen.get(k) for k in ("ready_labels", "attention_labels") if chosen.get(k)}
+    if readiness or chosen.get("checks_file"):
+        out.append("\nreadiness:")
+        if chosen.get("checks_file"):
+            out.append(f"  checks_file: {quote(chosen['checks_file'])}")
+        for k, v in readiness.items():
+            out.append(f"  {k}: {flow(v)}")
+    classes = {k: chosen.get(k) for k in ("generated", "generated_exceptions", "api_surface", "critical", "test_only") if chosen.get(k)}
+    if classes:
+        out.append("\nmaintainer:\n  file_classes:")
+        for k, v in classes.items():
+            out.append(f"    {k}:")
+            out += [f"      - {quote(x)}" for x in v]
+    out.append(MORE_KEYS)
+    return "\n".join(out) + "\n"
+
+
+def inferred(p: Proposal) -> dict:
+    """What was inferred, taken as it is (--yes, or no terminal). Critical code is never guessed."""
+    return {"generated": [c.glob for c in p.generated if c.picked], "generated_exceptions": [c.glob for c in p.generated_exceptions],
+            "api_surface": [c.glob for c in p.api_surface if c.picked],
+            "test_only": [c.glob for c in p.test_only if c.picked], "ready_labels": [c.glob for c in p.ready_labels],
+            "attention_labels": [c.glob for c in p.attention_labels], **context(p)}
+
+
+def context(p: Proposal) -> dict:
+    """What the repository states about itself, taken as it is: its guides, owners file, label catalogue and review bots."""
+    return {"agent_docs": [c.glob for c in p.agent_docs], "instructions_dir": p.instructions_dir, "codeowners": p.codeowners_file,
+            "labels_source": p.labels_source, "area_prefixes": p.area_prefixes, "kind_prefixes": p.kind_prefixes,
+            "checks_file": p.checks_file, "review_bots": [c.glob for c in p.review_bots]}
+
+
+def review(p: Proposal) -> dict:
+    """Walk the user through the proposal, one question per kind of rule."""
+    chosen: dict = {}
+    chosen.update(context(p))             # guides, review bots, owners, label catalogue: taken as the repository states them
+    chosen["generated_exceptions"] = [c.glob for c in p.generated_exceptions]
+    sections = [
+        ("generated", "Generated files (a change here without a change to its source is suspect)", p.generated),
+        ("api_surface", "Public API surface (changing these changes the product)", p.api_surface),
+        ("critical", "Critical code (a bug here costs the most; mark what you would never skim)", p.critical),
+        ("test_only", "Test-only files (low risk after merge)", p.test_only),
+    ]
+    for key, title, cands in sections:
+        options = [Option(c.glob, c.detail, checked=c.picked) for c in cands]
+        if not options and key == "critical" and getattr(p, "top_dirs", []):
+            options = [Option(f"{d}/**") for d in p.top_dirs]          # nothing to suggest, so offer the folders
+            title = "Critical code: which top-level folders? (nothing was inferred)"
+        picked = [o.label for o in menu(title, options, multi=True)] if options else []
+        if key == "critical":
+            extra = ask(f"  More {key.replace('_', ' ')} globs, comma-separated (Enter to skip)")
+            picked += [g.strip() for g in extra.split(",") if g.strip()]
+        chosen[key] = picked
+    chosen.update({"ready_labels": [c.glob for c in p.ready_labels], "attention_labels": [c.glob for c in p.attention_labels]})
+    return chosen
+
+
+# -- writing it to GitHub ------------------------------------------------------------------------------------------
+
+def say(message: str) -> None:
+    print(dim(f"  … {message}"), flush=True)
+
+
+OPENED: list[tuple[str, str]] = []          # (repository, pull request URL) opened in this run
+WAIT_SECONDS = 15
+
+
+def next_steps(target: str, url: str) -> None:
+    """After the pack pull request is open: how to make it useful, where the reference is, and what comes after the merge."""
+    number = url.rstrip("/").rsplit("/", 1)[-1]
+    print("\n" + bold("Next: make it useful, then merge it") + f"\n  {url}")
+    print("  It is a draft. Before you merge, edit it (the description lists what to check):")
+    print(f"    • in the browser: open the link, then Files changed, the ... menu on a file, Edit file")
+    print(f"    • or here:        gh pr checkout {number} --repo {target}   (edit, commit, git push)")
+    print(f"  What else the pack can hold: {DOCS_URL}")
+    print("  After you merge it the assistant reads it from the default branch. A running assistant checks GitHub for changes at most")
+    print("  every ten minutes, so it can take that long to see the merge; starting it afresh picks it up at once.")
+
+
+def pr_state(url: str) -> str:
+    return gh("pr", "view", url, "--json", "state", "--jq", ".state", check=False).strip()
+
+
+def wait_for_merge(urls: list[str]) -> dict[str, str]:
+    """Poll until each pull request is merged or closed. Ctrl-C stops waiting and leaves the rest as they are."""
+    states = {u: "OPEN" for u in urls}
+    try:
+        while True:
+            for u in [u for u, st in states.items() if st == "OPEN"]:
+                states[u] = pr_state(u) or "OPEN"
+            pending = [u for u, st in states.items() if st == "OPEN"]
+            if not pending:
+                break
+            sys.stdout.write("\r\x1b[K" + dim("Waiting for " + ", ".join(pending) + " to be merged (Ctrl-C to stop)..."))
+            sys.stdout.flush()
+            time.sleep(WAIT_SECONDS)
+    except KeyboardInterrupt:
+        pass
+    sys.stdout.write("\r\x1b[K")
+    return states
+
+
+def publish(target: str, files: dict[str, str], branch: str, title: str, body: str) -> str:
+    """Add `files` (path -> content) to `target` (owner/repo) on a branch and open a pull request; from your fork when you
+    cannot push. Never overwrites a file that exists."""
+    say(f"checking {target}")
+    existing = open_pr(target, branch)
+    if existing:
+        raise GhError(f"{target} already has an open pull request for this: {existing}")
+    meta = api(f"repos/{target}") or {}
+    me = gh("api", "user", "--jq", ".login").strip()
+    work = tempfile.mkdtemp(prefix="assistant-init-")
+    try:
+        source = target
+        if not meta.get("permissions", {}).get("push"):
+            say("you cannot push to it, so forking it")
+            gh("repo", "fork", target, "--clone=false", check=False)
+            source = f"{me}/{target.split('/')[1]}"
+        say(f"cloning {source}")
+        gh("repo", "clone", source, work, "--", "--quiet", "--depth", "1")
+        git = lambda *a: subprocess.run(["git", "-C", work, *a], check=True, capture_output=True, text=True)   # noqa: E731
+        # A merged or closed pull request leaves its branch behind, and pushing to it is refused: use the next free name.
+        base, n = branch, 1
+        while subprocess.run(["git", "-C", work, "ls-remote", "--exit-code", "--heads", "origin", branch], capture_output=True).returncode == 0:
+            n += 1
+            branch = f"{base}-{n}"
+        if source != target:
+            git("remote", "add", "upstream", f"https://github.com/{target}.git")
+            git("fetch", "--quiet", "--depth", "1", "upstream")
+            git("checkout", "--quiet", "-B", branch, "upstream/" + meta["default_branch"])
+        else:
+            git("checkout", "--quiet", "-B", branch)
+        for path, content in files.items():
+            dest = os.path.join(work, path)
+            if os.path.exists(dest):
+                raise GhError(f"{target} already has {path}; not overwriting it")
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(dest, "x") as f:
+                f.write(content)
+            git("add", path)
+        git("commit", "--quiet", "-s", "-m", title)
+        say(f"pushing {branch}")
+        git("push", "--quiet", "--set-upstream", "origin", branch)
+        head = branch if source == target else f"{me}:{branch}"
+        say("opening the pull request")
+        return gh("pr", "create", "--repo", target, "--head", head, "--title", title, "--body", body).strip()
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def pack_pr_body(files: dict[str, str], items: list[str]) -> str:
+    """What the pull request tells the person who opens it: what is in it, what to check, what init could not know, and what to add."""
+    listed = "\n".join(f"- `{path}`" for path in files)
+    missing = "\n".join(f"- {item}" for item in items)
+    facts = "assistant-org-facts.md" in " ".join(files)
+    return f"""## What this adds
+
+{listed}
+
+Written by `assistant init` from this repository's own files, labels, CODEOWNERS and guides, so the assistant knows what \
+is generated, public API, test-only and "ready" here. It is a draft: **edit this branch before you merge**.
+
+## Check before you merge
+
+- `maintainer.file_classes`: delete a glob that matches the wrong files, add one that is missing. Highest tier wins: generated, then API surface, then critical, then test-only.
+- `critical` holds only what you chose. Nobody but you knows which code costs the most when it is wrong.
+- `readiness` and `review_bots`: the labels and bots init found. Remove any that do not mean what the name suggests.
+{"- `assistant-org-facts.md`: answer each prompt in a sentence or two and delete a heading you have nothing to say under. Check the CI draft at the top against what you know." + chr(10) if facts else ""}
+## What init could not work out
+
+{missing}
+
+## Everything else you can add
+
+The comment at the bottom of `assistant-org.yaml` lists the other keys (merge gates, generated inputs, dependency bots, \
+milestones, approval bots, infra checks). The reference, with an example of each, is [docs/organisation-pack.md]({DOCS_URL}).
+
+## After you merge
+
+The assistant reads the file from the default branch. A running assistant checks GitHub for changes at most every ten \
+minutes, so it can take that long to see your merge; starting it afresh picks it up at once. To see exactly what it \
+loaded, ask it for `repo_pack`. To change it later, edit the file in an ordinary pull request.
+"""
+
+
+def create_shared_repo(owner: str, files: dict[str, str], body: str = "Adds `assistant-org.yaml`, written by `assistant init`.") -> str:
+    private = choose(f"Create {owner}/.github as", [Option("Public (recommended: anyone's assistant can read the pack)", value=False),
+                                                      Option("Private (the token must be able to read it)", value=True)]).value
+    gh("repo", "create", f"{owner}/.github", "--private" if private else "--public", "--description",
+       "Organisation defaults", "--add-readme")
+    return publish(f"{owner}/.github", files, "add-assistant-org-pack", "Add the assistant organisation pack", body)
+
+
+FACTS_STUB = """# What the assistant should know about {name}
+
+The assistant already reads this repository's guides, CODEOWNERS, labels and its pull requests. Write here what none of
+those say. Short answers are enough; delete a heading you have nothing to say under.
+
+{ci}## How a release is made
+(Branches, who cuts it, anything that must not be merged near one.)
+
+## Branches that matter
+(The default branch, long-lived release branches, anything that is never merged into.)
+
+## Failures that are not the author's fault
+(Known-flaky checks, services that go down, and how to tell.)
+
+## What a reviewer here looks for first
+(The things you would never merge without, and the things you let slide.)
+
+## Where the assistant keeps getting it wrong
+(Add to this whenever it does.)
+"""
+
+
+def not_inferred(p: Proposal, location: str) -> list[str]:
+    """What init could not work out, each with where to write it."""
+    items = []
+    if not p.agent_docs:
+        items.append("Guides: no AGENTS.md, CONTRIBUTING.md, RELEASING.md or similar was found. Put the rules a new reviewer "
+                     "must know in one of them; the assistant reads them (add the path to `agent_docs` in the pack).")
+    items.append("Merge gates (a check that blocks everyone, like a shared end-to-end suite): `maintainer.branch_gates` needs "
+                 "its check name, the label of the issue that reports it broken, and a bypass label. See docs/organisation-pack.md.")
+    items.append("Critical code: only you know which code costs the most when it is wrong; `critical` lists what you chose.")
+    items.append("The contributor assistant needs more than this: `ladder`, plus `readiness` and `labels` keys it reads (see "
+                 "docs/organisation-pack.md, \"Keys only the contributor assistant reads\"). The maintainer assistant works from this pack as it is.")
+    items.append("The release process, flaky failures and review norms: write them in `assistant-org-facts.md` next to the pack, "
+                 "or in CONTRIBUTING.md / RELEASING.md if they belong there too.")
+    return items
+
+
+def merge(chosen_by_repo: list[dict]) -> dict:
+    """One shared pack from several repositories: lists are joined, a single value is kept only if they all agree."""
+    out: dict = {}
+    for chosen in chosen_by_repo:
+        for k, v in chosen.items():
+            if isinstance(v, list):
+                out[k] = list(dict.fromkeys(out.get(k, []) + v))
+            elif k not in out:
+                out[k] = v
+            elif out[k] != v:
+                out[k] = None
+    return out
+
+
+# -- `assistant setup`: what a repository still lacks, and doing it ----------------------------------------------------
+
+BAKED_OWNERS = {"kyverno"}        # owners whose pack the published image carries (container/org/kyverno)
+VALID_REPO = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
+PACK_BRANCH, CI_BRANCH = "add-assistant-org-pack", "ci/adopt-shared-actions"
+
+
+def open_pr_filter(branch: str) -> str:
+    """The jq that picks the URL of an open pull request from `branch`, or from `branch-2`, `branch-3`... (what a later run uses
+    when an earlier merged one left the plain name behind)."""
+    return (f'[.[] | select(.headRefName == "{branch}" or (.headRefName | startswith("{branch}-") '
+            f'and (ltrimstr("{branch}-") | test("^[0-9]+$"))))] | .[0].url // ""')
+
+
+def open_pr(repo: str, branch: str) -> str:
+    return gh("pr", "list", "--repo", repo, "--state", "open", "--limit", "100", "--json", "url,headRefName", "--jq",
+              open_pr_filter(branch), check=False).strip()
+
+
+def setup_status(repo: str) -> dict:
+    """For the pack and for the PR automation: 'found', a pull request URL that is open for it, or '' (missing)."""
+    owner = repo.split("/")[0]
+    has_pack = (owner.lower() in BAKED_OWNERS or api(f"repos/{repo}/contents/.github/{PACK}") is not None
+                or api(f"repos/{owner}/.github/contents/{PACK}") is not None)
+    flows = api(f"repos/{repo}/contents/.github/workflows")
+    has_ci = isinstance(flows, list) and any(f.get("name") in ("pr-management.yaml", "pr-management.yml") for f in flows)
+    return {"pack": "found" if has_pack else open_pr(repo, PACK_BRANCH),
+            "ci": "found" if has_ci else open_pr(repo, CI_BRANCH)}
+
+
+def codeowner_team(repo: str) -> str:
+    """The first team of the repository's own organisation that its CODEOWNERS names, or ''."""
+    owner = repo.split("/")[0]
+    for path in (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"):
+        text = api(f"repos/{repo}/contents/{path}", raw=True)
+        if isinstance(text, str):
+            for line in text.splitlines():
+                m = re.search(rf"@{re.escape(owner)}/[A-Za-z0-9_.-]+", line.split("#")[0], re.I)
+                if m:
+                    return m.group(0)
+    return ""
+
+
+def adopt_script() -> str:
+    here = os.path.dirname(os.path.abspath(__file__))
+    for path in (os.path.join(here, "adopt-ci.sh"), os.path.join(here, "..", "scripts", "adopt-ci.sh")):
+        if os.path.isfile(path):
+            return path
+    return ""
+
+
+LIFECYCLE_LABELS = ("needs-author-action", "ready-for-review", "workflow-approval-required", "stale", "merge-conflicts")
+SYNC_WORKFLOW = "sync-labels.yaml"
+SYNC_TIMEOUT = 300
+
+
+def workflow_runs(repo: str) -> list[dict]:
+    out = gh("run", "list", "--repo", repo, "--workflow", SYNC_WORKFLOW, "--limit", "10", "--json", "databaseId,status,conclusion,url", check=False)
+    try:
+        return json.loads(out or "[]")
+    except ValueError:
+        return []
+
+
+def sync_labels(repo: str) -> bool:
+    """Start the Sync labels workflow and wait for it, so the labels are known to exist before anything depends on them."""
+    before = {r["databaseId"] for r in workflow_runs(repo)}
+    # The workflow's dry_run input defaults to true: without this it reports success and creates nothing.
+    gh("workflow", "run", SYNC_WORKFLOW, "--repo", repo, "-f", "dry_run=false")
+    run: Optional[dict] = None
+    waited = 0
+    try:
+        while waited <= SYNC_TIMEOUT:
+            new = [r for r in workflow_runs(repo) if r["databaseId"] not in before]
+            run = max(new, key=lambda r: r["databaseId"]) if new else run
+            if run and run["status"] == "completed":
+                break
+            sys.stdout.write("\r\x1b[K" + dim("Syncing labels (Ctrl-C stops waiting; the run goes on)..."))
+            sys.stdout.flush()
+            time.sleep(3)
+            waited += 3
+    except KeyboardInterrupt:
+        pass
+    sys.stdout.write("\r\x1b[K")
+    if run is None:
+        print(yellow("Started Sync labels, but could not find its run. Look in the Actions tab."))
+        return False
+    if run["status"] != "completed":
+        print(yellow(f"Sync labels is still running: {run['url']}"))
+        return False
+    if run.get("conclusion") != "success":
+        print(red(f"Sync labels {run.get('conclusion')}: {run['url']}"))
+        return False
+    missing = [name for name in LIFECYCLE_LABELS if api(f"repos/{repo}/labels/{name}") is None]
+    if missing:
+        print(yellow(f"Sync labels finished but these labels do not exist: {', '.join(missing)}. Check {run['url']}"))
+        return False
+    print(green("Labels created") + f" ({run['url']})")
+    return True
+
+
+def finish_ci(repo: str) -> None:
+    """The PR automation is adopted: are its labels created, and is it switched on? Offer what is left (only on a terminal)."""
+    labels = all(api(f"repos/{repo}/labels/{name}") is not None for name in LIFECYCLE_LABELS)
+    try:            # reading a repository variable needs admin: without it GitHub refuses, which is not the same as "not set"
+        var = api(f"repos/{repo}/actions/variables/PR_AUTOMATION_LIVE")
+        live: Optional[bool] = isinstance(var, dict) and var.get("value") == "true"
+    except GhError:
+        live = None
+    print(f"  {green('✓') if labels else yellow('•')} Labels: {'created' if labels else 'not created yet (the Sync labels workflow creates them)'}")
+    if live is None:
+        print(f"  {dim('•')} Switched on: could not check (reading the variable needs admin on {repo})")
+    else:
+        print(f"  {green('✓') if live else yellow('•')} Switched on: {'yes' if live else 'no, it only previews: nothing is labelled, commented on or closed'}")
+    if (labels and live is not False) or not interactive():
+        return
+    options = []
+    if not labels:
+        options.append(Option("Run the Sync labels workflow", "creates the labels the automation uses", "labels", True))
+    if live is False:
+        options.append(Option("Switch the automation on", "sets PR_AUTOMATION_LIVE=true; the first run can mark old quiet PRs stale", "live", False))
+    picked = [o.value for o in menu("Finish the PR automation? (space ticks, enter confirms; none ticked skips)", options, multi=True)]
+    labels_ok = True
+    try:
+        if "labels" in picked:
+            labels_ok = sync_labels(repo)
+        if "live" in picked:
+            if not labels_ok:
+                print(yellow("Not switching it on: the labels are not there yet. Fix that first, then switch it on."))
+            else:
+                gh("variable", "set", "PR_AUTOMATION_LIVE", "--body", "true", "--repo", repo)
+                print(green("Switched on") + ": readiness and path labels act on the next PR event, stale in its daily run.")
+    except GhError as exc:
+        print(red(str(exc)), file=sys.stderr)
+    for key, command in (("labels", f"gh workflow run sync-labels.yaml --repo {repo} -f dry_run=false"),
+                         ("live", f"gh variable set PR_AUTOMATION_LIVE --body true --repo {repo}")):
+        if key in [o.value for o in options] and key not in picked:
+            print(dim(f"  Later: {command}"))
+
+
+PR_URL = re.compile(r"https://github\.com/\S+/pull/\d+")
+
+
+def setup(repo: str) -> int:
+    """Say what `repo` lacks (an organisation pack, the PR automation) and, if asked, do it. Nothing runs without a yes."""
+    if api(f"repos/{repo}") is None:
+        print(red(f"{repo} was not found, or your gh login cannot see it."), file=sys.stderr)
+        return 1
+    st = setup_status(repo)
+    label = {"pack": "Organisation pack", "ci": "PR automation (labels, readiness, stale)"}
+    for key in ("pack", "ci"):
+        state = st[key]
+        print(f"  {green('✓') if state == 'found' else yellow('•')} {label[key]}: "
+              + ("found" if state == "found" else f"pull request open: {state}" if state else "not set up"))
+    if st["ci"] == "found":
+        finish_ci(repo)
+    missing = [k for k in ("pack", "ci") if not st[k]]
+    if not missing:
+        return 0
+    if not interactive():
+        print(dim(f"Run `assistant setup {repo}` in a terminal to set up what is missing."))
+        return 0
+    options = []
+    if "pack" in missing:
+        options.append(Option("Write the organisation pack", "file classes and guides read from the repository; opens a pull request", "pack", True))
+    if "ci" in missing:
+        options.append(Option("Adopt the PR automation", "opens a pull request; it only previews until you switch it on", "ci", True))
+    picked = [o.value for o in menu(f"Set up {repo} now? (space ticks, enter confirms; none ticked skips)", options, multi=True)]
+    code = 0
+    opened: dict[str, str] = {}            # kind -> pull request URL
+    if "pack" in picked:
+        before = len(OPENED)
+        code = main([repo]) or code
+        if len(OPENED) > before:
+            opened["pack"] = OPENED[-1][1]
+    if "ci" in picked:
+        script = adopt_script()
+        if not script:
+            print(red("The CI adoption script is not here: use the installer (install.sh | sh -s -- setup owner/repo) or a checkout."))
+            return 1
+        team = codeowner_team(repo) or ask(f"Team to notify when a PR needs a maintainer (@{repo.split('/')[0]}/team)")
+        if not team:
+            print("No team given; skipped the PR automation.")
+            return code
+        print(dim("  … adopting the PR automation"), flush=True)
+        proc = subprocess.Popen(["bash", script, "--reviewers", team, repo], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        for line in proc.stdout:
+            print(line, end="", flush=True)
+            found = PR_URL.search(line)
+            if found:
+                opened["ci"] = found.group(0)
+        code = proc.wait() or code
+        if "ci" in opened:
+            print("\n" + bold("Next: make it useful, then merge it") + f"\n  {opened['ci']}")
+            print("  Check its description: the reviewers team, .github/labels.yml and .github/pr-readiness-checks.yml are yours to edit.")
+            print("  Edit in the browser (Files changed, the ... menu, Edit file), or: gh pr checkout "
+                  f"{opened['ci'].rsplit('/', 1)[-1]} --repo {repo}")
+            print("  Reference: https://github.com/kyverno/assistant/blob/main/docs/adopting-actions.md")
+    if opened:
+        go = choose("Merge them when you are ready. Continue here afterwards?", [
+            Option("Wait here until they are merged", "checks every few seconds; Ctrl-C stops", "wait"),
+            Option("Stop here", f"run `assistant setup {repo}` again after merging: it says what is left", "stop")])
+        if go.value == "wait":
+            states = wait_for_merge(list(opened.values()))
+            for kind, url in opened.items():
+                state = states.get(url, "OPEN")
+                what = {"pack": "The organisation pack", "ci": "The PR automation"}[kind]
+                if state == "MERGED":
+                    print(green(f"✓ {what} is merged."))
+                elif state == "CLOSED":
+                    print(yellow(f"• {url} was closed without merging."))
+                else:
+                    print(dim(f"• {url} is still open. Run `assistant setup {repo}` again after merging."))
+            if states.get(opened.get("ci", ""), "") == "MERGED":
+                finish_ci(repo)
+    return code
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    ap = argparse.ArgumentParser(prog="assistant init", description=__doc__.split("\n\n")[0])
+    ap.add_argument("repos", nargs="*", help="owner/repo, one or more")
+    ap.add_argument("--location", choices=("repo", "org"), help="put the pack in each repository, or once in <owner>/.github")
+    ap.add_argument("--yes", action="store_true", help="accept what was inferred, without asking")
+    ap.add_argument("--dry-run", action="store_true", help="print the pack and stop; write nothing anywhere")
+    ap.add_argument("--setup", action="store_true", help="say what the repository lacks (pack, PR automation) and offer to set it up")
+    ap.add_argument("--dump", action="store_true", help=argparse.SUPPRESS)       # the inputs as JSON, for tests
+    ap.add_argument("--no-facts", action="store_true", help="leave out assistant-org-facts.md, the stub of questions to fill in")
+    args = ap.parse_args(argv)
+    use_terminal()
+    plain = args.yes or not interactive()
+    if args.setup:
+        if len(args.repos) != 1 or not VALID_REPO.match(args.repos[0]):
+            print(red("setup takes one repository, as owner/repo"), file=sys.stderr)
+            return 2
+        try:
+            return setup(args.repos[0])
+        except GhError as exc:
+            print(red(str(exc)), file=sys.stderr)
+            return 1
+    if args.dump:
+        try:
+            print(json.dumps(snapshot(args.repos[0])))
+            return 0
+        except (GhError, IndexError) as exc:
+            print(red(str(exc) or "give a repository"), file=sys.stderr)
+            return 1
+
+    try:
+        print(bold("assistant init") + dim("  writes the pack that tells the assistant what is generated, critical and ready"))
+        repos = args.repos or [r.strip() for r in re.split(r"[ ,]+", ask("Repositories (owner/repo, space-separated)")) if r.strip()]
+        if not repos or any(not re.fullmatch(r"[\w.-]+/[\w.-]+", r) for r in repos):
+            print(red("Give repositories as owner/repo."), file=sys.stderr)
+            return 2
+        print(dim("Reading " + ", ".join(repos) + " with your gh login..."))
+        proposals = [load(r) for r in repos]
+    except GhError as exc:
+        print(red(str(exc)), file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        print("\nCancelled. Nothing was written.")
+        return 130
+
+    try:
+        for p in proposals:
+            if p.truncated:
+                print(yellow(f"{p.repo}: the file list was cut off by GitHub, so some suggestions may be missing"))
+            if p.has_pack:
+                print(yellow(f"{p.repo} already has .github/{PACK}; it will be left as it is"))
+        todo = [p for p in proposals if not p.has_pack]
+        if not todo:
+            return 0
+        owners = {p.repo.split("/")[0] for p in todo}
+        location = args.location
+        if not location:
+            if len(todo) == 1 and len(owners) == 1:
+                location = "repo"                 # the default; --location org for a shared pack
+                owner = next(iter(owners))
+                if api(f"repos/{owner}/.github/contents/{PACK}") is not None:
+                    print(yellow(f"{owner}/.github already has {PACK}; it covers every repository of {owner} that has no pack of its own."))
+                    if plain or not confirm(f"Write a pack for just {todo[0].repo} instead (it overrides the shared one)?"):
+                        print("Nothing was written. Edit the shared file, or run again with --location repo.")
+                        return 0 if not plain else 1
+            elif len(owners) == 1:
+                one = choose(f"{len(todo)} repositories: one pack or one each?", [
+                    Option("One shared pack", f"{next(iter(owners))}/.github, same rules for all {len(todo)}", "org"),
+                    Option("One pack per repository", "each repository decides for itself", "repo")])
+                location = one.value
+            else:
+                location = "repo"
+                print(dim("The repositories belong to different owners, so each gets its own pack."))
+        if location == "org" and len(owners) > 1:
+            print(red("A shared pack needs one owner; choose --location repo."), file=sys.stderr)
+            return 2
+        if location == "org":
+            owner = next(iter(owners))
+            if api(f"repos/{owner}/.github/contents/{PACK}") is not None:
+                # Say so before the questions, not after them: a shared pack is already there.
+                print(yellow(f"{owner}/.github already has {PACK}; it covers every repository of {owner} that has no pack of its own."))
+                if plain or not confirm("Write a pack for just " + ", ".join(p.repo for p in todo) + " instead (it overrides the shared one)?"):
+                    print("Nothing was written. Edit the shared file, or run again with --location repo.")
+                    return 0 if not plain else 1
+                location = "repo"
+
+        facts_wanted = not args.no_facts
+        packs: list[tuple[str, dict[str, str], str]] = []        # (target repo, files, name)
+        if location == "org":
+            owner = next(iter(owners))
+            chosen = merge([inferred(p) if plain else review(p) for p in todo])
+            files = {PACK: render(owner, chosen)}
+            if facts_wanted:
+                files["assistant-org-facts.md"] = FACTS_STUB.format(name=owner, ci=''.join(p.ci_facts + chr(10) for p in todo[:1] if p.ci_facts))
+            packs.append((f"{owner}/.github", files, owner))
+        else:
+            for p in todo:
+                if plain:
+                    chosen = inferred(p)
+                else:
+                    print(f"\n{bold(p.repo)}")
+                    chosen = review(p)
+                files = {f".github/{PACK}": render(p.repo.split("/")[0], chosen)}
+                if facts_wanted:
+                    files[".github/assistant-org-facts.md"] = FACTS_STUB.format(name=p.repo, ci=(p.ci_facts + chr(10)) if p.ci_facts else "")
+                packs.append((p.repo, files, p.repo))
+
+        for target, files, _ in packs:
+            for path, content in files.items():
+                print(f"\n{bold(target + '/' + path)}\n" + dim("-" * 60) + f"\n{content.rstrip()}\n" + dim("-" * 60))
+        print("\n" + bold("What init could not work out for you:"))
+        for item in not_inferred(todo[0], location):
+            print(f"  {yellow('•')} {item}")
+        if args.dry_run:
+            print(dim("\n--dry-run: nothing was written."))
+            return 0
+        if not args.yes and not interactive():
+            print(dim("\nNo terminal and no --yes: nothing was written. Re-run with --yes to open the pull request, or --dry-run to only print."))
+            return 0
+        where = ", ".join(t for t, _, _ in packs)
+        pr_label = (f"Open a pull request in {where} (the repository is created if it does not exist)" if location == "org"
+                    else f"Open a pull request in {where}")
+        action = choose("What now?", [Option(pr_label, value="pr"),
+                                      Option("Save the files here and stop", value="file"),
+                                      Option("Cancel", value="no")]) if not plain else Option("", value="pr")
+        if action.value == "no":
+            print("Nothing was written.")
+            return 0
+        if action.value == "file":
+            for _, files, name in packs:
+                for path, content in files.items():
+                    dest = os.path.basename(path) if len(packs) == 1 else f"{name.replace('/', '-')}-{os.path.basename(path)}"
+                    if os.path.exists(dest):
+                        print(red(f"{dest} already exists; not overwriting it"), file=sys.stderr)
+                        return 1
+                    with open(dest, "x") as f:
+                        f.write(content)
+                    print(green(f"Wrote {dest}"))
+            return 0
+        for target, files, _ in packs:
+            if location == "org" and api(f"repos/{target}") is None:
+                if not confirm(f"{target} does not exist. Create it?"):
+                    print("Nothing was written.")
+                    return 0
+                url = create_shared_repo(target.split("/")[0], files, pack_pr_body(files, not_inferred(todo[0], location)))
+            else:
+                url = publish(target, files, "add-assistant-org-pack", "Add the assistant organisation pack",
+                              pack_pr_body(files, not_inferred(todo[0], location)))
+            print(green("Opened ") + url)
+            OPENED.append((target, url))
+            next_steps(target, url)
+        print(dim("\nTo see what the assistant loaded once it is merged, ask it for repo_pack."))
+        return 0
+    except GhError as exc:
+        print(red(str(exc)), file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        print("\nCancelled. Nothing more was written.")
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main())

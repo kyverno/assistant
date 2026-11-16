@@ -16,7 +16,7 @@ KEYS = {
     "fallback_reviewers", "exempt_labels", "close_days", "warning_days",
     "backlog_days", "milestone_prefix", "labels_file",
 }
-OPTIONAL_KEYS = {"infra_checks"}
+OPTIONAL_KEYS = {"infra_checks", "nudge_plain_comments"}
 ACTION = Path(__file__).resolve().parent
 DEFAULT_CHECKS = ACTION / "default-readiness-checks.yml"
 DEFAULT_CHECKS_PATH = ".github/pr-readiness-checks.yml"
@@ -40,6 +40,8 @@ def validate_config(config):
         or any(ord(c) < 32 for c in name + reason) for name, reason in infra.items()
     ):
         raise ValueError("infra_checks must map each check name to the reason a red result is not the author's to fix")
+    if not isinstance(config.get("nudge_plain_comments", False), bool):
+        raise ValueError("nudge_plain_comments must be true or false")
     for key in ("close_days", "warning_days", "backlog_days"):
         if type(config[key]) is not int:
             raise ValueError(f"{key} must be a JSON integer")
@@ -251,7 +253,8 @@ def main():
     env = dict(os.environ, DRY_RUN=dry_run, STALE_DAYS=str(stale_days), NUDGE_DAYS=str(nudge_days),
                CLOSE_DAYS=str(config["close_days"]), WARNING_DAYS=str(config["warning_days"]),
                BACKLOG_DAYS=str(config["backlog_days"]), FALLBACK_REVIEWERS=config["fallback_reviewers"],
-               EXEMPT_LABELS=json.dumps(config["exempt_labels"]), MILESTONE_PREFIX=config["milestone_prefix"])
+               EXEMPT_LABELS=json.dumps(config["exempt_labels"]), MILESTONE_PREFIX=config["milestone_prefix"],
+               NUDGE_PLAIN_COMMENTS=str(config.get("nudge_plain_comments", False)).lower())
     if mode == "validate":
         render_labels(yaml_file(trusted_file(workspace, config["labels_file"])))
         program = readiness_program(repo_checks_file(workspace), config.get("infra_checks", {}))

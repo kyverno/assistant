@@ -14,6 +14,10 @@ gh auth login                                   # your own login; nothing is sto
 scripts/adopt-ci.sh --reviewers @your-org/maintainers your-org/repo-a your-org/repo-b
 ```
 
+Without the clone, from the launcher (needs Docker and a released image): `assistant setup your-org/repo-a`. It also offers the
+organisation pack. `--reviewers` is optional: the first team of the repository's organisation named in its CODEOWNERS is used.
+The shared actions are pinned to the current commit of this repository's default branch, and a commit that is not on it is refused.
+
 For each repository the script clones it, adds the files below on a branch, signs the commit off (`-s`), pushes
 (to your fork if you cannot push to the repository) and opens the PR. Use `--dry-run` first to see the file list
 without pushing anything. It never overwrites a file that already exists, and skips a repository that already has
@@ -30,8 +34,8 @@ the PR open, so it is safe to run again.
 | `.github/labels.yml` | label catalog and path rules |
 
 The four workflow files are short callers: they say when to run and call a shared workflow here
-(`.github/workflows/pr-management.yml`, or `pr-management-validate.yml` for the config check), pinned to this
-checkout's commit. The logic, the default-branch checkout and the preview or live decision live in the shared
+(`.github/workflows/pr-management.yml`, or `pr-management-validate.yml` for the config check), pinned to a commit
+of this repository's default branch. The logic, the default-branch checkout and the preview or live decision live in the shared
 workflow. To update, change the SHA, or use `--update-pin` below. Job names now read `<job> / <shared job>`, which
 matters if a branch-protection rule requires one by name.
 

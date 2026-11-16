@@ -28,6 +28,9 @@ docker run --rm "$IMAGE" tar -C /opt/kyverno -c launcher | tar -x -C "$TMP"
 check "the launcher is called assistant" test -x "$TMP/launcher/assistant"
 check "the Docker launcher is called assistant-docker" test -x "$TMP/launcher/assistant-docker"
 check "no launcher is left under the old name" bash -c "! test -e '$TMP/launcher/kyverno' && ! test -e '$TMP/launcher/kyverno-docker'"
+check "the launcher carries the CI adoption script and its templates" bash -c "test -x '$TMP/launcher/adopt-ci.sh' && test -f '$TMP/launcher/adopt-ci-templates/pr-management.json' && test -f '$TMP/launcher/adopt-ci-templates/workflows/pr-management.yaml'"
+check "setup is found after an option that takes a value" bash -c "'$TMP/launcher/assistant' --image some-image setup nope 2>&1 | grep -q 'owner/repo'"
+check "the installer does not take the terminal for its own script" bash -c "! grep -v '^[[:space:]]*#' '$HERE/../../install.sh' | grep -q 'exec </dev/tty'"
 check "the launcher prints its help" bash -c "'$TMP/launcher/assistant' --help | grep -q -- '--profile'"
 check "the provider profiles are there" bash -c "test -f '$TMP/launcher/providers/repo-github.yaml' && grep -q 'id: assistant-repo-github' '$TMP/launcher/providers/repo-github.yaml'"
 check "no provider id keeps the old prefix" bash -c "! grep -rq 'id: kyverno-' '$TMP/launcher/providers'"
@@ -62,7 +65,7 @@ spec = importlib.util.spec_from_file_location('repo_intel', d + '/__init__.py', 
 m = importlib.util.module_from_spec(spec); sys.modules['repo_intel'] = m; spec.loader.exec_module(m)
 from repo_intel import pack, sequencer
 rules = pack.load('/fixtures/other-org.yaml')
-assert rules.gate.name == 'release-gate' and rules.classify('core/x.go') == 'ADMISSION_CRITICAL'
+assert rules.gate.name == 'release-gate' and rules.classify('core/x.go') == 'CRITICAL'
 r = sequencer.sequence([{'number': 1, 'changed_files': ['gen/out.go']}, {'number': 2, 'changed_files': ['schema/a.proto']}], 'main', rules=rules)
 assert [p['pr'] for t in r['tiers'] for p in t['prs']] == [2, 1], r
 PYEOF"

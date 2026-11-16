@@ -98,7 +98,7 @@ to `pull_request` or other untrusted-code execution.
 
 ## Repository configuration
 
-All keys below are mandatory; unknown keys fail validation.
+All keys below are mandatory except the optional `infra_checks` and `nudge_plain_comments`; unknown keys fail validation.
 
 ```json
 {
@@ -122,6 +122,28 @@ period. `fallback_reviewers` is an
 Kyverno, for example, uses `Kyverno Release ` and stamps qualifying same-repository issues
 during readiness sweeps.
 
+`nudge_plain_comments` (optional, default `false`) makes readiness ask a reviewer about a plain comment. When a
+PR that is otherwise `ready-for-review` has a maintainer's comment (a PR comment, or the summary of a review that only
+comments) that the author has not answered, the bot posts, naming the reviewer, linking the comment and quoting its first 100
+characters (with `@`, `#`, `<` and `>` removed, so the quote pings, links and injects nothing), and asks whether it is a
+requested change. It never changes a label. A requested change belongs in a **Request changes** review, which the
+`unanswered` check tracks; a reviewer who does not want a formal review can add an exempt label such as `hold`, which
+stops the bot changing labels on that PR. It errs towards staying quiet:
+
+- Only when the PR has no blocking finding, no pending or gated checks and no exempt label, so a PR the author already
+  owes action on is never nudged.
+- At most once per head commit, so reviewers talking to each other do not trigger a nudge per message.
+- A comment is answered by the author's later comment, review or reply in a review thread, or by a push. A review is for
+  one commit, so a different head means a push; a PR comment has no commit, so the head commit's date stands in.
+- Not for inline comments, nor for the summary of a review that has inline comments: those are review threads, which the
+  `threads` check already tracks.
+- Not for `/commands`, a bare LGTM or thanks, or a reviewer who approved afterwards.
+- Only comments from the last 7 days, so enabling it never digs up old threads. Run the workflow once with `dry_run`
+  to see how many nudges the first sweep would post.
+
+Maintainers are GitHub's OWNER, MEMBER and COLLABORATOR associations. Comments do not trigger the workflow, so a nudge
+appears on the next hourly sweep.
+
 The label file maps each label name to `color` (quote six-digit hex values),
 `description`, and optional actions/labeler `rules`. Rules are rendered without
 changing matcher semantics. Metadata-only entries are not path-label rules.
@@ -138,6 +160,10 @@ Readiness runs a built-in set, so a repository needs no check logic of its own:
 | `conflicts` | the PR has `merge-conflicts` |
 | `threads` | a review thread is unresolved and its last comment is not the author's |
 | `unanswered` | a maintainer's latest review is *Request changes* and the author has neither replied nor pushed since |
+
+A check can run more than once on a commit, and GitHub lists every run. Only the newest run of each check counts,
+so a red run that was later re-run green no longer blocks the PR; a re-run that has not finished counts as pending.
+This applies to the built-in checks and to a repository's own checks alike.
 
 The jq for each is in [`default-readiness-checks.yml`](default-readiness-checks.yml). A repository changes them in
 `.github/pr-readiness-checks.yml`, which is optional:
@@ -167,7 +193,8 @@ are rechecked before readiness changes. Comments are paginated for marker
 deduplication.
 
 Stale handling preserves commit/force-push/merge-conflict clocks, conservative
-observation of backdated pushes, and bot-only persisted markers. Author replies
+observation of backdated pushes, and bot-only persisted markers. The "first saw this push" marker is a short
+visible comment that the bot minimizes (as off topic) right after posting; minimizing is cosmetic, so a failure only warns. Author replies
 do not reset inactivity. Auto-close requires both total `close_days` inactivity
 **and** at least `warning_days` since a matching bot warning or bot-applied stale
 label. A manually applied stale label without a bot warning is insufficient.
