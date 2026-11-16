@@ -299,14 +299,14 @@ late_commit_observed_at() {
   printf '%s' "$now"
 }
 
-# Collapses the bot's own state comment. Cosmetic only: a failure here must never fail the sweep or change what it does.
+# Collapses the bot's own state comment, as off topic: "resolved" would tell readers that something was fixed. Cosmetic only: a failure here must never fail the sweep or change what it does.
 minimize_comment() {
   local url="$1" id node
   [[ "$url" =~ \#issuecomment-([0-9]+)$ ]] || return 0
   id="${BASH_REMATCH[1]}"
   node=$(gh api "repos/$repo/issues/comments/$id" --jq .node_id 2> /dev/null) && [[ -n "$node" ]] \
     || { echo "::warning::could not look up comment $id to minimize it."; return 0; }
-  act gh api graphql -f query='mutation($id: ID!) { minimizeComment(input: {subjectId: $id, classifier: RESOLVED}) { minimizedComment { isMinimized } } }' \
+  act gh api graphql -f query='mutation($id: ID!) { minimizeComment(input: {subjectId: $id, classifier: OFF_TOPIC}) { minimizedComment { isMinimized } } }' \
     -f id="$node" > /dev/null || echo "::warning::could not minimize comment $id."
   return 0
 }

@@ -194,7 +194,7 @@ deduplication.
 
 Stale handling preserves commit/force-push/merge-conflict clocks, conservative
 observation of backdated pushes, and bot-only persisted markers. The "first saw this push" marker is a short
-visible comment that the bot minimizes right after posting; minimizing is cosmetic, so a failure only warns. Author replies
+visible comment that the bot minimizes (as off topic) right after posting; minimizing is cosmetic, so a failure only warns. Author replies
 do not reset inactivity. Auto-close requires both total `close_days` inactivity
 **and** at least `warning_days` since a matching bot warning or bot-applied stale
 label. A manually applied stale label without a bot warning is insufficient.

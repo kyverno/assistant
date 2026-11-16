@@ -809,8 +809,12 @@ class AutomationTests(unittest.TestCase):
         body = persisted["stale_pr"]["comments"]["nodes"][-1]["body"]
         self.assertIn("<!-- pr-stale-author-action: observed", body)
         self.assertIn("Tracking the latest push for the stale sweep.", body)
-        self.assertTrue(any(c[:2] == ["api", "graphql"] and any("minimizeComment" in a for a in c) and "id=IC_node4242" in c
-                            for c in self.calls))
+        minimize = [c for c in self.calls if c[:2] == ["api", "graphql"] and any("minimizeComment" in a for a in c)]
+        self.assertEqual(len(minimize), 1)
+        self.assertIn("id=IC_node4242", minimize[0])
+        # Hidden as off topic: "resolved" would tell readers that something was fixed.
+        self.assertTrue(any("classifier: OFF_TOPIC" in a for a in minimize[0]))
+        self.assertFalse(any("RESOLVED" in a for a in minimize[0]))
 
     def test_failing_to_minimize_the_marker_never_fails_the_sweep(self):
         for failure in ("minimize_failure", "node_lookup_failure"):
