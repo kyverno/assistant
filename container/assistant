@@ -39,16 +39,20 @@ KIND=""
 SANDBOX=""
 DASH_PORT="${ASSISTANT_DASHBOARD_PORT:-9219}"   # not 9119, which a Hermes dashboard on your laptop would use
 # --no-openshell: run the image in plain Docker instead. A separate script, so everything below stays as it is.
-# `assistant init`: write your organisation pack by answering questions (runs on your machine, with your gh login).
-if [ "${1:-}" = init ]; then
-  shift
-  command -v python3 >/dev/null 2>&1 || { echo "assistant init needs python3" >&2; exit 1; }
-  exec python3 "$HERE/assistant-init" "$@"
-fi
-# `assistant setup owner/repo`: say what the repository lacks (organisation pack, PR automation) and offer to set it up.
-if [ "${1:-}" = setup ]; then
-  shift
-  command -v python3 >/dev/null 2>&1 || { echo "assistant setup needs python3" >&2; exit 1; }
+# `assistant init` and `assistant setup` run on your machine with your gh login, and need no sandbox or image. They may follow
+# options that take a value (`--image IMAGE setup owner/repo`, as the installer is often run), so find the first word that
+# is not an option or an option's value.
+SUB=""; SUB_AT=0; prev=""; i=0
+for a in "$@"; do
+  i=$((i + 1))
+  case "$prev" in --image|--profile|--name|--provider|--org) prev=""; continue ;; esac
+  case "$a" in init|setup) SUB="$a"; SUB_AT=$i; break ;; esac
+  prev="$a"
+done
+if [ -n "$SUB" ]; then
+  shift "$SUB_AT"
+  command -v python3 >/dev/null 2>&1 || { echo "assistant $SUB needs python3" >&2; exit 1; }
+  if [ "$SUB" = init ]; then exec python3 "$HERE/assistant-init" "$@"; fi
   exec python3 "$HERE/assistant-init" --setup "$@"
 fi
 for a in "$@"; do
