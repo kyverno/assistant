@@ -650,6 +650,7 @@ what to do first. What is built is above. What is planned, in order, is not buil
 | Daily use, data, the dashboard, coding in the sandbox | [`docs/usage.md`](docs/usage.md), [`docs/setup.md`](docs/setup.md) |
 | Adopting the CI actions | [`docs/adopting-actions.md`](docs/adopting-actions.md), [`.github/actions/`](.github/actions/README.md) |
 | Writing your organisation pack | [`docs/organisation-pack.md`](docs/organisation-pack.md) |
+| Limiting which repositories the assistant may reach, for an organisation | [`docs/access-rules.md`](docs/access-rules.md) |
 | Security: the policies, what was tested, and the design | [`docs/sandbox-security.md`](docs/sandbox-security.md), [`docs/container.md`](docs/container.md), [`docs/openshell-architecture.md`](docs/openshell-architecture.md), [`SECURITY.md`](SECURITY.md) |
 | How it works and why | [`docs/how-it-works.md`](docs/how-it-works.md), [`docs/architecture.md`](docs/architecture.md) |
 | Everything each assistant can do | [`docs/capabilities.md`](docs/capabilities.md) |

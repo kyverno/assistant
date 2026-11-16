@@ -1,0 +1,136 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The stack behind the organisation's access rules: NVIDIA's Agent Policy Fabric (a policy service and a policy gateway) and a
+# dedicated OpenShell gateway that sends every sandbox request through it. Adapted from deploy/docker/compose.yaml and
+# e2e/configs/compose/compose.openshell.yaml in github.com/NVIDIA/agent-policy-fabric (Apache-2.0, pinned commit in
+# container/apf/VERSION), without their build sections: the images are published by .github/workflows/apf-images.yml.
+# Driven by container/apf/stack.sh, which fills the volumes and the variables below; it is not meant to be run by hand.
+
+name: assistant-apf
+
+x-hardened: &hardened
+  user: "65532:65532"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  tmpfs: ["/tmp:rw,noexec,nosuid,size=16m,mode=1777"]
+  restart: unless-stopped
+  stop_grace_period: 30s
+  logging:
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }
+
+services:
+  pod:
+    image: registry.k8s.io/pause:3.10@sha256:ee6521f290b2168b6e0935a181d4cff9be1ac3f505666ef0e3c98fae8199917a
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: always
+    extra_hosts:
+      - "host.openshell.internal:127.0.0.1"
+    ports:
+      - "127.0.0.1:${OPENSHELL_PORT}:${OPENSHELL_PORT}"
+      - "127.0.0.1:${OPENSHELL_HEALTH_PORT}:${OPENSHELL_HEALTH_PORT}"
+      # Supervisors run with host networking and reach the request policy through this loopback publish.
+      - "127.0.0.1:${APF_EGRESS_PORT}:${APF_EGRESS_PORT}"
+
+  policy-service:
+    <<: *hardened
+    image: ${APF_SERVICE_IMAGE}
+    network_mode: service:pod
+    command:
+      - --socket=/run/apf/policy-service/policy-service.sock
+      - --policy-source=local
+      - --bundle-path=/data/bundles/bundle/manifest.yaml
+      - --document-signing-key=/etc/apf/secrets/document-signing.seed
+      - --document-key-id=${APF_KEY_ID}
+      - --trust-root-dir=/etc/apf/trust-roots
+      - --http-addr=127.0.0.1:19200
+      - --http-bearer-token-file=/etc/apf/secrets/http-bearer-token
+      - --audit-log-dir=/var/log/apf/audit
+      - --surfaces=openshell.sandbox.v1,openshell.provider-profile.v1,apf.policy.v1
+    volumes:
+      - apf-run:/run/apf
+      - apf-state:/var/lib/apf
+      - apf-audit:/var/log/apf/audit
+      - apf-secrets:/etc/apf/secrets:ro
+      - ${APF_BUNDLE_DIR}:/data/bundles/bundle:ro
+      - ${APF_TRUST_ROOT}:/etc/apf/trust-roots/${APF_KEY_ID}.pub:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:19200/readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  policy-gateway:
+    <<: *hardened
+    image: ${APF_GATEWAY_IMAGE}
+    network_mode: service:pod
+    command:
+      - --socket=/run/apf/policy-gateway/policy-gateway.sock
+      - --policy-service-socket=/run/apf/policy-service/policy-service.sock
+      - --document-kind=openshell.sandbox.v1
+      - --document-name=default
+      - --document-key-id=${APF_KEY_ID}
+      - --jwks-url=http://127.0.0.1:19200/.well-known/jwks.json
+      - --audit-log-dir=/var/log/apf/audit
+      - --openshell-gateway-url=http://127.0.0.1:${OPENSHELL_PORT}
+      - --openshell-interceptor-addr=0.0.0.0:${APF_ADMISSION_PORT}
+      - --openshell-interceptor-tls-cert-file=/etc/apf/openshell/interceptor/tls.crt
+      - --openshell-interceptor-tls-key-file=/etc/apf/openshell/interceptor/tls.key
+      - --openshell-interceptor-auth-trust-file=/etc/apf/openshell/interceptor/trust.toml
+      - --openshell-middleware-addr=0.0.0.0:${APF_EGRESS_PORT}
+      - --openshell-middleware-tls-cert-file=/etc/apf/openshell/middleware/tls.crt
+      - --openshell-middleware-tls-key-file=/etc/apf/openshell/middleware/tls.key
+      - --openshell-middleware-auth-trust-file=/etc/apf/openshell/middleware/trust.toml
+    depends_on:
+      policy-service:
+        condition: service_healthy
+    volumes:
+      - apf-run:/run/apf
+      - apf-audit:/var/log/apf/audit
+      - apf-openshell:/etc/apf/openshell:ro
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/${APF_EGRESS_PORT}"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 15s
+
+  openshell-gateway:
+    image: ghcr.io/nvidia/openshell/gateway:${OPENSHELL_IMAGE_TAG}
+    network_mode: service:pod
+    # Root for the engine socket and the same-path state bind.
+    user: "0"
+    security_opt: ["label=disable"]
+    command: ["--config", "/etc/openshell/gateway.toml"]
+    restart: on-failure
+    environment:
+      OPENSHELL_DB_URL: "sqlite:${OPENSHELL_STATE_DIR}/gateway.db?mode=rwc"
+      XDG_DATA_HOME: ${OPENSHELL_STATE_DIR}
+      XDG_STATE_HOME: ${OPENSHELL_STATE_DIR}
+      HOME: ${OPENSHELL_STATE_DIR}
+    volumes:
+      - ${CONTAINER_SOCKET}:/run/container-engine/engine.sock
+      - type: bind
+        source: ${OPENSHELL_STATE_DIR}
+        target: ${OPENSHELL_STATE_DIR}
+        bind:
+          create_host_path: true
+      - ${OPENSHELL_GATEWAY_TOML}:/etc/openshell/gateway.toml:ro
+      - openshell-jwt:/etc/openshell-extensions/apf:ro
+    depends_on:
+      # The gateway asks every registered extension to describe itself at startup and fails closed, so APF must be up first.
+      policy-gateway:
+        condition: service_healthy
+
+volumes:
+  apf-run: {}
+  # The anti-rollback counter: a bundle older than the last one is refused.
+  apf-state: {}
+  apf-audit: {}
+  apf-secrets: {}
+  apf-openshell: {}
+  openshell-jwt: {}

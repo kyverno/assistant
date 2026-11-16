@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: Apache-2.0
+# The dedicated OpenShell gateway: the same settings as the APF verification fixture (e2e/configs/gateway/openshell-gateway.docker.toml,
+# NVIDIA/agent-policy-fabric), without the sandbox-admission interceptor and the provider-profile source. The assistant keeps
+# OpenShell's own sandbox policy (it carries the MCP revisions APF's schema cannot), and APF only decides each request.
+# stack.sh replaces the @NAME@ markers.
+
+[openshell]
+version = 2
+
+[openshell.gateway]
+bind_address        = "0.0.0.0:@GATEWAY_PORT@"
+health_bind_address = "0.0.0.0:@HEALTH_PORT@"
+log_level           = "info"
+compute_driver      = "docker"
+disable_tls         = true
+
+# Plaintext and unauthenticated, on 127.0.0.1 only: anything that can reach that port on this machine can use this gateway.
+[openshell.gateway.auth]
+allow_unauthenticated_users = true
+
+[openshell.gateway.gateway_jwt]
+signing_key_path = "/etc/openshell-extensions/apf/jwt/signing.pem"
+public_key_path  = "/etc/openshell-extensions/apf/jwt/public.pem"
+kid_path         = "/etc/openshell-extensions/apf/jwt/kid"
+gateway_id       = "@GATEWAY_ID@"
+
+# Every request the sandboxes send to the hosts their policy names is decided here, before any credential is added.
+[[openshell.supervisor.middleware]]
+name              = "apf-content-policy"
+grpc_endpoint     = "https://host.openshell.internal:@EGRESS_PORT@"
+audience          = "urn:openshell:extension:middleware:@GATEWAY_ID@"
+tls_ca_cert_path  = "/etc/openshell-extensions/apf/ca.crt"
+max_payload_bytes = 4194304
+timeout           = "10s"
+
+[openshell.drivers.docker]
+socket_path           = "/run/container-engine/engine.sock"
+default_image         = "ghcr.io/nvidia/openshell-community/sandboxes/base@sha256:e29a8e98c1399aa08a8c624d758d1814b6edbe0302eb570c0468a6d3e811d167"
+supervisor_image      = "ghcr.io/nvidia/openshell/supervisor:@OPENSHELL_TAG@"
+sandbox_runtime_image = "ghcr.io/nvidia/openshell/sandbox:@OPENSHELL_TAG@"
+image_pull_policy     = "if_not_present"
+sandbox_label         = "@GATEWAY_ID@"
+# Loopback keeps the supervisor's host.openshell.internal alias on 127.0.0.1, where the pod publishes the gateway and the request policy.
+grpc_endpoint         = "http://127.0.0.1:@GATEWAY_PORT@"

@@ -35,7 +35,7 @@ _KNOWN: dict[str, Optional[tuple[str, ...]]] = {
 # Every top-level key a pack may have: `maintainer` is the maintainer assistant's; the rest are shared or the contributor
 # assistant's (profiles/contributor/plugins/contributor reads them). A key in neither profile is a typo, so it is an error.
 _ROOT_KEYS = ("name", "repositories", "agent_docs", "instructions_dir", "codeowners", "labels", "readiness", "entry_labels",
-              "reserved_labels", "review_bots", "ladder", "noise_paths", "test_files", "maintainer")
+              "reserved_labels", "review_bots", "ladder", "noise_paths", "test_files", "maintainer", "access")
 
 # The shared `readiness:` section: the maintainer reads three of these, the contributor also reads checks_file.
 _READINESS_KEYS = ("ready_labels", "attention_labels", "infra_checks", "checks_file")
@@ -334,6 +334,10 @@ def parse(data: Any, source: Optional[str] = None, facts: str = "") -> Rules:
     _check_keys(data, _ROOT_KEYS, "the file")
     if data.get("repositories") is not None and not _valid_repositories(data["repositories"]):
         raise PackError("repositories: expected a list of entries like `- repo: owner/name`")
+    # `access:` is the organisation's access rules. The launcher reads and enforces them (container/assistant-access) before this
+    # runs, and only from <owner>/.github; here it is checked for shape and otherwise ignored, so that a typo in it is an error
+    # in the one place the admin looks, not a pack that loads while its rules say something else.
+    _strings(_check_keys(data.get("access"), ("repos",), "access").get("repos"), "access.repos")
     m = _check_keys(data.get("maintainer"), tuple(_KNOWN), "maintainer")
     fc = _check_keys(m.get("file_classes"), _FILE_CLASSES, "maintainer.file_classes")
     gi = _check_keys(m.get("generated_inputs"), _KNOWN["generated_inputs"], "maintainer.generated_inputs")

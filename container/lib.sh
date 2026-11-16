@@ -232,3 +232,72 @@ binaries:
   - /usr/lib/git-core/git-remote-https
 EOF
 }
+
+# --- the organisation's access rules (docs/access-rules.md) ---
+# The owner of a repository can publish `access:` rules in <owner>/.github/assistant-org.yaml. When it does, the OpenShell
+# launcher runs the sandbox on a dedicated gateway behind APF (container/apf), which refuses every GitHub call outside those
+# repositories. Nothing here runs for the contributor assistant or without a repository.
+# shellcheck disable=SC2034  # ACCESS_RULES is read by the launchers
+ACCESS_RULES=""
+ACCESS_STATE="${ASSISTANT_ACCESS_DIR:-$HOME/.config/assistant/access}"
+
+# Ask which repository, unless it is already known (the environment, the remembered one, or the existing sandbox's).
+ask_repo() {
+  [ -z "${REPO:-}" ] && read -r -p "  ${REPO_ASK:-Repo to manage (owner/repo): }" REPO
+  [ -n "${REPO:-}" ] || { fail "no repository: type owner/repo, or set ASSISTANT_REPO"; return 1; }
+  valid_repo "$REPO" || { fail "'$REPO' is not an owner/repo name (letters, digits, dots, dashes, underscores)"; return 1; }
+}
+
+# The rules the owner of $1 (owner/repo) publishes, in ACCESS_RULES as JSON, or empty when it publishes none. Returns 1 when it
+# cannot tell, and then the caller must stop: not being able to read the rules is not permission to run without them.
+access_discover() {
+  local owner="${1%%/*}" out rc
+  ACCESS_RULES=""
+  command -v python3 >/dev/null 2>&1 \
+    || { fail "python3 is needed to read $owner's access rules (install it, or run with --no-access)"; return 1; }
+  if [ -n "${ASSISTANT_ACCESS_FILE:-}" ]; then
+    # An assistant-org.yaml on this machine instead of the published one: for an admin to try rules before they merge them.
+    info "using the access rules in $ASSISTANT_ACCESS_FILE, not the ones $owner publishes"
+    out="$(python3 -I "$HERE/assistant-access" check "$ASSISTANT_ACCESS_FILE" 2>&1)"; rc=$?
+  else
+    out="$(python3 -I "$HERE/assistant-access" discover "$owner" 2>&1)"; rc=$?
+  fi
+  # shellcheck disable=SC2034  # ACCESS_RULES is read by the launchers
+  case "$rc" in
+    0) ACCESS_RULES="$out" ;;
+    3) ;;
+    *) fail "could not read $owner's access rules: ${out#assistant-access: }"
+       info "try again, or run with --no-access to go without them"; return 1 ;;
+  esac
+  return 0
+}
+
+# The repositories in a rules JSON, for a message.
+access_repos() { python3 -c 'import json,sys; print(", ".join(json.loads(sys.argv[1])["repos"]))' "$1" 2>/dev/null; }
+
+# The sandbox policy with the access rules switched on: container/policy.yaml plus the middleware that sends every request to
+# the GitHub hosts through APF first. Written next to the stack's state; prints its path.
+access_policy_file() {
+  local out="$ACCESS_STATE/policy.yaml"
+  mkdir -p "$ACCESS_STATE" && chmod 700 "$ACCESS_STATE"
+  grep -q '^network_middlewares:' "$HERE/policy.yaml" && { fail "container/policy.yaml already has network_middlewares"; return 1; }
+  {
+    cat "$HERE/policy.yaml"
+    cat <<'POLICY'
+
+# The organisation's access rules (docs/access-rules.md): APF decides each request to these hosts before any credential is added,
+# and a request is refused if APF cannot be reached.
+network_middlewares:
+  access_rules:
+    name: access rules
+    middleware: apf-content-policy
+    order: 10
+    on_error: fail_closed
+    endpoints:
+      include:
+        - "api.githubcopilot.com"
+        - "api.github.com"
+POLICY
+  } >"$out"
+  printf '%s' "$out"
+}

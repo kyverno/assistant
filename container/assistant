@@ -5,6 +5,7 @@
 #                     [--upgrade] [--reset]
 #   container/assistant init [owner/repo ...]     write your organisation pack by answering questions (see docs/organisation-pack.md)
 #   container/assistant setup owner/repo          see what the repository lacks (pack, PR automation) and set it up
+#   container/assistant access status|stop        the stack that enforces your organisation's access rules (docs/access-rules.md)
 #   container/assistant --no-openshell [...]     plain Docker instead of OpenShell (less protection; --no-openshell --help)
 #
 # What it does, each time: checks Docker, installs OpenShell if it is missing, registers your GitHub
@@ -29,6 +30,8 @@
 #                  for others) and, as a maintainer, to the repository you manage, and nowhere else. Never force, never
 #                  to main. A second credential, kept in OpenShell, asked once.
 #   --no-push      remove that again
+#   --no-access    run the maintainer assistant without the access rules its organisation publishes (<owner>/.github/assistant-org.yaml,
+#                  `access:`). By default they apply: the assistant can then reach only the repositories they list.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -46,11 +49,18 @@ SUB=""; SUB_AT=0; prev=""; i=0
 for a in "$@"; do
   i=$((i + 1))
   case "$prev" in --image|--profile|--name|--provider|--org) prev=""; continue ;; esac
-  case "$a" in init|setup) SUB="$a"; SUB_AT=$i; break ;; esac
+  case "$a" in init|setup|access) SUB="$a"; SUB_AT=$i; break ;; esac
   prev="$a"
 done
 if [ -n "$SUB" ]; then
   shift "$SUB_AT"
+  if [ "$SUB" = access ]; then
+    case "${1:-}" in
+      status) exec "$HERE/apf/stack.sh" status ;;
+      stop) exec "$HERE/apf/stack.sh" down ;;
+      *) echo "usage: assistant access status|stop" >&2; exit 2 ;;
+    esac
+  fi
   command -v python3 >/dev/null 2>&1 || { echo "assistant $SUB needs python3" >&2; exit 1; }
   if [ "$SUB" = init ]; then exec python3 "$HERE/assistant-init" "$@"; fi
   exec python3 "$HERE/assistant-init" --setup "$@"
@@ -66,6 +76,7 @@ NO_ATTACH=0
 KEEP_CACHES=0
 PUSH=0
 NO_PUSH=0
+NO_ACCESS=0
 BACKUP_DIR=""
 WANT_PROVIDERS=()
 while [ $# -gt 0 ]; do
@@ -82,7 +93,8 @@ while [ $# -gt 0 ]; do
     --reset) RESET=1; shift ;;
     --push-to-fork) PUSH=1; shift ;;
     --no-push) NO_PUSH=1; shift ;;
-    -h|--help) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --no-access) NO_ACCESS=1; shift ;;
+    -h|--help) sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
@@ -90,7 +102,17 @@ done
 # shellcheck source=container/lib.sh
 . "$HERE/lib.sh"
 
-choose_profile "$(openshell sandbox list 2>/dev/null | awk 'NR>1{print $1}')" assistant-maint assistant-contrib
+# The sandboxes you have: on your gateway, and on the access-rules gateway when that stack is running.
+EXISTING="$(openshell sandbox list 2>/dev/null | awk 'NR>1{print $1}')"
+if [ -s "$ACCESS_STATE/repo" ] && [ -x "$HERE/apf/stack.sh" ]; then
+  case "$("$HERE/apf/stack.sh" status 2>/dev/null)" in
+    *running=yes*)
+      EXISTING="$EXISTING
+$(env OPENSHELL_GATEWAY_ENDPOINT="http://127.0.0.1:${ASSISTANT_ACCESS_PORT:-18080}" OPENSHELL_GATEWAY_INSECURE=true \
+  openshell sandbox list 2>/dev/null | awk 'NR>1{print $1}')" ;;
+  esac
+fi
+choose_profile "$EXISTING" assistant-maint assistant-contrib
 select_profile "$KIND"
 SANDBOX="${SANDBOX:-$DEFAULT_NAME}"
 # OpenShell limits a sandbox name to 19 characters.
@@ -224,6 +246,40 @@ INSTANCE="$SANDBOX"
 instance_exists() { sandbox_listed; }
 ensure_image
 
+# The organisation's access rules, for the maintainer assistant. The repository has to be known before anything is stored in
+# OpenShell, because with rules the whole run (token, sandbox) happens on a dedicated gateway behind APF, not on yours.
+REPO="${ASSISTANT_REPO:-}"
+POLICY_FILE="$HERE/policy.yaml"
+access_step() {
+  if [ "$NO_ACCESS" = 1 ]; then
+    info "skipped (--no-access): nothing limits this run to the repositories your organisation allows, if it publishes any"
+    return 0
+  fi
+  [ -z "$REPO" ] && [ -s "$ACCESS_STATE/repo" ] && REPO="$(cat "$ACCESS_STATE/repo")"
+  repo_from_instance      # a sandbox made before the rules existed keeps the repository in its profile
+  ask_repo || exit 1
+  access_discover "$REPO" || exit 1
+  if [ -z "$ACCESS_RULES" ]; then
+    info "${REPO%%/*} publishes no access rules, so the assistant can reach whatever your GitHub token can (docs/access-rules.md)"
+    return 0
+  fi
+  info "${REPO%%/*} publishes access rules: the assistant may reach $(access_repos "$ACCESS_RULES") and nothing else on GitHub"
+  if sandbox_listed; then
+    info "note: '$SANDBOX' on your own gateway was made without the rules and is not touched. The rules apply to a new sandbox on a"
+    info "dedicated gateway; once you no longer need the old one: openshell sandbox delete $SANDBOX"
+  fi
+  "$HERE/apf/stack.sh" up "$ACCESS_RULES" || { fail "could not start the access rules; nothing was stored or created"; exit 1; }
+  # From here every openshell command (token, sandbox) addresses the dedicated gateway.
+  export OPENSHELL_GATEWAY_ENDPOINT="http://127.0.0.1:${ASSISTANT_ACCESS_PORT:-18080}" OPENSHELL_GATEWAY_INSECURE=true
+  (umask 077; mkdir -p "$ACCESS_STATE"; printf '%s\n' "$REPO" >"$ACCESS_STATE/repo")
+  POLICY_FILE="$(access_policy_file)" || exit 1
+  pass "this run is on the access-rules gateway"
+}
+if [ "$KIND" = maintainer ]; then
+  step "2a. Access rules"
+  access_step
+fi
+
 step "3. GitHub token"
 sync_profile "$HERE/providers/$PROVIDER_FILE" "$PROVIDER" \
   || { fail "could not register the provider profile (container/providers/$PROVIDER_FILE)"; exit 1; }
@@ -234,7 +290,7 @@ if [ "$RESET" = 1 ]; then
   fi
   openshell provider delete "$PROVIDER" >/dev/null 2>&1
 fi
-REPO="${ASSISTANT_REPO:-}"
+REPO="${REPO:-${ASSISTANT_REPO:-}}"
 LOGIN="${!LOGIN_VAR:-}"
 if openshell provider get "$PROVIDER" >/dev/null 2>&1; then
   pass "GitHub token already stored in OpenShell (use --reset to replace it)"
@@ -361,7 +417,7 @@ else
     openshell provider get "assistant-$P" >/dev/null 2>&1 && PROVIDER_ARGS+=(--provider "assistant-$P")
   done
   openshell sandbox create --name "$SANDBOX" --from "$IMAGE" "${PROVIDER_ARGS[@]}" \
-    --policy "$HERE/policy.yaml" --no-auto-providers -- kyverno-main "$KIND" >"$LOG" 2>&1 &
+    --policy "$POLICY_FILE" --no-auto-providers -- kyverno-main "$KIND" >"$LOG" 2>&1 &
 fi
 READY=0
 for _ in $(seq 1 150); do
@@ -376,7 +432,7 @@ if [ "$READY" != 1 ]; then
   exit 1
 fi
 [ -n "${LOG:-}" ] && rm -f "$LOG"
-if openshell policy set --policy "$HERE/policy.yaml" --wait "$SANDBOX" >/dev/null 2>&1; then
+if openshell policy set --policy "$POLICY_FILE" --wait "$SANDBOX" >/dev/null 2>&1; then
   pass "policy applied"
 else
   info "could not re-apply the policy; the one from creation stays in force"

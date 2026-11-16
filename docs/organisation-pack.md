@@ -131,6 +131,11 @@ work here: what each label means, how code generation works, which CI jobs run b
 opened and closed. Date it. The assistant treats it as yours and re-checks the live repository when a decision
 depends on it. Keep it to what a new maintainer would need to be told; the code and your docs say the rest.
 
+## `access:`
+
+The one key the assistant does not read: the launcher does, from `<owner>/.github` only, to limit which repositories the maintainer
+assistant may reach. See [access-rules.md](access-rules.md). A typo in it is an error here too.
+
 ## Checking your pack
 
 Ask the assistant to call `repo_pack`: it returns the rules exactly as loaded, or the error. To see what a pack does
