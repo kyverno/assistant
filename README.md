@@ -213,7 +213,7 @@ in, and it keeps your memory, chat history, sign-in and model across upgrades.
   the token can act on every repository you can, private ones included. If your organisation's policy requires a
   fine-grained token, this option is not offered.
 - **Paste a fine-grained token** scoped to the **one repository**: the tighter option. The permissions it needs are
-  [below](#4-create-a-token) (maintainer) and in [`docs/getting-started.md`](docs/getting-started.md#tokens) (contributor).
+  [below](#optional-a-token-instead-of-the-gh-sign-in) (maintainer) and in [`docs/getting-started.md`](docs/getting-started.md#tokens) (contributor).
 
 **2. GitHub Copilot (the model).** The launcher starts the same device-code login Copilot's own tools use: it prints a code,
 you approve it at github.com/login/device, and Hermes keeps the resulting token inside the sandbox's Hermes home. It is
@@ -379,12 +379,12 @@ It grounds its answers in what your repository says about itself, so the better 
 
 If a package has no doc, it says its knowledge there is only what the code, owners and history show.
 
-### 4. Create a token
+### Optional: a token instead of the `gh` sign-in
 
-A fine-grained personal access token for the **one repository**, from your own account: Contents **Read**, Pull requests
-**Read and write**, Issues **Read and write**, Checks **Read**, and Code scanning, Dependabot and Secret scanning alerts
-**Read**; organisation Members **Read** if CODEOWNERS uses teams. No Contents write and no Administration: GitHub itself then
-refuses to merge. Or let the launcher use your `gh` sign-in. Step by step: [`docs/setup.md`](docs/setup.md#1-create-a-github-token).
+Most people use the `gh` sign-in the launcher offers, and have nothing to create. If you want something tighter, or your
+organisation's policy requires it, paste a fine-grained token for the **one repository** instead: Contents, Checks and the
+alerts **Read**, Pull requests and Issues **Read and write**, and no Contents write or Administration, so GitHub itself refuses
+to merge. Step by step: [`docs/setup.md`](docs/setup.md#1-create-a-github-token).
 
 ### For organisations: publish an assistant policy
 
