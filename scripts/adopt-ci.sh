@@ -271,7 +271,11 @@ team_from_codeowners() { # owner/repo
     text=$(gh api -H "Accept: application/vnd.github.raw" "repos/${repo}/contents/${path}" 2> /dev/null) || continue
     # Drop comments first (a whole line, or the end of one), then take the first team of this organisation. The result is
     # kept in a variable: with pipefail, a pipeline ending in head can report failure after it has printed its answer.
-    team=$(printf '%s\n' "$text" | sed 's/#.*//' | grep -oiE "@${repo%%/*}/[A-Za-z0-9_.-]+" | head -n 1 || true)
+    # The owner is compared as plain text (awk's `==`), never put into a pattern: a `.` in it must mean a dot.
+    team=$(printf '%s\n' "$text" | sed 's/#.*//' | tr -s ' \t' '\n\n' \
+      | awk -v owner="${repo%%/*}" 'BEGIN { owner = tolower(owner) }
+          substr($0, 1, 1) == "@" { n = index($0, "/")
+            if (n > 2 && tolower(substr($0, 2, n - 2)) == owner && substr($0, n + 1) ~ /^[A-Za-z0-9_.-]+$/) { print; exit } }' || true)
     [[ -z "$team" ]] || { printf '%s\n' "$team"; return 0; }
   done
   return 1
