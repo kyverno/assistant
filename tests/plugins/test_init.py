@@ -194,6 +194,16 @@ class Setup(unittest.TestCase):
             self._restore(saved)
         self.assertEqual(calls, [])
 
+    def test_only_the_main_caller_workflow_counts_as_adopted(self):
+        calls, saved = self._with({"repos/o/r/contents/.github/workflows": [{"name": "check-pr-management.yaml"}]})
+        try:
+            self.assertEqual(init.setup_status("o/r")["ci"], "")
+        finally:
+            self._restore(saved)
+
+    def test_a_name_that_is_not_owner_slash_repo_is_refused(self):
+        self.assertEqual(init.main(["--setup", "not-a-repo"]), 2)
+
     def test_a_repository_with_both_is_left_alone(self):
         calls, saved = self._with({f"repos/o/r/contents/.github/{init.PACK}": {"name": "x"},
                                    "repos/o/r/contents/.github/workflows": [{"name": "pr-management.yaml"}]}, tty=True)

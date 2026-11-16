@@ -306,7 +306,8 @@ adopt() {
   default_branch=$(gh api "repos/${repo}" --jq .default_branch)
   writable=$(gh api "repos/${repo}" --jq .permissions.push)
   branch="$base_branch"
-  if [[ -n "$(gh pr list --repo "$repo" --head "$branch" --state open --json number --jq '.[].number')" ]]; then
+  if [[ -n "$(gh pr list --repo "$repo" --state open --limit 100 --json headRefName \
+        --jq ".[] | select(.headRefName == \"${branch}\" or (.headRefName | test(\"^${branch}-[0-9]+\$\"))) | .headRefName")" ]]; then
     echo "  a PR from ${branch} is already open, skipped"
     return 0
   fi

@@ -649,10 +649,9 @@ def review(p: Proposal) -> dict:
 def publish(target: str, files: dict[str, str], branch: str, title: str, body: str) -> str:
     """Add `files` (path -> content) to `target` (owner/repo) on a branch and open a pull request; from your fork when you
     cannot push. Never overwrites a file that exists."""
-    open_pr = gh("pr", "list", "--repo", target, "--search", f"head:{branch}", "--state", "open", "--json", "url",
-                 "--jq", ".[0].url", check=False).strip()
-    if open_pr:
-        raise GhError(f"{target} already has an open pull request for this: {open_pr}")
+    existing = open_pr(target, branch)
+    if existing:
+        raise GhError(f"{target} already has an open pull request for this: {existing}")
     meta = api(f"repos/{target}") or {}
     me = gh("api", "user", "--jq", ".login").strip()
     work = tempfile.mkdtemp(prefix="assistant-init-")
@@ -754,12 +753,16 @@ def merge(chosen_by_repo: list[dict]) -> dict:
 # -- `assistant setup`: what a repository still lacks, and doing it ----------------------------------------------------
 
 BAKED_OWNERS = {"kyverno"}        # owners whose pack the published image carries (container/org/kyverno)
+VALID_REPO = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
 PACK_BRANCH, CI_BRANCH = "add-assistant-org-pack", "ci/adopt-shared-actions"
 
 
 def open_pr(repo: str, branch: str) -> str:
-    return gh("pr", "list", "--repo", repo, "--search", f"head:{branch}", "--state", "open", "--json", "url",
-              "--jq", ".[0].url", check=False).strip()
+    """URL of an open pull request from `branch`, or from `branch-2`, `branch-3`... (what a later run uses when an earlier
+    merged one left the plain name behind)."""
+    return gh("pr", "list", "--repo", repo, "--state", "open", "--limit", "100", "--json", "url,headRefName", "--jq",
+              f'[.[] | select(.headRefName == "{branch}" or (.headRefName | test("^{re.escape(branch)}-[0-9]+$")))] | .[0].url // ""',
+              check=False).strip()
 
 
 def setup_status(repo: str) -> dict:
@@ -768,7 +771,7 @@ def setup_status(repo: str) -> dict:
     has_pack = (owner.lower() in BAKED_OWNERS or api(f"repos/{repo}/contents/.github/{PACK}") is not None
                 or api(f"repos/{owner}/.github/contents/{PACK}") is not None)
     flows = api(f"repos/{repo}/contents/.github/workflows")
-    has_ci = isinstance(flows, list) and any("pr-management" in str(f.get("name", "")) for f in flows)
+    has_ci = isinstance(flows, list) and any(f.get("name") in ("pr-management.yaml", "pr-management.yml") for f in flows)
     return {"pack": "found" if has_pack else open_pr(repo, PACK_BRANCH),
             "ci": "found" if has_ci else open_pr(repo, CI_BRANCH)}
 
@@ -846,8 +849,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     use_terminal()
     plain = args.yes or not interactive()
     if args.setup:
-        if len(args.repos) != 1:
-            print(red("setup takes one owner/repo"), file=sys.stderr)
+        if len(args.repos) != 1 or not VALID_REPO.match(args.repos[0]):
+            print(red("setup takes one repository, as owner/repo"), file=sys.stderr)
             return 2
         try:
             return setup(args.repos[0])
