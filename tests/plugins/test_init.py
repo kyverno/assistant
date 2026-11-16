@@ -263,6 +263,7 @@ class Setup(unittest.TestCase):
                                    [], [run], [{**run, "status": "completed", "conclusion": "success"}]])
         self.assertTrue(ok)
         self.assertEqual(commands[0][:2], ("workflow", "run"))
+        self.assertIn("dry_run=false", commands[0])          # the workflow previews by default and would create nothing
 
     def test_a_failed_sync_is_reported_not_treated_as_done(self):
         failed = {"databaseId": 2, "status": "completed", "conclusion": "failure", "url": "u"}

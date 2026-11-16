@@ -912,7 +912,8 @@ def workflow_runs(repo: str) -> list[dict]:
 def sync_labels(repo: str) -> bool:
     """Start the Sync labels workflow and wait for it, so the labels are known to exist before anything depends on them."""
     before = {r["databaseId"] for r in workflow_runs(repo)}
-    gh("workflow", "run", SYNC_WORKFLOW, "--repo", repo)
+    # The workflow's dry_run input defaults to true: without this it reports success and creates nothing.
+    gh("workflow", "run", SYNC_WORKFLOW, "--repo", repo, "-f", "dry_run=false")
     run: Optional[dict] = None
     waited = 0
     try:
@@ -977,7 +978,7 @@ def finish_ci(repo: str) -> None:
                 print(green("Switched on") + ": readiness and path labels act on the next PR event, stale in its daily run.")
     except GhError as exc:
         print(red(str(exc)), file=sys.stderr)
-    for key, command in (("labels", f"gh workflow run sync-labels.yaml --repo {repo}"),
+    for key, command in (("labels", f"gh workflow run sync-labels.yaml --repo {repo} -f dry_run=false"),
                          ("live", f"gh variable set PR_AUTOMATION_LIVE --body true --repo {repo}")):
         if key in [o.value for o in options] and key not in picked:
             print(dim(f"  Later: {command}"))

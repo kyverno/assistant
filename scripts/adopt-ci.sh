@@ -364,7 +364,9 @@ adopt() {
       -m "Pins ${source_repo}/.github/actions/pr-management at ${ref}."
     pr_body > "$tmp/body.md"
     publish "ci: adopt the shared PR automation" || exit 1
-    echo "  after you merge it: run the \"Sync labels\" workflow once (Actions tab), then switch it on with"
+    echo "  after you merge it: create the labels with"
+    echo "    gh workflow run sync-labels.yaml --repo ${repo} -f dry_run=false"
+    echo "  (from the Actions tab, untick dry run), then switch it on with"
     echo "    gh variable set PR_AUTOMATION_LIVE --body true --repo ${repo}"
     echo "  until then it only previews: nothing is labelled, commented on or closed."
   )
