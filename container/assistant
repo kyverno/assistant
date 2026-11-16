@@ -4,6 +4,7 @@
 #   container/assistant [--profile maintainer|contributor] [--image IMAGE | --build] [--name NAME] [--provider P ...]
 #                     [--upgrade] [--reset]
 #   container/assistant init [owner/repo ...]     write your organisation pack by answering questions (see docs/organisation-pack.md)
+#   container/assistant setup owner/repo          see what the repository lacks (pack, PR automation) and set it up
 #   container/assistant --no-openshell [...]     plain Docker instead of OpenShell (less protection; --no-openshell --help)
 #
 # What it does, each time: checks Docker, installs OpenShell if it is missing, registers your GitHub
@@ -38,11 +39,21 @@ KIND=""
 SANDBOX=""
 DASH_PORT="${ASSISTANT_DASHBOARD_PORT:-9219}"   # not 9119, which a Hermes dashboard on your laptop would use
 # --no-openshell: run the image in plain Docker instead. A separate script, so everything below stays as it is.
-# `assistant init`: write your organisation pack by answering questions (runs on your machine, with your gh login).
-if [ "${1:-}" = init ]; then
-  shift
-  command -v python3 >/dev/null 2>&1 || { echo "assistant init needs python3" >&2; exit 1; }
-  exec python3 "$HERE/assistant-init" "$@"
+# `assistant init` and `assistant setup` run on your machine with your gh login, and need no sandbox or image. They may follow
+# options that take a value (`--image IMAGE setup owner/repo`, as the installer is often run), so find the first word that
+# is not an option or an option's value.
+SUB=""; SUB_AT=0; prev=""; i=0
+for a in "$@"; do
+  i=$((i + 1))
+  case "$prev" in --image|--profile|--name|--provider|--org) prev=""; continue ;; esac
+  case "$a" in init|setup) SUB="$a"; SUB_AT=$i; break ;; esac
+  prev="$a"
+done
+if [ -n "$SUB" ]; then
+  shift "$SUB_AT"
+  command -v python3 >/dev/null 2>&1 || { echo "assistant $SUB needs python3" >&2; exit 1; }
+  if [ "$SUB" = init ]; then exec python3 "$HERE/assistant-init" "$@"; fi
+  exec python3 "$HERE/assistant-init" --setup "$@"
 fi
 for a in "$@"; do
   [ "$a" = "--no-openshell" ] && exec "$HERE/assistant-docker" "$@"
@@ -71,7 +82,7 @@ while [ $# -gt 0 ]; do
     --reset) RESET=1; shift ;;
     --push-to-fork) PUSH=1; shift ;;
     --no-push) NO_PUSH=1; shift ;;
-    -h|--help) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
@@ -241,6 +252,12 @@ else
     || { fail "could not store the token in OpenShell"; printf '%s\n' "$out" | sed 's/^/    /' >&2; exit 1; }
   unset PAT
   pass "token stored in OpenShell"
+  # First run for a maintainer: say what the repository lacks and offer to set it up, so nothing has to be found out later.
+  if [ "$HERMES_PROFILE" = maintainer ] && [ -t 0 ] && [ -z "${ASSISTANT_SKIP_SETUP:-}" ] \
+     && command -v python3 >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+    step "3a. Is $REPO set up for the assistant?"
+    python3 "$HERE/assistant-init" --setup "$REPO" || info "setup did not finish; run 'assistant setup $REPO' to try again"
+  fi
 fi
 
 # Pushing to your own fork, if you asked for it. Off by default: the assistant otherwise only reads GitHub.

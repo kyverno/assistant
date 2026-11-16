@@ -66,8 +66,8 @@ class OtherOrganisation(unittest.TestCase):
         self.assertEqual(c("x/y.pb.go"), "GENERATED")
         self.assertEqual(c("gen/keep.go"), "STANDARD")        # an exception to the generated glob
         self.assertEqual(c("api/v1/t.go"), "API_SURFACE")
-        self.assertEqual(c("core/engine.go"), "ADMISSION_CRITICAL")
-        self.assertEqual(c("core/engine_test.go"), "ADMISSION_CRITICAL")   # a higher tier wins over test-only
+        self.assertEqual(c("core/engine.go"), "CRITICAL")
+        self.assertEqual(c("core/engine_test.go"), "CRITICAL")   # a higher tier wins over test-only
         self.assertEqual(c("misc/other_test.go"), "TEST_ONLY")
         self.assertEqual(c("README.md"), "STANDARD")
 
@@ -98,7 +98,7 @@ class KyvernoPack(unittest.TestCase):
         self.assertEqual(c("pkg/clients/dclient/client.go"), "STANDARD")          # the generated exception
         self.assertEqual(c("pkg/clients/x/y.generated.go"), "GENERATED")
         self.assertEqual(c("api/kyverno/v1/policy_types.go"), "API_SURFACE")
-        self.assertEqual(c("pkg/engine/x.go"), "ADMISSION_CRITICAL")
+        self.assertEqual(c("pkg/engine/x.go"), "CRITICAL")
         self.assertEqual(c("pkg/utils/x_test.go"), "TEST_ONLY")
         self.assertEqual(c("docs/guide.md"), "STANDARD")
         self.assertTrue(self.rules.is_generated_input_path("api/kyverno/v1/policy_types.go"))

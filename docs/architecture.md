@@ -106,7 +106,7 @@ per-profile under `~/.hermes/profiles/<profile>/plugins/<name>/`.
   call (session context, Slack/Discussions, maintainer history), made explicit in
   `profiles/maintainer/skills/pr-queue/SKILL.md`'s precedence ladder, not something the tool decides. Also
   computes per-PR annotations: file classification (`GENERATED` > `API_SURFACE` >
-  `ADMISSION_CRITICAL` > `TEST_ONLY` > `STANDARD`), `rebase_flag` (shares a changed file with
+  `CRITICAL` > `TEST_ONLY` > `STANDARD`), `rebase_flag` (shares a changed file with
   an earlier tier), `file_overlaps`/`package_overlaps` (no hard edge), `gate_blocked`
   (branch-level e2e-gate status, independent of `ready-for-review`).
 
