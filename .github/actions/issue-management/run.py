@@ -4,8 +4,8 @@ waiting on their reporter.
 
 The rules, configured in the repository's issue-management.json (every key is optional):
 
-  possibly-resolved    A merged PR references the issue without closing it, no open PR does, and nobody
-                       commented since the merge. Labels and comments; never closes.
+  possibly-resolved    Off until `resolved_label` names a label. A merged PR references the issue without closing
+                       it, no open PR does, and nobody commented since the merge. Labels and comments; never closes.
   waiting-on-reporter  An issue with a needs-info label and no reply from its author. Warns with `stale-issue`,
                        then closes as not planned once that warning is `close_days` old. The only closing rule.
 
@@ -45,7 +45,7 @@ import time
 DEFAULTS = {
     # Not `stale`: PR automation owns that label, and a PR and an issue should never share one.
     "stale_label": "stale-issue",
-    "resolved_label": "possibly-resolved",
+    "resolved_label": None,  # the rule is off until a label is named
     # A repository that sorts issues into review queues names the labels here. An issue already in one is never
     # given `possibly-resolved`, and the report counts each queue.
     "queue_labels": [],
@@ -247,10 +247,12 @@ def load_config(path):
     if not isinstance(config["resolved_clears_on_comment"], bool):
         raise ValueError("resolved_clears_on_comment must be true or false")
     for key in ("stale_label", "resolved_label"):
-        if not isinstance(config[key], str) or '"' in config[key]:
-            raise ValueError(f"{key} must be a string without double quotes")
-    if not config["stale_label"] or not config["resolved_label"]:
-        raise ValueError("stale_label and resolved_label must not be empty")
+        value = config[key]
+        if value is None and key == "resolved_label":
+            continue  # off
+        if not isinstance(value, str) or not value or '"' in value:
+            raise ValueError(f"{key} must be a non-empty string without double quotes"
+                             + (" (or null to turn the rule off)" if key == "resolved_label" else ""))
     for key, fields in COMMENT_FIELDS.items():
         if set(re.findall(r"{(\w*)}", config[key])) - fields:
             raise ValueError(f"{key} may only use {', '.join('{' + f + '}' for f in sorted(fields))}")
@@ -333,7 +335,7 @@ class IssueData:
         """Reads back only as far as the rules need: to each relevant label's event, to the comments from the
         oldest of those events on, and to the newest human comment."""
         labels = {n["name"] for n in self.node["labels"]["nodes"]}
-        relevant = labels & ({cfg["stale_label"], cfg["resolved_label"]} | set(cfg["needs_info_labels"]))
+        relevant = labels & ({cfg["stale_label"], cfg["resolved_label"]} - {None} | set(cfg["needs_info_labels"]))
         for name in sorted(relevant):
             while self.label_time(name) is None and self.more("labelEvents"):
                 pass
@@ -428,7 +430,7 @@ def decide(issue, now, cfg):
         return actions, [f"#{number}: more than 100 labels, skipped"]
 
     # A human comment after a managed label removes it. A queue a person reviews is the exception.
-    managed = {stale, resolved} if cfg["resolved_clears_on_comment"] else {stale}
+    managed = {stale, resolved} - {None} if cfg["resolved_clears_on_comment"] else {stale}
     for name in sorted(labels & managed):
         applied = label_time(issue, name)
         if applied is None:
@@ -481,7 +483,7 @@ def decide(issue, now, cfg):
         return actions, notes
 
     # Rule: possibly resolved. Never closes. An issue a person already put in a queue is left where they put it.
-    if resolved not in labels and not labels & set(cfg["queue_labels"]):
+    if resolved and resolved not in labels and not labels & set(cfg["queue_labels"]):
         if not issue["refs_complete"]:
             notes.append(f"#{number}: mentioned by more than 100 PRs, not checked for a fix")
         elif not any(r["state"] == "OPEN" for r in issue["refs"]):
@@ -531,7 +533,7 @@ def discover(gh, repo, cfg, now):
     day = lambda n: (now - timedelta(days=n)).strftime("%Y-%m-%d")  # noqa: E731
     base = f"repo:{repo}"
     searches = [(f'{base} is:issue is:open label:"{cfg["stale_label"]}"', NUMBER_FRAGMENT)]
-    if cfg["resolved_clears_on_comment"]:
+    if cfg["resolved_label"] and cfg["resolved_clears_on_comment"]:
         # Only then does an issue already carrying the label ever need a second look.
         searches.append((f'{base} is:issue is:open label:"{cfg["resolved_label"]}"', NUMBER_FRAGMENT))
     searches += [(f'{base} is:issue is:open label:"{name}"', NUMBER_FRAGMENT) for name in cfg["needs_info_labels"]]
@@ -549,6 +551,8 @@ def discover(gh, repo, cfg, now):
         if capped:
             log(f"::warning::'{query[:80]}' matched more than {SEARCH_CAP} issues; the rest are not examined")
         numbers |= {n["number"] for n in nodes}
+    if not cfg["resolved_label"]:
+        return numbers, failures
     try:
         nodes, capped = search_nodes(gh, mentioned, MENTION_FRAGMENT)
         if capped:
@@ -583,7 +587,8 @@ def missing_labels(gh, repo, cfg):
     if not isinstance(pages, list) or not pages or any(not isinstance(p, list) for p in pages):
         raise GhError("incomplete labels response")
     have = {label["name"].lower() for page in pages for label in page}
-    wanted = [cfg["stale_label"], cfg["resolved_label"], *cfg["needs_info_labels"], *cfg["queue_labels"]]
+    wanted = [cfg["stale_label"], cfg["resolved_label"] or cfg["stale_label"], *cfg["needs_info_labels"],
+              *cfg["queue_labels"]]
     # An exempt label nobody has applied yet is harmless, so it is reported apart.
     return ([n for n in dict.fromkeys(wanted) if n.lower() not in have],
             [n for n in dict.fromkeys(cfg["exempt_labels"]) if n.lower() not in have])

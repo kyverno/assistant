@@ -107,13 +107,15 @@ automations in a repository.
 Nothing happens until an admin sets the repository variable `ISSUE_AUTOMATION_LIVE` to `true`, separate from
 `PR_AUTOMATION_LIVE`. Until then every scheduled run writes what it would do to the job summary.
 
-Labels work as they do for PRs: the adoption PR adds `needs-info`, `stale-issue` and `possibly-resolved` to
+Labels work as they do for PRs: the adoption PR adds `needs-info` and `stale-issue` to
 `.github/labels.yml` (keeping any it already has) and adds the **Sync labels** workflow. After merging, run **Sync
 labels** by hand with dry run off to create them. The action itself never creates a label; a preview, and a live run,
 list any configured label the repository lacks, and a rule that needs a missing label does nothing until it exists.
 `needs-info` is applied by people, so the waiting-on-the-reporter rule only acts once someone uses it. To reuse labels
 you already have, write a config that names them and pass it with `--issue-config my-config.json`: it becomes
-`.github/issue-management.json`, and only the labels it leaves at their defaults are added to `labels.yml`. `stale-issue` is used rather than `stale`, which the PR automation owns. The rules and keys are in
+`.github/issue-management.json`, and only the labels it leaves at their defaults are added to `labels.yml`. `stale-issue` is used rather than `stale`, which the PR automation owns. The possibly-resolved rule is off by
+default; set `"resolved_label"` in the config to turn it on (`possibly-resolved` is added to `labels.yml` only if you
+name it, and any other name is treated as a label you already have). The rules and keys are in
 [`.github/actions/issue-management/README.md`](../.github/actions/issue-management/README.md).
 
 ### Issue queue triage (agentic)

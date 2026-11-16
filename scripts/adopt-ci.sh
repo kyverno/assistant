@@ -189,7 +189,7 @@ pinned to commit \`${ref}\`. The workflow file added here is a short caller: it 
 permissions to grant, and calls the shared workflow \`issue-management.yml\` in
 ${source_repo}, which holds the logic, the trusted checkout and the token.
 
-- **Possibly resolved**: labels an issue \`possibly-resolved\` and asks for confirmation when a merged PR mentions it
+- **Possibly resolved** (off until \`resolved_label\` is set in the config): labels an issue and asks for confirmation when a merged PR mentions it
   without closing it, no open PR mentions it, and nobody has commented since. Never closes.
 - **Waiting on the reporter**: for an issue with a needs-info label and no reply from its author, warns with
   \`stale-issue\` after 14 days and closes as not planned after 14 more. **This is the only rule that closes.** A reply
@@ -205,7 +205,7 @@ admin turns it on afterwards.
 
 **Before the switch**
 
-1. Run **Sync labels** from the Actions tab with dry run off, so \`needs-info\`, \`stale-issue\` and \`possibly-resolved\` exist.
+1. Run **Sync labels** from the Actions tab with dry run off, so the labels the config uses exist (\`needs-info\` and \`stale-issue\` by default).
    Only labels the config leaves at their defaults were added to \`.github/labels.yml\`.
    The action never creates a label; its report lists any configured label that is missing.
 2. Run **Issue management** from the Actions tab with dry run on, and read the job summary.
@@ -383,7 +383,7 @@ adopt() {
         case "$label" in
           needs-info) jq -e '(.needs_info_labels // ["needs-info"]) | index("needs-info")' "$cfg" > /dev/null || continue ;;
           stale-issue) jq -e '(.stale_label // "stale-issue") == "stale-issue"' "$cfg" > /dev/null || continue ;;
-          possibly-resolved) jq -e '(.resolved_label // "possibly-resolved") == "possibly-resolved"' "$cfg" > /dev/null || continue ;;
+          possibly-resolved) jq -e '.resolved_label == "possibly-resolved"' "$cfg" > /dev/null || continue ;;
         esac
         grep -qE "^[\"']?${label}[\"']?:" .github/labels.yml && continue
         [[ ! -s .github/labels.yml || -z "$(tail -c1 .github/labels.yml)" ]] || echo >> .github/labels.yml

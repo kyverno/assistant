@@ -22,7 +22,7 @@ KYVERNO = {
     "needs_info_labels": ["needs-info", "cannot reproduce", "waiting for status update"],
     "exempt_labels": ["no-stale", "hold", "security", "good first issue", "release-critical", "release-high"],
 }
-CFG = {**run.DEFAULTS, **KYVERNO}
+CFG = {**run.DEFAULTS, "resolved_label": "possibly-resolved", **KYVERNO}
 NOW = datetime(2026, 11, 11, tzinfo=timezone.utc)
 
 
@@ -166,6 +166,11 @@ class WaitingOnReporter(unittest.TestCase):
 
 
 class PossiblyResolved(unittest.TestCase):
+    def test_off_by_default(self):
+        off = {**run.DEFAULTS, **KYVERNO}
+        self.assertIsNone(off["resolved_label"])
+        self.assertEqual(kinds(issue(refs=[(99, "MERGED", 10)], created=30), off), [])
+
     def test_labels_after_grace_with_a_marker(self):
         acts, _ = decide(issue(refs=[(99, "MERGED", 10)], created=30))
         self.assertEqual([(a[0], a[1]) for a in acts], [("label", "possibly-resolved")])
@@ -290,6 +295,11 @@ class Config(unittest.TestCase):
     def test_rejects_empty_managed_label(self):
         with self.assertRaises(ValueError):
             self.load({"stale_label": ""})
+
+    def test_resolved_label_may_be_null_but_not_empty(self):
+        self.assertIsNone(self.load({"resolved_label": None})["resolved_label"])
+        with self.assertRaises(ValueError):
+            self.load({"resolved_label": ""})
 
     def test_resolved_clears_on_comment_must_be_a_boolean(self):
         with self.assertRaises(ValueError):
@@ -536,6 +546,12 @@ class Discovery(unittest.TestCase):
         for expected in ('label:"stale-issue"', 'label:"possibly-resolved"', 'label:"needs-info"',
                          'label:"cannot reproduce"', "updated:>=2026-10-12"):
             self.assertIn(expected, text)
+
+    def test_no_mention_or_resolved_search_while_the_rule_is_off(self):
+        found, failures, queries = self.numbers({**run.DEFAULTS, **KYVERNO}, [])
+        self.assertEqual(failures, 0)
+        self.assertFalse(any("updated:" in q or "possibly-resolved" in q for q in queries))
+        self.assertTrue(any('label:"stale-issue"' in q for q in queries))
 
     def test_exempt_issues_are_left_out_of_the_mention_search(self):
         _, _, queries = self.numbers(CFG, [])

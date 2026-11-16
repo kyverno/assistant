@@ -7,7 +7,7 @@ Python 3.9+ and `gh`; no packages. The script is loaded from `GITHUB_ACTION_PATH
 
 | Rule | When | Action |
 | --- | --- | --- |
-| possibly resolved | A merged PR mentions the issue without closing it, `resolved_grace_days` passed, no human commented since the merge, no open PR mentions it either, and the issue is in none of the `queue_labels` | Adds `possibly-resolved` and comments. Never closes. |
+| possibly resolved (**off** until `resolved_label` is set) | A merged PR mentions the issue without closing it, `resolved_grace_days` passed, no human commented since the merge, no open PR mentions it either, and the issue is in none of the `queue_labels` | Adds the `resolved_label` and comments. Never closes. |
 | waiting on reporter | The issue has a `needs_info_labels` label and its author has not replied since it was applied | After `warning_days` of quiet, adds `stale-issue` and posts a warning. Once that warning is `close_days` old and the label is still there, closes as not planned. **The only rule that closes.** |
 
 - A human comment after `stale-issue` removes it. It removes `possibly-resolved` too, unless
@@ -70,7 +70,8 @@ with unknown `{fields}` fail the run.
 
 | Key | Default |
 | --- | --- |
-| `stale_label` / `resolved_label` | `stale-issue` / `possibly-resolved`. Created by the Sync labels workflow, never by this action |
+| `stale_label` | `stale-issue`. Created by the Sync labels workflow, never by this action |
+| `resolved_label` | `null`: the possibly-resolved rule is off. Name a label (for example `possibly-resolved`, or a queue label you already have) to turn it on |
 | `resolved_clears_on_comment` | `true`. `false` keeps `resolved_label` when someone comments, for a label that is a review queue a person clears |
 | `queue_labels` | `[]`. The repository's review-queue labels |
 | `needs_info_labels` | `["needs-info"]` |
