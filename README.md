@@ -369,8 +369,20 @@ offers the organisation pack); you can also copy the files from [`adopt-ci-templ
 
 ## Prepare your repository
 
-The assistants are only as sharp as what your repository tells them, so do this **before** you run the installer. Three things
-make them effective (the contributor assistant reads the same files), and organisations can add a fourth.
+The assistants are only as sharp as what your repository tells them, so do this **before** you run the installer, or let the
+first run offer it. Three things make them effective (the contributor assistant reads the same files), and organisations can
+add a fourth.
+
+**The quick way, one command** (from the first release after v0.2.0; needs Docker, `gh` and Python 3):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kyverno/assistant/main/install.sh | sh -s -- setup owner/repo
+```
+
+It shows what the repository lacks (an organisation pack, the PR automation), offers to set up each with a checkbox, opens a
+pull request for it, tells you how to edit that pull request, can wait until you merge it, and then creates the labels and
+switches the automation on. With the `assistant` alias from [Run it](#run-it) it is `assistant setup owner/repo`. Steps 1 and 2
+below say what it does, and how to do each by hand.
 
 ### 1. Adopt the shared CI and labels first
 
