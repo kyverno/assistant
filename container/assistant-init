@@ -896,11 +896,24 @@ def open_pr(repo: str, branch: str) -> str:
               open_pr_filter(branch), check=False).strip()
 
 
+def shared_pack(owner: str) -> str:
+    """What <owner>/.github/assistant-org.yaml is: 'none', 'access-only' (it holds the access rules and nothing else, so it
+    is not an organisation pack yet) or 'full'. The access rules share the file with the pack, but writing them must not
+    make setup think the pack is done."""
+    text = api(f"repos/{owner}/.github/contents/{PACK}", raw=True)
+    if text is None:
+        return "none"
+    if not isinstance(text, str):
+        return "full"
+    keys = set(re.findall(r"(?m)^([A-Za-z_][\w-]*)\s*:", text))
+    return "access-only" if keys == {"access"} else "full"
+
+
 def setup_status(repo: str) -> dict:
     """For the pack and for the PR automation: 'found', a pull request URL that is open for it, or '' (missing)."""
     owner = repo.split("/")[0]
     has_pack = (owner.lower() in BAKED_OWNERS or api(f"repos/{repo}/contents/.github/{PACK}") is not None
-                or api(f"repos/{owner}/.github/contents/{PACK}") is not None)
+                or shared_pack(owner) == "full")
     flows = api(f"repos/{repo}/contents/.github/workflows")
     has_ci = isinstance(flows, list) and any(f.get("name") in ("pr-management.yaml", "pr-management.yml") for f in flows)
     return {"pack": "found" if has_pack else open_pr(repo, PACK_BRANCH),
@@ -1266,7 +1279,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             if len(todo) == 1 and len(owners) == 1:
                 location = "repo"                 # the default; --location org for a shared pack
                 owner = next(iter(owners))
-                if api(f"repos/{owner}/.github/contents/{PACK}") is not None:
+                if shared_pack(owner) == "full":
                     print(yellow(f"{owner}/.github already has {PACK}; it covers every repository of {owner} that has no pack of its own."))
                     if plain or not confirm(f"Write a pack for just {todo[0].repo} instead (it overrides the shared one)?"):
                         print("Nothing was written. Edit the shared file, or run again with --location repo.")
@@ -1284,7 +1297,10 @@ def main(argv: Optional[list[str]] = None) -> int:
             return 2
         if location == "org":
             owner = next(iter(owners))
-            if api(f"repos/{owner}/.github/contents/{PACK}") is not None:
+            if shared_pack(owner) == "access-only":
+                print(yellow(f"{owner}/.github/{PACK} holds only the access rules, so the pack goes in each repository instead."))
+                location = "repo"
+            elif shared_pack(owner) == "full":
                 # Say so before the questions, not after them: a shared pack is already there.
                 print(yellow(f"{owner}/.github already has {PACK}; it covers every repository of {owner} that has no pack of its own."))
                 if plain or not confirm("Write a pack for just " + ", ".join(p.repo for p in todo) + " instead (it overrides the shared one)?"):
