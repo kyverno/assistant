@@ -210,5 +210,8 @@ if [ "$NEW_LOGIN" = 1 ] || { [ "$HAS_PROVIDER_KEY" = 1 ] && [ ! -f "$PROFILE_DIR
 fi
 
 step "Starting"
+MODEL="$(hermes -p "$PROFILE" config get model.default 2>/dev/null)"
+PROVIDER="$(hermes -p "$PROFILE" config get model.provider 2>/dev/null)"
+[ -n "$MODEL" ] && info "Model: $MODEL${PROVIDER:+ via $PROVIDER} (switch with /model in the chat)"
 info "The first screen takes about 30 seconds to appear."
 exec hermes -p "$PROFILE" chat "$@"

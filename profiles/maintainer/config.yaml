@@ -24,8 +24,10 @@
 # Do not add a tool to any layer below without re-running the verification
 # in docs/architecture.md.
 
+# The model a new install starts with. The launcher's first-run picker and /model change it; the banner shows it.
 model:
-  default: "anthropic/claude-sonnet-4-6"
+  provider: "copilot"
+  default: "claude-sonnet-5.5"
 
 mcp_servers:
   github:
