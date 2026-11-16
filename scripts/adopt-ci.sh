@@ -266,10 +266,13 @@ add_file() { # source, destination (relative to repo root); never overwrites
 
 # The first team of the repo's own organisation that its CODEOWNERS names: whoever owns code is who a PR should reach.
 team_from_codeowners() { # owner/repo
-  local repo="$1" path text
+  local repo="$1" path text team
   for path in .github/CODEOWNERS CODEOWNERS docs/CODEOWNERS; do
     text=$(gh api -H "Accept: application/vnd.github.raw" "repos/${repo}/contents/${path}" 2> /dev/null) || continue
-    printf '%s\n' "$text" | grep -v '^[[:space:]]*#' | grep -oiE "@${repo%%/*}/[A-Za-z0-9_.-]+" | head -n 1 && return 0
+    # Drop comments first (a whole line, or the end of one), then take the first team of this organisation. The result is
+    # kept in a variable: with pipefail, a pipeline ending in head can report failure after it has printed its answer.
+    team=$(printf '%s\n' "$text" | sed 's/#.*//' | grep -oiE "@${repo%%/*}/[A-Za-z0-9_.-]+" | head -n 1 || true)
+    [[ -z "$team" ]] || { printf '%s\n' "$team"; return 0; }
   done
   return 1
 }
