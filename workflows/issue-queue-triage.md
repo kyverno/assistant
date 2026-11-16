@@ -23,6 +23,9 @@ permissions:
   copilot-requests: write
 
 safe-outputs:
+  # Preview first, like the issue sweep: while this is on, the run only reports the labels it would add and writes
+  # nothing to any issue. Read a few runs, then delete this line, run `gh aw compile` and commit to go live.
+  staged: true
   add-labels:
     allowed:
       - "triage:critical-review"

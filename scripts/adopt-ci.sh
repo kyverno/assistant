@@ -391,11 +391,13 @@ adopt() {
         echo "  append '${label}' to .github/labels.yml"
         labels_appended=true
       done
-      if [[ "$labels_appended" == "true" ]]; then
-        added+=(.github/labels.yml)
+      [[ "$labels_appended" != "true" ]] || added+=(.github/labels.yml)
+      # With a label catalog present the repo needs the Sync labels caller; add_file keeps an existing one.
+      if [[ -s .github/labels.yml ]]; then
         add_file "$templates/workflows/sync-labels.yaml" .github/workflows/sync-labels.yaml
+      else
+        rm -f .github/labels.yml
       fi
-      [[ -s .github/labels.yml ]] || rm -f .github/labels.yml
       [[ ${#added[@]} -gt 0 ]] || { echo "  already adopted, nothing to add"; exit 0; }
       [[ "$dry_run" == "false" ]] || { echo "  dry run: nothing pushed"; exit 0; }
       git add -- "${added[@]}"

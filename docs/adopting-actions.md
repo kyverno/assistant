@@ -135,6 +135,10 @@ The queue names and their definitions in it are Kyverno's. Edit the `allowed` li
 definitions in the prompt to match your queues, and create the labels first: a label that does not exist is rejected.
 Then run `gh aw compile` and commit both files. `gh aw update` later pulls upstream changes and keeps your edits.
 
+It ships in **preview**: `staged: true` in its `safe-outputs` makes a run report the labels it would add and write
+nothing to any issue. Read a few runs, then delete that line, run `gh aw compile` and commit to let it label. Unlike the
+sweep this switch is a committed edit, not the `ISSUE_AUTOMATION_LIVE` variable, because gh-aw fixes it at compile time.
+
 It runs on a daily schedule (scattered to a fixed time) and only when the `skip-if-no-match` search finds an issue in
 no queue. gh-aw also adds a manual trigger. The agent job holds `contents: read`, `issues: read` and
 `copilot-requests: write`, which lets it use the built-in token for Copilot, billed to the organization, so no secret
