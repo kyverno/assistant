@@ -88,8 +88,8 @@ Every Dependabot PR appears exactly once.
      its sibling merged is that follow-up, say which.
    - Related PRs: `search_pull_requests(query='is:open "<dep>"')` for non-Dependabot
      PRs that mention the dependency.
-   - Blocks / blocked by: call `sequence_prs` with the Dependabot PRs plus any
-     related open PRs. Dependabot PRs overlap on `go.mod`/`go.sum` by nature — report
+   - Blocks / blocked by: call `sequence_prs` with the numbers of the Dependabot PRs plus any
+     related open PRs (it fetches any it has not seen). Dependabot PRs overlap on `go.mod`/`go.sum` by nature — report
      that as one note (merge one at a time; Dependabot rebases the rest), not as a
      conflict per pair. A bump of a module in the pack's `generated_inputs.dependency_modules` orders ahead of PRs touching
      generated outputs; state `gate_blocked` wherever true.

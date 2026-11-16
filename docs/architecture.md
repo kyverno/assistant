@@ -96,7 +96,7 @@ per-profile under `~/.hermes/profiles/<profile>/plugins/<name>/`.
   `timelineItems`). Verified live against `kyverno/kyverno` (2026-10-05): both
   `closedByPullRequestsReferences` and `ClosedEvent.closer`'s `PullRequest`/`Commit`
   union resolve correctly end to end, not just by schema introspection.
-- **sequencer** (`repo-intel`) — `sequence_prs` takes that richer metadata and builds a hard
+- **sequencer** (`repo-intel`) — `sequence_prs` takes PR numbers, reads their records from the last fetch, and builds a hard
   dependency graph, no scoring: 4 edge types (stacked branches — one PR's base branch is
   another's head; generated-file input-before-output; an explicit body reference to another
   candidate; two candidates closing the same issue, which goes to `unresolved` instead of an

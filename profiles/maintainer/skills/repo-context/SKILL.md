@@ -37,7 +37,9 @@ Call `repo_pack` once per session and keep the answer. It returns:
 
 - `branch_gates`: a branch-wide merge gate, if the repository has one: its status name, the label on its failure
   issues, whether an issue's body names the branch, and the label that bypasses it. While a gate is open, every PR on
-  the branch is blocked whatever it touches. No gates listed means there is no gate: never mention one.
+  the branch is blocked whatever it touches. `fetch_pr_candidates` and `sequence_prs` read the open failure issues
+  themselves and return the gate's state; never check it with another tool. No gates listed means there is no gate:
+  never mention one.
 - `file_classes`, `generated_inputs`, `dependency_bots`: which paths are generated, API surface, critical (elevated risk
   after merge) or test-only, which paths and modules feed generated files, and which dependency bumps need regenerated
   output. `sequence_prs` applies these; you explain them.

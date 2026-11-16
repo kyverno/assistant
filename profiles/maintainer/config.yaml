@@ -163,7 +163,7 @@ custom_toolsets:
     # repo-intel: a bundled plugin (plugins/repo-intel/), not an MCP server. Registers the fetch tools
     # (fetch_pr_candidates and friends: GitHub's GraphQL API called directly with this profile's own
     # REPO_GITHUB_TOKEN, replacing N sequential pull_request_read calls with one tool call) and
-    # sequence_prs, a pure function over already-fetched PR metadata. See docs/architecture.md.
+    # sequence_prs, a dependency graph over the PRs a fetch returned, taken by number. See docs/architecture.md.
     - repo-intel
     # maintainer-dashboard: a bundled plugin (plugins/maintainer-dashboard/). Registers update_dashboard,
     # which writes the maintainer's dashboard tab state; no GitHub/Slack access.
