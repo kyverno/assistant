@@ -33,6 +33,7 @@ because the sandbox has no open internet and the chat screen hides first-use pro
 | Model API key (`--provider anthropic\|openai\|nvidia`) | OpenShell, asked once | A placeholder. Hermes accepts it for these providers. OpenRouter is not supported this way: Hermes requires an `sk-or-` prefix. |
 | GitHub Copilot sign-in | Created by Hermes' own device-code login inside the sandbox | The real token, in the profile's `.env`. It only grants Copilot model access. |
 
+| Slack bot token (`--slack`, optional) | OpenShell, asked once | A placeholder in `SLACK_BOT_TOKEN`. The proxy swaps in the real value on `chat.postMessage`, `conversations.open` and `auth.test` to `slack.com`, and only from Hermes' Python. |
 | Push token (`--push-to-fork`, optional) | OpenShell, asked once, apart from the read-only repo token | A placeholder in `GIT_PUSH_TOKEN`. The proxy swaps in the real value on `git push` to the allowed repositories only, and only from `git`. |
 
 The Copilot token and the repo token never share a variable name, so Hermes cannot pick the wrong one.
@@ -50,6 +51,7 @@ Everything not listed is denied (`policy.yaml` and `providers/*.yaml`).
 | `github.com`, `codeload`, `raw.githubusercontent.com` | Read-only, for the agent's terminal, no credential |
 | Toolchain hosts (`go.dev`, `proxy.golang.org`, `nodejs.org`, `registry.npmjs.org`, and a few more) | GET only, and only for the installer's own binaries (`curl`, Go, Node). Used by `assistant-workspace`; every download is checked against the vendor's checksum |
 | `github.com` `git-receive-pack`, only with `--push-to-fork` | Pushes to your own forks (and, for a maintainer, the repository they manage), nothing else. The credential is swapped in by the proxy; a hook also refuses force pushes, deletes and pushes to main |
+| `slack.com`, only with `--slack` | Posting the digest: `chat.postMessage`, `conversations.open`, `auth.test`. Nothing else, and no reading of channels |
 | `models.dev` | Read-only, for the `/model` list |
 | A model provider you added with `--provider` | Only that provider's API host |
 
@@ -69,10 +71,10 @@ Verified means it was run in a real sandbox, on the image as built from this che
 | GitHub Copilot sign-in and a model reply | Verified | Device-code login works inside the sandbox. Which models answer depends on your plan: see below |
 | Anthropic / NVIDIA / OpenAI keys | Partly | The request reaches the provider with the key swapped in. A real reply is untested |
 | Agent terminal and file tools | Enabled, not exercised | They run locally in the sandbox; the hook allows them only inside OpenShell |
-| Slack | Not available | The Slack MCP server runs under Docker, which a sandbox does not have |
+| Slack | Digest only (`--slack`) | Posting the weekday review digest. Slack chat and reading channels are not available: the Slack MCP server runs under Docker, which a sandbox does not have |
 | Linux (amd64) | Verified on a runner | On a GitHub runner (Ubuntu 24.04, kernel 6.17, Docker Engine 28): an amd64 image was built there and the whole stack ran, with the placeholder token, the proxy refusing a merge, read-only hooks and the dashboard answering. Not a real laptop, and not by the publish workflow; arm64 Linux is untried |
 | Dashboard | Verified | Runs in the sandbox; the launcher forwards `127.0.0.1:9219`. A sample item written through the agent's own `update_dashboard` function was served by it, with the Maintainer tab's script and styles loading |
-| Scheduled jobs (cron, the Slack digest) | Not available | They run inside the Hermes gateway, which is not started |
+| Scheduled jobs (cron, the Slack digest) | Review digest only, with `--slack` | They run inside the Hermes gateway, which the sandbox starts only if you turned the digest on. The post to Slack and the schedule were checked with a placeholder token; a full digest run with a model was not. The memory jobs stay paused |
 | `AGENTS.md` cache seeding | Not done | `repo-context` falls back to searching GitHub |
 | Keeping state when the image is upgraded | Verified | `--upgrade`: see below |
 

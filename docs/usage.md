@@ -87,6 +87,7 @@ The result comes back as a patch (`openshell sandbox download`), or as a pushed 
 
 ```bash
 assistant --push-to-fork      # off by default; --no-push removes it
+assistant --slack             # weekday review digest in Slack (maintainer); --no-slack removes it
 ```
 
 That stores a second credential in OpenShell (your `gh` sign-in's token, or a token with write on your fork). OpenShell
@@ -95,10 +96,13 @@ branch deletes and pushes to main. Nothing is ever merged.
 
 ## Slack and scheduled jobs
 
-These are not available in the sandbox yet. They work in the [host install](host-install.md):
+**Review digest (maintainer):** `assistant --slack` asks for a Slack bot token, where to post (your member ID for a DM, or
+a channel ID) and a time. It then posts the review order every weekday at that time, in your time zone, with the chat closed.
+It needs Docker and your computer running; a missed run catches up once, within about two hours. The app has to be added to
+a workspace you can add apps to. `assistant --slack` again changes the time or place; `assistant --no-slack` removes it. Not available with `--no-openshell`.
 
-- **Slack**: talk to the assistant by mentioning it, and it can read and post in your maintainers channel.
-- **Scheduled jobs**: a weekday review digest and two memory jobs (installed paused).
+**Slack chat** (mentioning the assistant, reading channels) and the two memory jobs are not available in the sandbox. They
+work in the [host install](host-install.md).
 
 ## Troubleshooting
 
