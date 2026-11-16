@@ -237,6 +237,11 @@ memory:
   # this gate does not cover mnemosyne_triple_add (see the hook above) —
   # verified live, not assumed from the plugin's own docs.
   write_approval: true
+  # The Mnemosyne tools the skills use; the other 36 stay out of the model's context. Only remember stages its
+  # write for approval and the triple hook checks triple_add, so tools that would write past the gate
+  # (forget, update, invalidate, import...) are not exposed.
+  mnemosyne:
+    tools: [mnemosyne_recall, mnemosyne_remember, mnemosyne_sleep, mnemosyne_triple_add, mnemosyne_triple_query]
 
 # Hermes' agent-side "curator" can write new skills on its own mid-session
 # (skill_manage) — found live: it authored a skill of its own accord in an
