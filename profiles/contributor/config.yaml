@@ -10,8 +10,10 @@
 #   2. mcp_servers.github.tools.include: Hermes' own per-tool filter, the same list.
 #   3. hooks.pre_tool_call: shell hooks, all fail_closed (a crash or timeout blocks instead of allowing).
 
+# The model a new install starts with. The launcher's first-run picker and /model change it; the banner shows it.
 model:
-  default: "anthropic/claude-sonnet-4-6"
+  provider: "copilot"
+  default: "claude-sonnet-5.5"
 
 mcp_servers:
   github:
