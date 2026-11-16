@@ -109,12 +109,6 @@ class WithoutAPack(unittest.TestCase):
 
 
 class ThroughTheTool(unittest.TestCase):
-    def test_the_handler_returns_json_with_tiers(self):
-        from repo_intel import sequence_tools
-        out = json.loads(sequence_tools.handle_sequence_prs({"prs": [pr(1), pr(2, body="Requires #1")], "repo_default_branch": "main"}))
-        self.assertTrue(out["success"])
-        self.assertEqual(len(out["tiers"]), 2)
-
     def test_the_tool_schemas_name_no_organisation(self):
         from repo_intel import fetch_tools, pack_tools, sequence_tools
         schemas = [fetch_tools.FETCH_PR_CANDIDATES_SCHEMA, fetch_tools.FETCH_PR_DETAILS_SCHEMA, fetch_tools.FETCH_ISSUE_CANDIDATES_SCHEMA,

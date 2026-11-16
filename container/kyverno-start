@@ -136,6 +136,21 @@ print(json.load(urllib.request.urlopen(req, timeout=10)).get("login", ""))' 2>/d
 fi
 pass "repo $(env_get ASSISTANT_REPO), $KIND $(env_get "$LOGIN_VAR")"
 
+# Once per repository: cache its AGENTS.md and ARCHITECTURE.md files in memory as repo-doc:<path>, which the
+# maintainer's skills recall. The host installer does the same; a sandbox would otherwise start with none.
+DOCS_MARK="$PROFILE_DIR/.repo-docs-$(env_get ASSISTANT_REPO | tr '/' '_')"
+if [ "$KIND" = maintainer ] && [ ! -f "$DOCS_MARK" ]; then
+  SEED="$(mktemp)"
+  STATUS="$("$HERMES_PY" -I /usr/local/bin/kyverno-seed-repo-docs "$(env_get ASSISTANT_REPO)" "$SEED" 2>/dev/null)"
+  if [ -s "$SEED" ] && hermes -p "$PROFILE" mnemosyne import -i "$SEED" --force >/dev/null 2>&1; then
+    pass "$STATUS"
+    touch "$DOCS_MARK"
+  elif [ -n "$STATUS" ]; then
+    info "repository docs: $STATUS"
+  fi
+  rm -f "$SEED"
+fi
+
 # Hermes hides MCP and plugin tools behind a search step by default. A small model never searches, so it never
 # finds find_issues or the GitHub tools and wanders through the terminal instead. Keep every tool in view. This runs
 # on each start because config.yaml is yours and survives --upgrade, so an image change alone would not reach it.
@@ -210,5 +225,8 @@ if [ "$NEW_LOGIN" = 1 ] || { [ "$HAS_PROVIDER_KEY" = 1 ] && [ ! -f "$PROFILE_DIR
 fi
 
 step "Starting"
+MODEL="$(hermes -p "$PROFILE" config get model.default 2>/dev/null)"
+PROVIDER="$(hermes -p "$PROFILE" config get model.provider 2>/dev/null)"
+[ -n "$MODEL" ] && info "Model: $MODEL${PROVIDER:+ via $PROVIDER} (switch with /model in the chat)"
 info "The first screen takes about 30 seconds to appear."
 exec hermes -p "$PROFILE" chat "$@"

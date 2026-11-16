@@ -31,10 +31,10 @@ milestone/fixed facts — assumed loaded, not re-derived here.
   directly ("most urgent") — pair it with `fetch_pr_details` for just the
   chosen numbers' full data.
 - `sequence_prs` (plugin tool, `plugins/repo-intel/`) — builds the hard-
-  dependency graph and layers it into tiers.
+  dependency graph and layers it into tiers. Takes PR numbers only.
 - `fetch_file_diff_overlap` (plugin tool, `plugins/repo-intel/`) — fetches
   the real diff hunks for a `file_overlaps` entry's shared file, to read.
-- `mcp-github`: `search_pull_requests`, `search_issues`, `list_issues`, `issue_read`, `search_code`, `list_releases`,
+- `mcp-github`: `search_pull_requests`, `search_issues`, `issue_read`, `search_code`, `list_releases`,
   `get_latest_release`, `list_code_scanning_alerts`, `get_code_scanning_alert`,
   `list_secret_scanning_alerts`, `get_secret_scanning_alert`, `actions_list`,
   `actions_get`, `get_job_logs`, `request_copilot_review`, `pull_request_read`
@@ -81,24 +81,22 @@ for just those 10. State the slice size against the digest's own `total_count`.
    `html_url` — a real link to the approval page, not a generic pointer at GitHub.
    Dependabot PRs the triage sweep hasn't reached yet carry neither label and aren't
    in this set — `dependabot-queue` fetches by author instead.
-2. **Precedence**: nothing to prepare — `sequence_prs` derives all four hard-edge
-   types (stacked, generated-file, explicit body reference, closing-issue conflict)
-   itself from the fetched `body`/`changed_files`/`closing_issues`/`dependency_bumps`.
-   `fetch_pr_candidates` already resolved any body reference pointing outside the
-   fetched set (`external_references`: its real kind/state/title) — cite that
-   directly per PR, never as a "please go check" item.
-3. **Gate check**, only if `repo_pack` lists a branch gate: `list_issues(owner=..., repo=...,
-   state="open", labels=["<the gate's failure_issue_label>"])`, every time, cited — never
-   assert "no gate open" without this call. `search_issues` is natural-language only and
-   can miss a real open issue; don't use it here. Pass each open issue's branch marker
-   (parsed from its body when the gate's `marks_branch` is true, or `null` if it has none)
-   as `blocking_issue_branches`. No gate in the pack: skip this step, pass nothing, and
-   never mention a gate.
-4. **Call `sequence_prs`** with every candidate's `number`/`changed_files`/`labels`/
-   `base_branch`/`head_branch`/`body`/`closing_issues` (as fetched)/`dependency_bumps`/`files_truncated`,
-   `repo_default_branch`, and `blocking_issue_branches`. It returns `tiers` (each PR
+2. **Read what the fetch already worked out.** `sequence_prs` derives all four hard-edge
+   types (stacked, generated-file, explicit body reference, closing-issue conflict) itself.
+   `external_references` gives the real state of any body reference outside the fetched set:
+   cite it per PR, never as a "please go check" item. Each closing issue's `other_prs` names
+   every other PR that says it closes the same issue: an `OPEN` one competes with this PR
+   (present the two together and say which looks further along), a `MERGED` one may make this
+   PR a duplicate (say so). The first fetch of a session carries `pack`; call `repo_pack` only
+   for file classes, labels or the organisation's facts.
+3. **Gate**: when the pack has a gate, the fetch result's `gate` lists its open failure issues
+   and the branches they block, and each PR carries `gate_blocked` and `gate_checks`. Cite the
+   failure issues by link. Never check the gate with another tool. No `gate` in the result: never
+   mention a gate.
+4. **Call `sequence_prs(pr_numbers=[...])`** with every candidate's number. It reads their
+   records from the fetch and the gate from the repository. It returns `tiers` (each PR
    tagged with `hard_constraints`, `rebase_flag`, `gate_blocked`, `file_classification`),
-   `cycles`, `unresolved`, `file_overlaps`, and `package_overlaps` — a structural
+   `cycles`, `unresolved`, `file_overlaps`, `package_overlaps` and `gate_status` — a structural
    report, not an order:
    - `cycles`/`unresolved`: hand those PRs to the maintainer by number; don't pick an
      order for them.
@@ -209,7 +207,7 @@ Long form (asked for, or a signal below is concerning) adds:
 
 - Review-thread state: `pull_request_read(method="get_review_comments")`'s
   `is_resolved` + last commenter per thread — name which threads, not just a count.
-- Risk: the same file-classification/gate check as the main Procedure, for this PR.
+- Risk: the PR's `file_classification` and `gate_blocked`, as in the main Procedure.
 - Slack/Discussions context: `conversations_history(limit="7d")` if Slack is
   configured (widen on request), and `list_discussions`, both matched
   client-side against the PR's number/title/topic — no search exists for

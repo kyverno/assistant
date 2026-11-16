@@ -12,21 +12,91 @@ requests happen inside it.
 from __future__ import annotations
 
 import concurrent.futures
+import http.client
 import json
 import os
 import re
+import ssl
+import time
 import urllib.error
 import urllib.request
 from typing import Any, Optional
 
 from .pack import PackError, Rules, load as load_pack
-from .sequencer import CROSS_REF_PATTERN
+from .sequencer import CROSS_REF_PATTERN, gate_blocked, pr_from_dict
 
 _GRAPHQL_URL = "https://api.github.com/graphql"
 _USER_AGENT = "repo-intel-fetch-plugin"
+# GitHub asks for serial requests to stay clear of its secondary rate limits; two at once keeps a 15-PR fetch quick.
+_MAX_WORKERS = 2
+# Above this many characters a result is trimmed (bodies first, then trailing items) instead of spilling to a file.
+RESULT_CHAR_CAP = 40_000
 
 class FetchError(RuntimeError):
     pass
+
+
+# Full PR records from the last fetch, per repository, so sequence_prs can take PR numbers instead of the model
+# re-typing every record; and the repository's gate and default branch from that same fetch.
+_PRS: dict[str, dict[int, dict[str, Any]]] = {}
+_REPO_STATE: dict[str, tuple[float, dict[str, Any]]] = {}
+_REPO_STATE_TTL = 120
+_PACK_SHOWN: set[str] = set()
+
+
+def cached_prs(repo: str, numbers: list[int]) -> tuple[list[dict[str, Any]], list[int]]:
+    """The cached full records for `numbers`, and the numbers not in the cache."""
+    have = _PRS.get(repo.lower(), {})
+    return [have[n] for n in numbers if n in have], [n for n in numbers if n not in have]
+
+
+def _remember(repo: str, prs: list[dict[str, Any]]) -> None:
+    store = _PRS.setdefault(repo.lower(), {})
+    for p in prs:
+        if "error" not in p:
+            store[p["number"]] = p
+
+
+def _ssl_context() -> ssl.SSLContext:
+    # The system store first: in the sandbox it holds the OpenShell proxy's certificate. certifi covers Pythons with
+    # no system store (python.org builds on macOS).
+    ctx = ssl.create_default_context()
+    try:
+        import certifi  # type: ignore[import-not-found]
+
+        ctx.load_verify_locations(cafile=certifi.where())
+    except ImportError:
+        pass
+    return ctx
+
+
+def _rate_limit_error(exc: urllib.error.HTTPError, detail: str, what: str) -> Optional[FetchError]:
+    h = {k.lower(): v for k, v in (exc.headers or {}).items()}
+    if exc.code in (403, 429) and ("rate limit" in detail.lower() or h.get("x-ratelimit-remaining") == "0"):
+        wait = h.get("retry-after")
+        if not wait and h.get("x-ratelimit-reset", "").isdigit():
+            wait = str(max(1, int(h["x-ratelimit-reset"]) - int(time.time())))
+        return FetchError(f"GitHub rate limit hit on {what}; try again in about {wait or 'a minute or two'} seconds. "
+                          "Do not retry in a loop.")
+    return None
+
+
+def _open(req: urllib.request.Request, what: str) -> Any:
+    """JSON from one request, retried once when the connection breaks or GitHub answers 502/503/504."""
+    last: Optional[Exception] = None
+    for attempt in range(2):
+        try:
+            with urllib.request.urlopen(req, timeout=30, context=_ssl_context()) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", "replace")[:500]
+            if exc.code in (502, 503, 504) and attempt == 0:
+                last = exc
+                continue
+            raise _rate_limit_error(exc, detail, what) or FetchError(f"GitHub {what} HTTP {exc.code}: {detail}") from exc
+        except (urllib.error.URLError, http.client.HTTPException, OSError) as exc:
+            last = exc
+    raise FetchError(f"could not reach GitHub for {what}: {last}")
 
 
 def _rules(repo: Optional[str] = None) -> Rules:
@@ -56,12 +126,7 @@ def _graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
             "Accept": "application/vnd.github+json",
         },
     )
-    try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", "replace")[:500]
-        raise FetchError(f"GitHub GraphQL HTTP {exc.code}: {detail}") from exc
+    payload = _open(req, "GraphQL")
     if payload.get("errors"):
         raise FetchError(f"GitHub GraphQL error: {payload['errors']}")
     return payload["data"]
@@ -76,12 +141,7 @@ def _rest_get(path: str) -> Any:
             "User-Agent": _USER_AGENT,
         },
     )
-    try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", "replace")[:500]
-        raise FetchError(f"GitHub REST HTTP {exc.code}: {detail}") from exc
+    return _open(req, "REST")
 
 
 _SEARCH_QUERY = """
@@ -133,12 +193,35 @@ query($owner: String!, $name: String!, $number: Int!) {
         }
       } } }
       closingIssuesReferences(first: 20) {
-        nodes { number milestone { title state } labels(first: 20) { nodes { name } } }
+        nodes {
+          number state milestone { title state } labels(first: 20) { nodes { name } }
+          closedByPullRequestsReferences(first: 10, includeClosedPrs: true) { nodes { number title state } }
+        }
       }
     }
   }
 }
 """
+
+
+def _gate_checks(contexts: list[dict], rules: Rules) -> dict[str, str]:
+    """Each pack gate's own status on this PR's head commit: SUCCESS, FAILURE, PENDING, or MISSING when the gate's
+    status never reported. A gate with no status_context is left out."""
+    out: dict[str, str] = {}
+    for g in rules.gates:
+        if not g.status_context:
+            continue
+        state = "MISSING"
+        for c in contexts:
+            if c.get("context") == g.status_context:
+                state = {"SUCCESS": "SUCCESS", "PENDING": "PENDING", "EXPECTED": "PENDING"}.get(c.get("state"), "FAILURE")
+            elif c.get("__typename") == "CheckRun" and c.get("name") == g.status_context:
+                if c.get("status") != "COMPLETED":
+                    state = "PENDING"
+                else:
+                    state = "SUCCESS" if c.get("conclusion") in ("SUCCESS", "NEUTRAL", "SKIPPED") else "FAILURE"
+        out[g.name] = state
+    return out
 
 
 def _compute_ci_state(contexts: list[dict], gate_contexts: frozenset = frozenset()) -> str:
@@ -322,15 +405,24 @@ def _fetch_one(owner: str, name: str, number: int, rules: Rules) -> dict[str, An
         "bot_approved": bot_approved,
         "ci_state": _compute_ci_state(contexts_conn["nodes"], frozenset(g.status_context for g in rules.gates)),
         "ci_state_truncated": contexts_conn["pageInfo"]["hasNextPage"],
+        **({"gate_checks": _gate_checks(contexts_conn["nodes"], rules)} if rules.gates else {}),
         "closing_issues": [
             {
                 "number": n["number"],
+                "state": n["state"],
                 "milestone": (n["milestone"] or {}).get("title"),
                 "milestone_open": bool(n["milestone"] and n["milestone"]["state"] == "OPEN"),
                 # release-critical/-high/-medium/-low live here, on the issue — never on the
                 # PR itself, and not applied/removed by any workflow (a maintainer judgment
                 # call, not automation) — see repo-context's label-taxonomy reference.
                 "labels": [l["name"] for l in n["labels"]["nodes"]],
+                # Every other PR that says it closes this issue: OPEN ones compete with this PR, a MERGED one
+                # already landed a fix this PR may duplicate.
+                "other_prs": [
+                    {"number": o["number"], "title": o["title"], "state": o["state"]}
+                    for o in (n.get("closedByPullRequestsReferences") or {}).get("nodes", [])
+                    if o["number"] != pr["number"]
+                ],
             }
             for n in pr["closingIssuesReferences"]["nodes"]
         ],
@@ -344,19 +436,113 @@ _PR_DIGEST_FIELDS = (
     "bumps", "semver_level", "author_association", "created_at", "base_branch", "head_branch",
     "size", "milestone", "milestone_due_on", "labels", "labels_truncated", "changed_files",
     "files_truncated", "unresolved_review_threads", "review_threads_truncated",
-    "bot_approved", "ci_state", "ci_state_truncated", "closing_issues",
+    "bot_approved", "ci_state", "ci_state_truncated", "gate_checks", "gate_blocked", "closing_issues",
     "external_references", "maintainer_can_modify", "staled_at", "last_commit_at",
     "comment_count", "author_comments_since_stale",
 )
+# A digest lists a PR's files only up to this many; past it, the directories it touches. sequence_prs reads the full
+# list from the cache, so the model never needs it.
+_DIGEST_FILE_LIST_MAX = 10
 
 
 def _pr_digest(pr: dict[str, Any]) -> dict[str, Any]:
     if "error" in pr:
         return pr
     digest = {k: pr[k] for k in _PR_DIGEST_FIELDS if k in pr}
+    files = digest.get("changed_files") or []
+    if len(files) > _DIGEST_FILE_LIST_MAX:
+        digest["changed_dirs"] = sorted({os.path.dirname(f) or "." for f in files})
+        del digest["changed_files"]
     # closing_issues' assignees/other_closing_prs (added by _fetch_one_stale) are themselves
     # small — titles and logins, never a PR/issue body — kept as-is, not stripped further.
     return digest
+
+
+def fit(result: dict[str, Any], key: str, digest) -> dict[str, Any]:
+    """Keep a result under RESULT_CHAR_CAP: first drop free text (the digest form), then trailing items, naming what
+    was left out so it can be fetched by number."""
+    if len(json.dumps(result)) <= RESULT_CHAR_CAP:
+        return result
+    items = [digest(i) for i in result[key]]
+    result = {**result, key: items, "trimmed": "long text dropped to fit; fetch the full detail by number"}
+    left_out: list[int] = []
+    while items and len(json.dumps(result)) > RESULT_CHAR_CAP:
+        left_out.insert(0, items.pop().get("number"))
+        result[key] = items
+        result["not_shown"] = left_out
+    return result
+
+
+_REPO_STATE_QUERY = """
+query($owner: String!, $name: String!) {
+  repository(owner: $owner, name: $name) { defaultBranchRef { name } }
+}
+"""
+
+_REPO_STATE_GATE_QUERY = """
+query($owner: String!, $name: String!, $label: String!) {
+  repository(owner: $owner, name: $name) {
+    defaultBranchRef { name }
+    issues(first: 20, states: OPEN, labels: [$label]) { totalCount nodes { number title url body } }
+  }
+}
+"""
+
+
+def repo_state(owner: str, name: str, rules: Rules) -> dict[str, Any]:
+    """The default branch and, when the pack has a gate, its open failure issues and the branches they block. Read
+    from the repository's issue list, not search, so an open failure issue is never missed. Remembered briefly."""
+    key = f"{owner}/{name}".lower()
+    hit = _REPO_STATE.get(key)
+    if hit and time.time() - hit[0] < _REPO_STATE_TTL:
+        return hit[1]
+    g = rules.gate
+    if g is None:
+        data = _graphql(_REPO_STATE_QUERY, {"owner": owner, "name": name})["repository"]
+        state: dict[str, Any] = {"default_branch": (data["defaultBranchRef"] or {}).get("name") or "main", "gate": None}
+    else:
+        data = _graphql(_REPO_STATE_GATE_QUERY, {"owner": owner, "name": name, "label": g.failure_issue_label})["repository"]
+        issues = []
+        for i in data["issues"]["nodes"]:
+            m = g.branch_marker.search(i["body"] or "") if g.branch_marker else None
+            # No marker in the pack, or none in this issue: the issue blocks every branch.
+            issues.append({"number": i["number"], "title": i["title"], "url": i["url"],
+                           "branch": m.group("branch") if m else None})
+        state = {
+            "default_branch": (data["defaultBranchRef"] or {}).get("name") or "main",
+            "gate": {
+                "name": g.name, "failure_issue_label": g.failure_issue_label, "bypass_label": g.bypass_label,
+                "open_failure_issues": issues,
+                "open_failure_issues_truncated": data["issues"]["totalCount"] > len(issues),
+                "blocking_branches": sorted({i["branch"] for i in issues if i["branch"]}),
+                "blocks_all_branches": any(i["branch"] is None for i in issues),
+            },
+        }
+    _REPO_STATE[key] = (time.time(), state)
+    return state
+
+
+def _mark_gate(prs: list[dict[str, Any]], state: dict[str, Any], rules: Rules) -> None:
+    gate = state.get("gate")
+    if not gate:
+        return
+    branches = set(gate["blocking_branches"])
+    for p in prs:
+        if "error" not in p:
+            p["gate_blocked"] = gate_blocked(pr_from_dict(p), branches, gate["blocks_all_branches"], rules)
+
+
+def _pack_brief(rules: Rules) -> dict[str, Any]:
+    """The few pack facts every answer needs, sent once per session with the first fetch."""
+    s = rules.summary()
+    return {
+        "source": s["pack"],
+        "branch_gates": [g["name"] for g in s["branch_gates"]],
+        "ready_labels": s["readiness"]["ready_labels"],
+        "approval_bots": s["approval_bots"],
+        "review_bots": s["review_bots"],
+        "more": "repo_pack has the file classes, labels and the organisation's own facts",
+    }
 
 
 # A body reference ("Parent: #N") may name an issue, not a PR — GitHub shares one number
@@ -475,7 +661,7 @@ def fetch_pr_candidates(
     prs: list[dict[str, Any]] = []
     errors: list[str] = []
     if numbers:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(numbers))) as pool:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(_MAX_WORKERS, len(numbers))) as pool:
             futures = {pool.submit(fetch_one, owner, name, n, rules): n for n in numbers}
             for future in concurrent.futures.as_completed(futures):
                 n = futures[future]
@@ -505,7 +691,7 @@ def fetch_pr_candidates(
     if refs_by_pr:
         unique_external = {r for refs in refs_by_pr.values() for r in refs}
         resolved: dict[int, dict[str, Any]] = {}
-        with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(unique_external))) as pool:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(_MAX_WORKERS, len(unique_external))) as pool:
             futures = {pool.submit(_resolve_ref_state, owner, name, n): n for n in unique_external}
             for future in concurrent.futures.as_completed(futures):
                 n = futures[future]
@@ -517,17 +703,26 @@ def fetch_pr_candidates(
             if p["number"] in refs_by_pr:
                 p["external_references"] = [resolved[n] for n in sorted(refs_by_pr[p["number"]])]
 
+    state = repo_state(owner, name, rules)
+    _mark_gate(prs, state, rules)
+    _remember(repo, prs)
     if detail == "digest":
         prs = [_pr_digest(p) for p in prs]
 
     prs.sort(key=lambda p: p.get("number", 0))
-    return {
+    result: dict[str, Any] = {
         "total_count": total_count,
         "fetched": len(prs),
         "truncated": total_count > len(prs),
+        "default_branch": state["default_branch"],
+        **({"gate": state["gate"]} if state["gate"] else {}),
         "prs": prs,
         "errors": errors,
     }
+    if repo.lower() not in _PACK_SHOWN:
+        _PACK_SHOWN.add(repo.lower())
+        result["pack"] = _pack_brief(rules)
+    return fit(result, "prs", _pr_digest)
 
 
 def fetch_pr_details(
@@ -544,7 +739,7 @@ def fetch_pr_details(
     prs: list[dict[str, Any]] = []
     errors: list[str] = []
     if pr_numbers:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(pr_numbers))) as pool:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(_MAX_WORKERS, len(pr_numbers))) as pool:
             futures = {pool.submit(fetch_one, owner, name, n, rules): n for n in pr_numbers}
             for future in concurrent.futures.as_completed(futures):
                 n = futures[future]
@@ -553,8 +748,11 @@ def fetch_pr_details(
                 except FetchError as exc:
                     errors.append(f"PR #{n}: {exc}")
 
+    state = repo_state(owner, name, rules)
+    _mark_gate(prs, state, rules)
+    _remember(repo, prs)
     prs.sort(key=lambda p: p.get("number", 0))
-    return {"fetched": len(prs), "prs": prs, "errors": errors}
+    return fit({"fetched": len(prs), "prs": prs, "errors": errors}, "prs", _pr_digest)
 
 
 _ISSUE_SEARCH_QUERY = """
@@ -715,7 +913,7 @@ def fetch_issue_candidates(
     issues: list[dict[str, Any]] = []
     errors: list[str] = []
     if numbers:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(numbers))) as pool:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(_MAX_WORKERS, len(numbers))) as pool:
             futures = {pool.submit(_fetch_issue_one, owner, name, n): n for n in numbers}
             for future in concurrent.futures.as_completed(futures):
                 n = futures[future]
@@ -728,13 +926,13 @@ def fetch_issue_candidates(
         issues = [_issue_digest(i) for i in issues]
 
     issues.sort(key=lambda i: i.get("number", 0))
-    return {
+    return fit({
         "total_count": total_count,
         "fetched": len(issues),
         "truncated": total_count > len(issues),
         "issues": issues,
         "errors": errors,
-    }
+    }, "issues", _issue_digest)
 
 
 def fetch_issue_details(repo: str, issue_numbers: list[int]) -> dict[str, Any]:
@@ -747,7 +945,7 @@ def fetch_issue_details(repo: str, issue_numbers: list[int]) -> dict[str, Any]:
     issues: list[dict[str, Any]] = []
     errors: list[str] = []
     if issue_numbers:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(issue_numbers))) as pool:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(_MAX_WORKERS, len(issue_numbers))) as pool:
             futures = {pool.submit(_fetch_issue_one, owner, name, n): n for n in issue_numbers}
             for future in concurrent.futures.as_completed(futures):
                 n = futures[future]
@@ -757,7 +955,7 @@ def fetch_issue_details(repo: str, issue_numbers: list[int]) -> dict[str, Any]:
                     errors.append(f"Issue #{n}: {exc}")
 
     issues.sort(key=lambda i: i.get("number", 0))
-    return {"fetched": len(issues), "issues": issues, "errors": errors}
+    return fit({"fetched": len(issues), "issues": issues, "errors": errors}, "issues", _issue_digest)
 
 
 def _get_patch_for_file(owner: str, name: str, number: int, path: str) -> Optional[str]:
@@ -784,7 +982,7 @@ def fetch_file_diff_overlap(repo: str, path: str, pr_numbers: list[int]) -> dict
     owner, name = repo.split("/", 1)
 
     by_pr: dict[int, Optional[str]] = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(pr_numbers))) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(_MAX_WORKERS, len(pr_numbers))) as pool:
         futures = {pool.submit(_get_patch_for_file, owner, name, n, path): n for n in pr_numbers}
         for future in concurrent.futures.as_completed(futures):
             by_pr[futures[future]] = future.result()
