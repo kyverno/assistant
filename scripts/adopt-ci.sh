@@ -19,6 +19,7 @@ reviewers_arg=""
 reviewers=""
 dry_run=false
 branch=""
+branch_explicit=false
 update_pin=false
 
 die() { echo "error: $*" >&2; exit 1; }
@@ -50,7 +51,7 @@ while [[ $# -gt 0 ]]; do
     --update-pin) update_pin=true; shift ;;
     --source) source_repo="${2:?--source needs a value}"; shift 2 ;;
     --ref) ref="${2:?--ref needs a value}"; shift 2 ;;
-    --branch) branch="${2:?--branch needs a value}"; shift 2 ;;
+    --branch) branch="${2:?--branch needs a value}"; branch_explicit=true; shift 2 ;;
     -h | --help) usage; exit 0 ;;
     -*) usage >&2; die "unknown option $1" ;;
     *) repos+=("$1"); shift ;;
@@ -61,6 +62,7 @@ done
 if [[ -z "$branch" ]]; then
   if [[ "$update_pin" == "true" ]]; then branch="ci/update-pr-management-pin"; else branch="ci/adopt-shared-actions"; fi
 fi
+base_branch="$branch"
 [[ "$source_repo" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || die "--source must look like owner/repo"
 if [[ -n "$reviewers_arg" ]]; then
   # Same rule as the action's own config check; a single @user is rejected there.
@@ -303,10 +305,19 @@ adopt() {
   fi
   default_branch=$(gh api "repos/${repo}" --jq .default_branch)
   writable=$(gh api "repos/${repo}" --jq .permissions.push)
+  branch="$base_branch"
   if [[ -n "$(gh pr list --repo "$repo" --head "$branch" --state open --json number --jq '.[].number')" ]]; then
     echo "  a PR from ${branch} is already open, skipped"
     return 0
   fi
+  # A merged or closed adoption leaves its branch behind, and pushing to it is refused: use the next free name.
+  local holder="$repo" n=1
+  [[ "$writable" == "true" ]] || holder="$(gh api user --jq .login)/${repo#*/}"
+  while gh api "repos/${holder}/branches/${branch}" > /dev/null 2>&1; do
+    [[ "$branch_explicit" == "false" ]] || { echo "  skipped: branch ${branch} already exists in ${holder}" >&2; return 1; }
+    n=$((n + 1)); branch="${base_branch}-${n}"
+  done
+  [[ "$branch" == "$base_branch" ]] || echo "  ${base_branch} already exists (an earlier adoption); using ${branch}"
   work="$tmp/${repo//\//_}"
   gh repo clone "$repo" "$work" -- --depth 1 --quiet
   (

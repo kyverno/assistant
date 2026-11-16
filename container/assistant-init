@@ -663,6 +663,11 @@ def publish(target: str, files: dict[str, str], branch: str, title: str, body: s
             source = f"{me}/{target.split('/')[1]}"
         gh("repo", "clone", source, work, "--", "--quiet", "--depth", "1")
         git = lambda *a: subprocess.run(["git", "-C", work, *a], check=True, capture_output=True, text=True)   # noqa: E731
+        # A merged or closed pull request leaves its branch behind, and pushing to it is refused: use the next free name.
+        base, n = branch, 1
+        while subprocess.run(["git", "-C", work, "ls-remote", "--exit-code", "--heads", "origin", branch], capture_output=True).returncode == 0:
+            n += 1
+            branch = f"{base}-{n}"
         if source != target:
             git("remote", "add", "upstream", f"https://github.com/{target}.git")
             git("fetch", "--quiet", "--depth", "1", "upstream")
