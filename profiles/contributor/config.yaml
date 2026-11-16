@@ -87,6 +87,10 @@ memory:
   # Local-only (SQLite). Every write is staged for the contributor's yes/no (/memory pending).
   provider: mnemosyne
   write_approval: true
+  # Recall and remember only; the other Mnemosyne tools stay out of the model's context, including the ones that
+  # would write without the approval step.
+  mnemosyne:
+    tools: [mnemosyne_recall, mnemosyne_remember]
 
 skills:
   write_approval: true
