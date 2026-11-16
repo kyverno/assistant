@@ -128,9 +128,10 @@ detail_query='
         commits(last: 1) {
           nodes { commit {
             oid
+            committedDate
             statusCheckRollup { contexts(first: 100) { pageInfo { hasNextPage endCursor } nodes {
-              ... on CheckRun { name conclusion status }
-              ... on StatusContext { context state }
+              ... on CheckRun { name conclusion status startedAt }
+              ... on StatusContext { context state createdAt }
             } } }
           } }
         }
@@ -140,8 +141,8 @@ detail_query='
         }
         # Only the newest 100 of each (the API page maximum), without pagination: a check about "the latest comment"
         # never needs older ones, but a PR with over 100 newer events could hide an unanswered maintainer comment.
-        comments(last: 100) { nodes { author { login __typename } authorAssociation createdAt } }
-        reviews(last: 100) { nodes { author { login __typename } authorAssociation state submittedAt commit { oid } } }
+        comments(last: 100) { nodes { id url bodyText author { login __typename } authorAssociation createdAt } }
+        reviews(last: 100) { nodes { id url author { login __typename } authorAssociation state submittedAt bodyText commit { oid } } }
       }
     }
   }'
@@ -157,8 +158,8 @@ checks_page_query='
     repository(owner: $owner, name: $name) { pullRequest(number: $number) {
       commits(last: 1) { nodes { commit {
         statusCheckRollup { contexts(first: 100, after: $after) { pageInfo { hasNextPage endCursor } nodes {
-          ... on CheckRun { name conclusion status }
-          ... on StatusContext { context state }
+          ... on CheckRun { name conclusion status startedAt }
+          ... on StatusContext { context state createdAt }
         } } }
       } } }
     } }
@@ -197,6 +198,23 @@ paginate_connection() {
   done
 }
 
+# A check can run several times on one commit (a re-run, or a workflow triggered by more than one event), and the rollup
+# lists every run. Only the newest run of each check says whether it passes now, so an earlier red run must not keep
+# blocking a PR whose later run is green. A run that has not finished counts as the newest, so a queued re-run is
+# never hidden behind an older result. Entries with no name are kept as they are: the pending check treats them as unknown.
+latest_check_per_name() {
+  jq -c '
+    def key: .name // .context;
+    def stamp:
+      if ((.status // "COMPLETED") != "COMPLETED") or .state == "PENDING" or .state == "EXPECTED" then "~"
+      else (.startedAt // .createdAt // "") end;
+    if .commits.nodes[0].commit.statusCheckRollup == null then .
+    else .commits.nodes[0].commit.statusCheckRollup.contexts.nodes |= (
+      [.[] | select(key == null)]
+      + ([.[] | select(key != null)] | group_by(key) | map(max_by(stamp)))
+    ) end' one-pr.json > one-pr-next.json && mv one-pr-next.json one-pr.json
+}
+
 fetch_pr_details() {
   gh api graphql -f query="$detail_query" -f owner="$owner" -f name="$name" -F number="$number" \
     | jq -c '.data.repository.pullRequest' > one-pr.json || return 1
@@ -222,6 +240,7 @@ fetch_pr_details() {
     paginate_connection one-pr.json ".commits.nodes[0].commit.statusCheckRollup.contexts" "$checks_page_query" || return 1
   fi
   paginate_connection one-pr.json ".reviewThreads" "$threads_page_query" || return 1
+  latest_check_per_name || return 1
 
   cat one-pr.json >> pr-details.jsonl
 }
@@ -229,8 +248,50 @@ fetch_pr_details() {
 # Written straight to a file, never through a bash variable — PR content can contain arbitrary text.
 # Called in an `if` context (errexit suppressed), so every fallible command returns explicitly; a failed
 # PR is skipped (never evaluated or mutated) and the run still fails after the remaining PRs are handled.
+# A maintainer's plain comment (a PR comment, or a review that only comments) the author has not answered. Only "Request
+# changes" blocks readiness, so such a comment may be a requested change the reviewer never marked as one. Prints the
+# newest such comment as {id, url, who, text}, or null; always null unless the repository opts in with
+# nudge_plain_comments. It only decides whether to ask the reviewer once, so it errs towards staying quiet:
+#  - answered: the author commented, reviewed or replied in a review thread afterwards, or pushed. A review is for one
+#    commit, so a different head means a push; a PR comment has no commit, so the head commit's date stands in.
+#  - not a request: a `/command` (Prow), a bare LGTM or thanks, or an approval by the same reviewer afterwards.
+#  - too old: only comments from the last 7 days, so enabling this never digs up old threads.
+plain_comment_to_nudge() {
+  if [[ "${NUDGE_PLAIN_COMMENTS:-false}" != "true" ]]; then echo null; return 0; fi
+  jq -c --argjson days "$NUDGE_WINDOW_DAYS" '
+    def human: (.author.__typename // "") != "Bot" and ((.author.login // "") | endswith("[bot]") | not);
+    def maintainer: .authorAssociation == "OWNER" or .authorAssociation == "MEMBER" or .authorAssociation == "COLLABORATOR";
+    def routine: (.bodyText // "") | test("^\\s*/") or test("^\\s*(lgtm|looks good( to me)?|thanks|thank you|ty|\\+1|👍)[\\s.!]*$"; "i");
+    # Quoted back to the reviewer, so it must not ping anyone (@), cross-link an issue or PR (#), or carry HTML or a
+    # marker comment (< >). One line, at most 100 characters.
+    def excerpt:
+      ((.bodyText // "") | gsub("[@#<>]"; "") | gsub("\\s+"; " ") | gsub("^ | $"; "")) as $t
+      | if ($t | length) > 100 then $t[0:100] + "…" else $t end;
+    .author.login as $author
+    | (.commits.nodes[0].commit.oid // "") as $head
+    | (.commits.nodes[0].commit.committedDate // "") as $pushed
+    | (now - $days * 86400) as $since
+    | ([.reviews.nodes[]? | select(human and .state == "APPROVED") | {who: (.author.login // ""), at: .submittedAt}]) as $approvals
+    | ([.comments.nodes[]? | select(human) | {who: (.author.login // ""), at: .createdAt}]
+       + [.reviews.nodes[]? | select(human) | select(.state != "PENDING") | {who: (.author.login // ""), at: .submittedAt}]
+       + [.reviewThreads.nodes[]?.comments.nodes[]? | {who: (.author.login // ""), at: .createdAt}]) as $events
+    | ([$events[] | select(.who == $author) | .at] | max // "") as $answered
+    | [(.comments.nodes[]? | select(human and maintainer and .author.login != $author)
+          | {id, url, text: excerpt, who: .author.login, at: .createdAt, routine: routine, pushed: ($pushed > .createdAt)}),
+       (.reviews.nodes[]? | select(human and maintainer and .author.login != $author)
+          | select(.state == "COMMENTED" and ((.bodyText // "") != ""))
+          | {id, url, text: excerpt, who: .author.login, at: .submittedAt, routine: routine, pushed: ((.commit.oid // "") != $head)})]
+    | map(. as $c | select(
+        ($c.at > $answered) and ($c.pushed | not) and ($c.routine | not)
+        and (($c.at | fromdateiso8601) > $since)
+        and ([$approvals[] | select(.who == $c.who and .at > $c.at)] | length == 0)
+        and ($c.id | test("^[A-Za-z0-9_=-]+$")) and ($c.who | test("^[A-Za-z0-9-]+$"))))
+    | sort_by(.at) | last // null | if . == null then null else {id, url, who, text} end' pr.json
+}
+
 : > pr-details.jsonl
 fetch_failures=0
+NUDGE_WINDOW_DAYS=7
 for number in $(jq -r '.[]' qualifying-numbers.json); do
   if ! fetch_pr_details; then
     echo "::warning::PR #$number: detail fetch failed — skipping this PR."
@@ -325,9 +386,12 @@ for ((i = 0; i < returned_count; i++)); do
       [[ "$has_ready_label" == "true" ]] && gh pr edit "$number" --repo "${GITHUB_REPOSITORY}" --remove-label "ready-for-review"
       echo "PR #$number: checks still pending — removed ready-for-review if present."
     else
+      nudge_target=$(plain_comment_to_nudge)
       if [[ "$infra_finding" != "[]" ]]; then
         infra_message=$(jq -r '.[0].message' <<< "$infra_finding")
         infra_marker="<!-- pr-readiness-check-infra: $(printf '%s' "$infra_message" | sha1sum | cut -c1-12) -->"
+      fi
+      if [[ "$infra_finding" != "[]" || "$nudge_target" != "null" ]]; then
         gh api "repos/${GITHUB_REPOSITORY}/issues/$number/comments" --paginate --jq '.[].body' > comments.txt
       fi
       [[ "$has_label" == "true" ]] && gh pr edit "$number" --repo "${GITHUB_REPOSITORY}" --remove-label "needs-author-action"
@@ -338,6 +402,21 @@ for ((i = 0; i < returned_count; i++)); do
         if ! grep -qF -- "$infra_marker" comments.txt; then
           gh pr comment "$number" --repo "${GITHUB_REPOSITORY}" --body "$infra_marker
 Everything else here looks ready, so this is labelled \`ready-for-review\`. ${infra_message}"
+        fi
+      fi
+
+      if [[ "$nudge_target" != "null" ]]; then
+        # One per head commit, not per comment: reviewers talking to each other must not trigger a nudge per message.
+        # A push answers the comment, so the same comment is never nudged under two heads.
+        nudge_marker="<!-- pr-readiness-check-nudge: $head_sha -->"
+        if ! grep -qF -- "$nudge_marker" comments.txt; then
+          nudge_quote=$(jq -r '.text' <<< "$nudge_target")
+          # Added after the substitution: $(...) would strip the blank line that ends the quote.
+          [[ -n "$nudge_quote" ]] && nudge_quote="> ${nudge_quote}"$'\n\n'
+          gh pr comment "$number" --repo "${GITHUB_REPOSITORY}" --body "$nudge_marker
+@$(jq -r '.who' <<< "$nudge_target"), in [your comment]($(jq -r '.url' <<< "$nudge_target")):
+
+${nudge_quote}This PR is ready for review and that comment has had no reply or push since. Is it a requested change? If so, please submit it as **Request changes**. The bot then tracks it until the author replies or pushes. If you'd rather not use a formal review, add \`hold\` to stop the bot changing labels on this PR, and remove it once the comment is resolved."
         fi
       fi
     fi
