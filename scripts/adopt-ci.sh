@@ -272,10 +272,11 @@ team_from_codeowners() { # owner/repo
     # Drop comments first (a whole line, or the end of one), then take the first team of this organisation. The result is
     # kept in a variable: with pipefail, a pipeline ending in head can report failure after it has printed its answer.
     # The owner is compared as plain text (awk's `==`), never put into a pattern: a `.` in it must mean a dot.
-    team=$(printf '%s\n' "$text" | sed 's/#.*//' | tr -s ' \t' '\n\n' \
+    team=$(printf '%s\n' "$text" | sed 's/#.*//' \
       | awk -v owner="${repo%%/*}" 'BEGIN { owner = tolower(owner) }
-          substr($0, 1, 1) == "@" { n = index($0, "/")
-            if (n > 2 && tolower(substr($0, 2, n - 2)) == owner && substr($0, n + 1) ~ /^[A-Za-z0-9_.-]+$/) { print; exit } }' || true)
+          { for (i = 1; i <= NF; i++) { t = $i
+              if (substr(t, 1, 1) == "@") { n = index(t, "/")
+                if (n > 2 && tolower(substr(t, 2, n - 2)) == owner && substr(t, n + 1) ~ /^[A-Za-z0-9_.-]+$/) { print t; exit } } } }' || true)
     [[ -z "$team" ]] || { printf '%s\n' "$team"; return 0; }
   done
   return 1
