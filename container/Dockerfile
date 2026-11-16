@@ -194,6 +194,7 @@ COPY --chown=1000:1000 container/providers/repo-github.yaml container/providers/
 COPY --from=build --chown=1000:1000 /opt/hermes-home /opt/hermes-home
 RUN ln -s /opt/hermes-home/.local/bin/hermes /usr/local/bin/hermes
 COPY --chmod=755 container/kyverno-start container/kyverno-main container/kyverno-digest container/kyverno-env container/dashboard-relay /usr/local/bin/
+COPY --chmod=755 container/seed-repo-docs.py /usr/local/bin/kyverno-seed-repo-docs
 # Clone a repository and install the toolchains it declares (Go, Node, the Kyverno CLI), for building and testing in the sandbox.
 COPY --chmod=755 container/assistant-workspace /usr/local/bin/assistant-workspace
 COPY --chmod=755 container/toolchains /usr/local/lib/kyverno/toolchains
