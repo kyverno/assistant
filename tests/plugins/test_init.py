@@ -247,6 +247,22 @@ class Setup(unittest.TestCase):
             self._restore(saved)
 
 
+class Description(unittest.TestCase):
+    def test_the_pull_request_tells_the_author_what_to_check_and_what_to_add(self):
+        p = init.propose("o/r", TREE, "", "", [])
+        body = init.pack_pr_body({".github/assistant-org.yaml": "", ".github/assistant-org-facts.md": ""}, init.not_inferred(p, "repo"))
+        for text in ("edit this branch before you merge", "Check before you merge", "What init could not work out", "branch_gates",
+                     "docs/organisation-pack.md", "repo_pack", "assistant-org-facts.md"):
+            self.assertIn(text, body)
+
+    def test_the_pack_itself_lists_the_keys_init_leaves_to_you(self):
+        text = init.render("o", init.inferred(init.propose("o/r", TREE, "", "", [])))
+        for key in ("maintainer.branch_gates", "maintainer.generated_inputs", "maintainer.dependency_bots", "maintainer.milestones",
+                    "readiness.infra_checks", "organisation-pack.md"):
+            self.assertIn(key, text)
+        pack.parse(__import__("yaml").safe_load(text), "test")          # the comments do not break it
+
+
 class Rendering(unittest.TestCase):
     def test_what_it_writes_is_a_valid_pack(self):
         p = init.propose("o/r", TREE, "", "", ["ready-for-review", "needs-author-action"])

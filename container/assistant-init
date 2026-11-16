@@ -565,6 +565,20 @@ def quote(s: str) -> str:
     return json.dumps(s)
 
 
+DOCS_URL = "https://github.com/kyverno/assistant/blob/main/docs/organisation-pack.md"
+
+MORE_KEYS = f"""
+# More you can add. init left these out because only you know them (reference: {DOCS_URL}):
+#   maintainer.branch_gates              a check that blocks every merge: name, status_context, failure_issue_label, bypass_label
+#   maintainer.file_classes.critical     the code that costs the most when it is wrong
+#   maintainer.generated_inputs          what feeds the generated files: paths, dependency_modules
+#   maintainer.dependency_bots           dependency bumps that need regenerated output: codegen_module_globs, codegen_kind_label
+#   maintainer.approval_bots             bots whose approval counts as one review signal
+#   maintainer.milestones                title_format, open_milestone_label, issue_urgency_labels
+#   readiness.infra_checks               check names whose failure is not the author's to fix
+#   ladder, entry_labels, ...            only the contributor assistant reads these"""
+
+
 def render(name: str, chosen: dict) -> str:
     """The pack as YAML, in the form docs/organisation-pack.md describes. Only what was chosen is written."""
     def flow(v) -> str:
@@ -601,6 +615,7 @@ def render(name: str, chosen: dict) -> str:
         for k, v in classes.items():
             out.append(f"    {k}:")
             out += [f"      - {quote(x)}" for x in v]
+    out.append(MORE_KEYS)
     return "\n".join(out) + "\n"
 
 
@@ -689,13 +704,46 @@ def publish(target: str, files: dict[str, str], branch: str, title: str, body: s
         shutil.rmtree(work, ignore_errors=True)
 
 
-def create_shared_repo(owner: str, files: dict[str, str]) -> str:
+def pack_pr_body(files: dict[str, str], items: list[str]) -> str:
+    """What the pull request tells the person who opens it: what is in it, what to check, what init could not know, and what to add."""
+    listed = "\n".join(f"- `{path}`" for path in files)
+    missing = "\n".join(f"- {item}" for item in items)
+    facts = "assistant-org-facts.md" in " ".join(files)
+    return f"""## What this adds
+
+{listed}
+
+Written by `assistant init` from this repository's own files, labels, CODEOWNERS and guides, so the assistant knows what \
+is generated, public API, test-only and "ready" here. It is a draft: **edit this branch before you merge**.
+
+## Check before you merge
+
+- `maintainer.file_classes`: delete a glob that matches the wrong files, add one that is missing. Highest tier wins: generated, then API surface, then critical, then test-only.
+- `critical` holds only what you chose. Nobody but you knows which code costs the most when it is wrong.
+- `readiness` and `review_bots`: the labels and bots init found. Remove any that do not mean what the name suggests.
+{"- `assistant-org-facts.md`: answer each prompt in a sentence or two and delete a heading you have nothing to say under. Check the CI draft at the top against what you know." + chr(10) if facts else ""}
+## What init could not work out
+
+{missing}
+
+## Everything else you can add
+
+The comment at the bottom of `assistant-org.yaml` lists the other keys (merge gates, generated inputs, dependency bots, \
+milestones, approval bots, infra checks). The reference, with an example of each, is [docs/organisation-pack.md]({DOCS_URL}).
+
+## After you merge
+
+The assistant reads the file from the default branch, and remembers it for up to ten minutes. To see exactly what it \
+loaded, ask it for `repo_pack`. To change it later, edit the file in an ordinary pull request.
+"""
+
+
+def create_shared_repo(owner: str, files: dict[str, str], body: str = "Adds `assistant-org.yaml`, written by `assistant init`.") -> str:
     private = choose(f"Create {owner}/.github as", [Option("Public (recommended: anyone's assistant can read the pack)", value=False),
                                                       Option("Private (the token must be able to read it)", value=True)]).value
     gh("repo", "create", f"{owner}/.github", "--private" if private else "--public", "--description",
        "Organisation defaults", "--add-readme")
-    return publish(f"{owner}/.github", files, "add-assistant-org-pack", "Add the assistant organisation pack",
-                   "Adds `assistant-org.yaml`, written by `assistant init`.")
+    return publish(f"{owner}/.github", files, "add-assistant-org-pack", "Add the assistant organisation pack", body)
 
 
 FACTS_STUB = """# What the assistant should know about {name}
@@ -983,12 +1031,10 @@ def main(argv: Optional[list[str]] = None) -> int:
                 if not confirm(f"{target} does not exist. Create it?"):
                     print("Nothing was written.")
                     return 0
-                url = create_shared_repo(target.split("/")[0], files)
+                url = create_shared_repo(target.split("/")[0], files, pack_pr_body(files, not_inferred(todo[0], location)))
             else:
                 url = publish(target, files, "add-assistant-org-pack", "Add the assistant organisation pack",
-                              "Adds `.github/assistant-org.yaml`, written by `assistant init` from the repository's own files, "
-                              "labels, CODEOWNERS and guides. Review the globs: they decide what the assistant treats as generated, "
-                              "critical or test-only.")
+                              pack_pr_body(files, not_inferred(todo[0], location)))
             print(green("Opened ") + url)
         print(dim("Merge it, and the published assistant reads it from the default branch. Check with: ask for repo_pack."))
         return 0
