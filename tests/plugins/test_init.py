@@ -201,6 +201,16 @@ class Setup(unittest.TestCase):
         finally:
             self._restore(saved)
 
+    def test_the_open_pull_request_filter_accepts_the_plain_and_numbered_branch_only(self):
+        import json, shutil, subprocess
+        if not shutil.which("jq"):
+            self.skipTest("jq is not installed")
+        prs = json.dumps([{"headRefName": "ci/adopt-shared-actions-2", "url": "two"}, {"headRefName": "ci/adopt-shared-actions-x", "url": "x"},
+                          {"headRefName": "other", "url": "o"}])
+        pick = lambda branch: subprocess.run(["jq", "-r", init.open_pr_filter(branch)], input=prs, capture_output=True, text=True).stdout.strip()
+        self.assertEqual(pick("ci/adopt-shared-actions"), "two")
+        self.assertEqual(pick("add-assistant-org-pack"), "")
+
     def test_a_name_that_is_not_owner_slash_repo_is_refused(self):
         self.assertEqual(init.main(["--setup", "not-a-repo"]), 2)
 

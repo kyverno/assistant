@@ -757,12 +757,16 @@ VALID_REPO = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
 PACK_BRANCH, CI_BRANCH = "add-assistant-org-pack", "ci/adopt-shared-actions"
 
 
+def open_pr_filter(branch: str) -> str:
+    """The jq that picks the URL of an open pull request from `branch`, or from `branch-2`, `branch-3`... (what a later run uses
+    when an earlier merged one left the plain name behind)."""
+    return (f'[.[] | select(.headRefName == "{branch}" or (.headRefName | startswith("{branch}-") '
+            f'and (ltrimstr("{branch}-") | test("^[0-9]+$"))))] | .[0].url // ""')
+
+
 def open_pr(repo: str, branch: str) -> str:
-    """URL of an open pull request from `branch`, or from `branch-2`, `branch-3`... (what a later run uses when an earlier
-    merged one left the plain name behind)."""
     return gh("pr", "list", "--repo", repo, "--state", "open", "--limit", "100", "--json", "url,headRefName", "--jq",
-              f'[.[] | select(.headRefName == "{branch}" or (.headRefName | test("^{re.escape(branch)}-[0-9]+$")))] | .[0].url // ""',
-              check=False).strip()
+              open_pr_filter(branch), check=False).strip()
 
 
 def setup_status(repo: str) -> dict:
