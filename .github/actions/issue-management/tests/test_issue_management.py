@@ -654,6 +654,12 @@ class Sweep(unittest.TestCase):
         code, _, _ = self.go(dry_run=True)
         self.assertEqual(code, 1)
 
+    def test_a_failed_label_listing_stops_a_live_run_before_any_write(self):
+        self.fake.live["labels"] = None
+        self.warn_case(1)
+        code, _, _ = self.go(dry_run=False)
+        self.assertEqual((code, self.fake.writes()), (1, []))
+
     def test_one_failing_issue_does_not_stop_the_rest(self):
         self.warn_case(1)
         self.warn_case(2)

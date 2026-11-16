@@ -245,10 +245,11 @@ Opened with \`scripts/adopt-ci.sh --issues\`.
 EOF
 }
 
-# --update-pin recognises a pinned reference by its shape alone: a `uses:` value that names pr-management or
-# issue-management and ends in @ and a full commit SHA. That covers each action and shared workflow, from any source,
-# with no list to keep up to date.
-pin_re='[^[:space:]]*(pr|issue)-management[^[:space:]@]*@[0-9a-f]{40}'
+# --update-pin recognises a pinned reference by its shape alone: a `uses:` value that names pr-management, or an
+# issue-management action or workflow under .github/, and ends in @ and a full commit SHA. That covers each action and
+# shared workflow, from any source, with no list to keep up to date. An unrelated action that merely has
+# "issue-management" in its name is not matched.
+pin_re='[^[:space:]]*(pr-management|/\.github/(actions|workflows)/issue-management)[^[:space:]@]*@[0-9a-f]{40}'
 
 md_list() { # lines on stdin become a Markdown list of code spans
   # The backticks are Markdown, not command substitution.
@@ -320,7 +321,7 @@ update_pins() { # runs in the clone
   old=$(printf '%s\n' "$files" | pins_in)
   # Swap the owner/repo and the SHA; the path inside the repository stays as it is.
   printf '%s\n' "$files" | while IFS= read -r f; do
-    sed -E -i.bak "s#(uses:[[:space:]]*)[^/[:space:]]+/[^/[:space:]]+(/[^[:space:]@]*(pr|issue)-management[^[:space:]@]*)@[0-9a-f]{40}#\1${source_repo}\2@${ref}#" "$f" \
+    sed -E -i.bak "s#(uses:[[:space:]]*)[^/[:space:]]+/[^/[:space:]]+(/[^[:space:]@]*(pr-management|\.github/(actions|workflows)/issue-management)[^[:space:]@]*)@[0-9a-f]{40}#\1${source_repo}\2@${ref}#" "$f" \
       && rm -f "$f.bak"
   done
   if git diff --quiet; then
@@ -426,7 +427,8 @@ adopt() {
       add_file "${issue_config:-$templates/issue-management.json}" .github/issue-management.json
       # Same catalog and Sync labels workflow as the PR automation: an existing labels.yml keeps everything it has and
       # only the issue labels it lacks are appended.
-      [[ -e .github/labels.yml ]] || : > .github/labels.yml
+      labels_created=false
+      [[ -e .github/labels.yml ]] || { : > .github/labels.yml; labels_created=true; }
       labels_appended=false
       # Only a label the config leaves at its default needs a catalog entry; any other name is the repo's own label.
       cfg=.github/issue-management.json
@@ -446,8 +448,8 @@ adopt() {
       # With a label catalog present the repo needs the Sync labels caller; add_file keeps an existing one.
       if [[ -s .github/labels.yml ]]; then
         add_file "$templates/workflows/sync-labels.yaml" .github/workflows/sync-labels.yaml
-      else
-        rm -f .github/labels.yml
+      elif [[ "$labels_created" == "true" ]]; then
+        rm -f .github/labels.yml  # only the empty file this run made, never one the repository had
       fi
       [[ ${#added[@]} -gt 0 ]] || { echo "  already adopted, nothing to add"; exit 0; }
       [[ "$dry_run" == "false" ]] || { echo "  dry run: nothing pushed"; exit 0; }

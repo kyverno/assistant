@@ -657,6 +657,9 @@ def sweep(gh, repo, cfg, max_actions, now):
         missing, missing_exempt = missing_labels(gh, repo, cfg)
     except GhError as err:
         log(f"::error::could not list the repository's labels: {err}")
+        if not gh.dry_run:
+            log("::error::not changing anything without knowing which labels exist")
+            return 1
         missing, missing_exempt, failed = [], [], failed + 1
     rows, comments, notes, changed, read = [], [], [], 0, 0
     for number in sorted(numbers):
