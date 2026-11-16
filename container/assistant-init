@@ -678,7 +678,8 @@ def next_steps(target: str, url: str) -> None:
     print(f"    • in the browser: open the link, then Files changed, the ... menu on a file, Edit file")
     print(f"    • or here:        gh pr checkout {number} --repo {target}   (edit, commit, git push)")
     print(f"  What else the pack can hold: {DOCS_URL}")
-    print("  After you merge it the assistant reads it from the default branch (remembered for ten minutes).")
+    print("  After you merge it the assistant reads it from the default branch. A running assistant checks GitHub for changes at most")
+    print("  every ten minutes, so it can take that long to see the merge; starting it afresh picks it up at once.")
 
 
 def pr_state(url: str) -> str:
@@ -781,7 +782,8 @@ milestones, approval bots, infra checks). The reference, with an example of each
 
 ## After you merge
 
-The assistant reads the file from the default branch, and remembers it for up to ten minutes. To see exactly what it \
+The assistant reads the file from the default branch. A running assistant checks GitHub for changes at most every ten \
+minutes, so it can take that long to see your merge; starting it afresh picks it up at once. To see exactly what it \
 loaded, ask it for `repo_pack`. To change it later, edit the file in an ordinary pull request.
 """
 
