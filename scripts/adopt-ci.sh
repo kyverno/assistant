@@ -193,6 +193,24 @@ EOF
 }
 
 issue_body() {
+  # Runs in the clone, so these describe the config that is actually being adopted.
+  local resolved clears resolved_text comment_text
+  resolved=$(jq -r '.resolved_label // empty' .github/issue-management.json)
+  clears=$(jq -r 'if .resolved_clears_on_comment == false then "no" else "yes" end' .github/issue-management.json)
+  if [[ -z "$resolved" ]]; then
+    resolved_text="- **Possibly resolved** is off. Set \`resolved_label\` in the config to turn it on: it then labels an issue and asks for
+  confirmation when a merged PR mentions it without closing it, no open PR mentions it, and nobody has commented since.
+  It never closes."
+    comment_text="any human comment removes \`stale-issue\`."
+  else
+    resolved_text="- **Possibly resolved**: labels an issue \`${resolved}\` and asks for confirmation when a merged PR mentions it
+  without closing it, no open PR mentions it, and nobody has commented since. Never closes."
+    if [[ "$clears" == "yes" ]]; then
+      comment_text="any human comment removes \`stale-issue\` and \`${resolved}\`."
+    else
+      comment_text="any human comment removes \`stale-issue\`; \`${resolved}\` stays, because a person clears it."
+    fi
+  fi
   cat << EOF
 ## What this does
 
@@ -201,14 +219,13 @@ pinned to commit \`${ref}\`. The workflow file added here is a short caller: it 
 permissions to grant, and calls the shared workflow \`issue-management.yml\` in
 ${source_repo}, which holds the logic, the trusted checkout and the token.
 
-- **Possibly resolved** (off until \`resolved_label\` is set in the config): labels an issue and asks for confirmation when a merged PR mentions it
-  without closing it, no open PR mentions it, and nobody has commented since. Never closes.
+${resolved_text}
 - **Waiting on the reporter**: for an issue with a needs-info label and no reply from its author, warns with
   \`stale-issue\` after 14 days and closes as not planned after 14 more. **This is the only rule that closes.** A reply
   from the reporter resets it.
 
-Issues with an exempt label or a milestone are never labelled or closed, and any human comment removes \`stale-issue\`
-and \`possibly-resolved\`. \`stale-issue\` is not \`stale\`, so it never mixes with PR stale handling.
+Issues with an exempt label or a milestone are never labelled or closed, and ${comment_text}
+\`stale-issue\` is not \`stale\`, so it never mixes with PR stale handling.
 
 ## Nothing changes when this merges
 
@@ -245,11 +262,11 @@ Opened with \`scripts/adopt-ci.sh --issues\`.
 EOF
 }
 
-# --update-pin recognises a pinned reference by its shape alone: a `uses:` value that names pr-management, or an
-# issue-management action or workflow under .github/, and ends in @ and a full commit SHA. That covers each action and
+# --update-pin recognises a pinned reference by its shape alone: a `uses:` value that names pr-management, or is exactly
+# the issue-management action or workflow under .github/, and ends in @ and a full commit SHA. That covers each action and
 # shared workflow, from any source, with no list to keep up to date. An unrelated action that merely has
 # "issue-management" in its name is not matched.
-pin_re='[^[:space:]]*(pr-management|/\.github/(actions|workflows)/issue-management)[^[:space:]@]*@[0-9a-f]{40}'
+pin_re='[^[:space:]]*(pr-management[^[:space:]@]*|/\.github/(actions/issue-management|workflows/issue-management\.yml))@[0-9a-f]{40}'
 
 md_list() { # lines on stdin become a Markdown list of code spans
   # The backticks are Markdown, not command substitution.
@@ -321,7 +338,7 @@ update_pins() { # runs in the clone
   old=$(printf '%s\n' "$files" | pins_in)
   # Swap the owner/repo and the SHA; the path inside the repository stays as it is.
   printf '%s\n' "$files" | while IFS= read -r f; do
-    sed -E -i.bak "s#(uses:[[:space:]]*)[^/[:space:]]+/[^/[:space:]]+(/[^[:space:]@]*(pr-management|\.github/(actions|workflows)/issue-management)[^[:space:]@]*)@[0-9a-f]{40}#\1${source_repo}\2@${ref}#" "$f" \
+    sed -E -i.bak "s#(uses:[[:space:]]*)[^/[:space:]]+/[^/[:space:]]+(/[^[:space:]@]*(pr-management[^[:space:]@]*|\.github/(actions/issue-management|workflows/issue-management\.yml)))@[0-9a-f]{40}#\1${source_repo}\2@${ref}#" "$f" \
       && rm -f "$f.bak"
   done
   if git diff --quiet; then

@@ -16,6 +16,8 @@ expect match "    uses: kyverno/assistant/.github/workflows/issue-management.yml
 expect match "        uses: kyverno/assistant/.github/actions/pr-management@${sha}"
 expect match "        uses: other/fork/.github/actions/issue-management@${sha}"
 expect nomatch "    uses: acme/tools/issue-management@${sha}"
+expect nomatch "    uses: acme/tools/.github/actions/issue-management-extra@${sha}"
+expect nomatch "    uses: acme/tools/.github/workflows/issue-management-validate.yml@${sha}"
 expect nomatch "    uses: acme/issue-management-action@${sha}"
 expect nomatch "    uses: kyverno/assistant/.github/workflows/pr-management.yml@main"
 expect nomatch "    uses: actions/checkout@${sha}"
