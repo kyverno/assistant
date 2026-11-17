@@ -31,6 +31,9 @@ It agreed with Jim on 6 of 10. The misses were verify-closure judged as needs-re
 shipped) and scope-review judged as decision (it read a feature request as a decision). The seeds lacked the
 discussion Jim had, so the real rate is unknown.
 
+The triage also posts one short comment per labelled issue with the reason, so the reason is on the issue and not only
+in the run log (`add-comment`, same cap as the labels, staged with them).
+
 The prompt now tells the agent to check the evidence first (the whole discussion, merged pull requests and releases,
 ownership documents). Not done yet, to be tried only if that is not enough: let the agent read the three most recent
 issues of each queue as examples, let it abstain and leave an issue for a person, hand it per-issue facts computed by

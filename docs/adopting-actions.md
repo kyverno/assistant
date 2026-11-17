@@ -125,8 +125,10 @@ name it, and any other name is treated as a label you already have). The rules a
 ### Issue queue triage (agentic)
 
 `workflows/issue-queue-triage.md` is a [GitHub Agentic Workflow](https://github.github.com/gh-aw/): once a day it sorts
-open issues that are in no review queue into one queue each, by adding a label. It never closes, comments, edits or
-removes anything, and a person still reviews every queue. Before choosing it reads the whole issue with its comments,
+open issues that are in no review queue into one queue each, by adding a label and one short comment that says why. It
+never closes, edits or removes anything, and a person still reviews every queue. A labelled issue is in a queue, so the
+next run does not look at it again: the labels are the record of what was sorted, and each run takes the oldest issues
+still in no queue. Before choosing it reads the whole issue with its comments,
 looks for merged pull requests that mention it and for the latest releases, and reads the repository's ownership
 documents (CODEOWNERS, ARCHITECTURE.md and similar) once per run, so a fix that shipped or a different owner can
 show. Its reason for each issue names that evidence. It is not a shared `uses:` workflow like the others: gh-aw
