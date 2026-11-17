@@ -54,8 +54,8 @@ Readiness is separate from priority: a critical PR with red CI or requested chan
 
 For each PR work out what to do, using the first line that fits: `gate_blocked` (state it, it is branch-wide); red CI
 ("author to fix CI"); `changes_requested`; `merge_state` DIRTY ("needs a rebase"); unresolved threads ("N threads
-open"); green and `bot_approved` with no open threads ("merge now" when `human_approvals` meets the rule, else
-"approve, then merge"); otherwise "needs a first review".
+open"); green and `bot_approved` with no open threads ("merge now" with at least one human approval, "approve, then
+merge" with none: the pack states no approval count, so say how many approvals it has); otherwise "needs a first review".
 
 Who: `author`, with `author_association` in words: MEMBER "maintainer", COLLABORATOR "collaborator", CONTRIBUTOR
 "contributor", FIRST_TIME_CONTRIBUTOR or FIRST_TIMER "first-time contributor", NONE "new contributor"; Dependabot is
