@@ -246,6 +246,10 @@ platforms:
       reply_in_thread: true
       reply_broadcast: false
 
+# Post a job's own text, without the "Cronjob Response" header and the "to stop this job" footer.
+cron:
+  wrap_response: false
+
 memory:
   memory_enabled: true
   user_profile_enabled: true

@@ -1,6 +1,7 @@
 #!/bin/bash
 # The sandbox's main process. It runs the dashboard in the background, restarting it if it stops, and keeps the
 # sandbox alive; everything else (the chat) is started on demand with `openshell sandbox exec`.
+# If you chose the Slack digest, it also runs the gateway (kyverno-digest), which is what fires the scheduled jobs.
 # The dashboard listens on 127.0.0.1 inside the sandbox only; the launcher forwards a port on your laptop to it
 # (Without OpenShell, a relay in the container passes it on to Docker's published port.)
 # It belongs to the maintainer profile; the contributor sandbox (kyverno-main contributor) just stays alive.
@@ -32,6 +33,10 @@ if [ "${1:-maintainer}" != maintainer ]; then exec sleep infinity; fi
     sleep 5
   done
 ) >> /tmp/dashboard.log 2>&1 &
+
+# The scheduled review digest: the gateway, once the digest was chosen and set up (it waits for that). OpenShell only:
+# the Slack token is a provider there.
+[ "${ASSISTANT_RUNTIME:-}" = docker ] || kyverno-digest >> /tmp/gateway.log 2>&1 &
 
 # Without OpenShell, Docker publishes the relay's port; the dashboard itself stays on 127.0.0.1 (see dashboard-relay).
 if [ "${ASSISTANT_RUNTIME:-}" = docker ]; then
