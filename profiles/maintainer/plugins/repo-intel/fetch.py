@@ -19,6 +19,7 @@ import re
 import ssl
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any, Optional
 
@@ -36,9 +37,21 @@ class FetchError(RuntimeError):
     pass
 
 
+class NotFound(FetchError):
+    pass
+
+
 # Full PR records from the last fetch, per repository, so sequence_prs can take PR numbers instead of the model
 # re-typing every record; and the repository's gate and default branch from that same fetch.
 _PRS: dict[str, dict[int, dict[str, Any]]] = {}
+_PR_FETCHED_AT: dict[tuple[str, int], float] = {}
+# A cached PR is reused when GitHub's updatedAt for it has not moved and it is younger than this. CI results do not move
+# updatedAt, so the age limit keeps check states from going stale.
+_PR_REUSE_TTL = 600
+_ISSUES: dict[str, dict[int, dict[str, Any]]] = {}
+_ISSUE_FETCHED_AT: dict[tuple[str, int], float] = {}
+# Things that never change for a given commit: patches by head commit, CODEOWNERS and docs by default-branch commit.
+_BY_COMMIT: dict[tuple, Any] = {}
 _REPO_STATE: dict[str, tuple[float, dict[str, Any]]] = {}
 _REPO_STATE_TTL = 120
 _PACK_SHOWN: set[str] = set()
@@ -54,7 +67,52 @@ def _remember(repo: str, prs: list[dict[str, Any]]) -> None:
     store = _PRS.setdefault(repo.lower(), {})
     for p in prs:
         if "error" not in p:
+            if p["number"] not in store or store[p["number"]] is not p:
+                _PR_FETCHED_AT[(repo.lower(), p["number"])] = time.time()
             store[p["number"]] = p
+
+
+def cached_pr(repo: str, number: int, updated_at: Optional[str] = None) -> Optional[dict[str, Any]]:
+    """A cached record still fresh enough to reuse: younger than _PR_REUSE_TTL and, when updated_at is given, not
+    updated on GitHub since."""
+    rec = _PRS.get(repo.lower(), {}).get(number)
+    if rec is None or time.time() - _PR_FETCHED_AT.get((repo.lower(), number), 0) > _PR_REUSE_TTL:
+        return None
+    if updated_at and rec.get("updated_at") and rec["updated_at"] != updated_at:
+        return None
+    return rec
+
+
+def cached_issue(repo: str, number: int, updated_at: Optional[str] = None) -> Optional[dict[str, Any]]:
+    rec = _ISSUES.get(repo.lower(), {}).get(number)
+    if rec is None or time.time() - _ISSUE_FETCHED_AT.get((repo.lower(), number), 0) > _PR_REUSE_TTL:
+        return None
+    if updated_at and rec.get("updated_at") and rec["updated_at"] != updated_at:
+        return None
+    return rec
+
+
+def _remember_issues(repo: str, issues: list[dict[str, Any]]) -> None:
+    store = _ISSUES.setdefault(repo.lower(), {})
+    for i in issues:
+        if "error" not in i:
+            if store.get(i["number"]) is not i:
+                _ISSUE_FETCHED_AT[(repo.lower(), i["number"])] = time.time()
+            store[i["number"]] = i
+
+
+# Fields only the engine reads (queue and item); the fetch tools leave them out of what the model sees.
+_ENGINE_FIELDS = ("files", "head_oid", "updated_at", "review_requests")
+
+
+def _public(pr: dict[str, Any]) -> dict[str, Any]:
+    if "error" in pr:
+        return pr
+    out = {k: v for k, v in pr.items() if k not in _ENGINE_FIELDS}
+    if out.get("closing_issues"):
+        out["closing_issues"] = [{k: v for k, v in i.items() if k not in ("body_excerpt", "title", "created_at")}
+                                 for i in out["closing_issues"]]
+    return out
 
 
 def _ssl_context() -> ssl.SSLContext:
@@ -93,6 +151,8 @@ def _open(req: urllib.request.Request, what: str) -> Any:
             if exc.code in (502, 503, 504) and attempt == 0:
                 last = exc
                 continue
+            if exc.code == 404:
+                raise NotFound(f"GitHub {what} HTTP 404: {detail}") from exc
             raise _rate_limit_error(exc, detail, what) or FetchError(f"GitHub {what} HTTP {exc.code}: {detail}") from exc
         except (urllib.error.URLError, http.client.HTTPException, OSError) as exc:
             last = exc
@@ -148,7 +208,7 @@ _SEARCH_QUERY = """
 query($search: String!, $first: Int!) {
   search(query: $search, type: ISSUE, first: $first) {
     issueCount
-    nodes { ... on PullRequest { number } }
+    nodes { ... on PullRequest { number updatedAt } }
   }
 }
 """
@@ -171,14 +231,18 @@ query($owner: String!, $name: String!, $number: Int!) {
       state
       mergedAt
       closedAt
+      updatedAt
       baseRefName
       headRefName
+      headRefOid
+      reviewDecision
+      reviewRequests(first: 10) { nodes { requestedReviewer { __typename ... on User { login } ... on Team { slug } } } }
       additions
       deletions
       changedFiles
       milestone { title dueOn }
       labels(first: 100) { pageInfo { hasNextPage } nodes { name } }
-      files(first: 100) { pageInfo { hasNextPage } nodes { path } }
+      files(first: 100) { pageInfo { hasNextPage } nodes { path additions deletions changeType } }
       reviewThreads(first: 100) { pageInfo { hasNextPage } nodes { isResolved } }
       reviews(last: 100) { nodes { author { login } state submittedAt body } }
       mergeStateStatus
@@ -198,7 +262,8 @@ query($owner: String!, $name: String!, $number: Int!) {
       closingIssuesReferences(first: 20) {
         pageInfo { hasNextPage }
         nodes {
-          number state milestone { title state } labels(first: 20) { nodes { name } }
+          number state title body createdAt reactions { totalCount }
+          milestone { title state dueOn } labels(first: 20) { nodes { name } }
           closedByPullRequestsReferences(first: 25, includeClosedPrs: true) {
             pageInfo { hasNextPage } nodes { number title state }
           }
@@ -228,6 +293,21 @@ def _gate_checks(contexts: list[dict], rules: Rules) -> dict[str, str]:
                     state = "SUCCESS" if c.get("conclusion") in ("SUCCESS", "NEUTRAL", "SKIPPED") else "FAILURE"
         out[g.name] = state
     return out
+
+
+def _failing_checks(contexts: list[dict], gate_contexts: frozenset) -> list[str]:
+    out = []
+    for c in contexts:
+        name = c.get("name") or c.get("context")
+        if not name or name in gate_contexts:
+            continue
+        if c.get("__typename") == "CheckRun":
+            bad = c.get("status") == "COMPLETED" and c.get("conclusion") not in ("SUCCESS", "NEUTRAL", "SKIPPED")
+        else:
+            bad = c.get("state") in ("FAILURE", "ERROR")
+        if bad and name not in out:
+            out.append(name)
+    return out[:5]
 
 
 def _compute_ci_state(contexts: list[dict], gate_contexts: frozenset = frozenset()) -> str:
@@ -415,6 +495,15 @@ def _fetch_one(owner: str, name: str, number: int, rules: Rules) -> dict[str, An
         "milestone_due_on": (pr["milestone"] or {}).get("dueOn"),
         "labels": [n["name"] for n in pr["labels"]["nodes"]],
         "labels_truncated": pr["labels"]["pageInfo"]["hasNextPage"],
+        "updated_at": pr.get("updatedAt"),
+        "head_oid": pr.get("headRefOid"),
+        "review_decision": pr.get("reviewDecision"),
+        "review_requests": [
+            r["requestedReviewer"].get("login") or "team:" + (r["requestedReviewer"].get("slug") or "")
+            for r in (pr.get("reviewRequests") or {}).get("nodes", []) if r.get("requestedReviewer")
+        ],
+        "files": [{"path": n["path"], "additions": n.get("additions") or 0, "deletions": n.get("deletions") or 0,
+                   "change": n.get("changeType") or "MODIFIED"} for n in pr["files"]["nodes"]],
         "changed_files": [n["path"] for n in pr["files"]["nodes"]],
         "files_truncated": pr["files"]["pageInfo"]["hasNextPage"],
         "unresolved_review_threads": sum(1 for t in threads if not t["isResolved"]),
@@ -422,13 +511,20 @@ def _fetch_one(owner: str, name: str, number: int, rules: Rules) -> dict[str, An
         "bot_approved": bot_approved,
         "ci_state": _compute_ci_state(contexts_conn["nodes"], frozenset(g.status_context for g in rules.gates)),
         "ci_state_truncated": contexts_conn["pageInfo"]["hasNextPage"],
+        "failing_checks": _failing_checks(contexts_conn["nodes"], frozenset(g.status_context for g in rules.gates)),
         **({"gate_checks": _gate_checks(contexts_conn["nodes"], rules)} if rules.gates else {}),
         "closing_issues": [
             {
                 "number": n["number"],
                 "state": n["state"],  # CLOSED means another change already fixed it
+                "title": n.get("title"),
+                "created_at": n.get("createdAt"),
+                # The start of the issue's text, for the severity wording the engine looks for; never shown whole.
+                "body_excerpt": (n.get("body") or "")[:600],
+                "reactions": (n.get("reactions") or {}).get("totalCount", 0),
                 "milestone": (n["milestone"] or {}).get("title"),
                 "milestone_open": bool(n["milestone"] and n["milestone"]["state"] == "OPEN"),
+                "milestone_due_on": (n["milestone"] or {}).get("dueOn"),
                 # release-critical/-high/-medium/-low live here, on the issue — never on the
                 # PR itself, and not applied/removed by any workflow (a maintainer judgment
                 # call, not automation) — see repo-context's label-taxonomy reference.
@@ -457,8 +553,8 @@ _PR_DIGEST_FIELDS = (
     "bumps", "semver_level", "author_association", "created_at", "base_branch", "head_branch",
     "size", "milestone", "milestone_due_on", "labels", "labels_truncated", "changed_files",
     "files_truncated", "unresolved_review_threads", "review_threads_truncated",
-    "bot_approved", "ci_state", "ci_state_truncated", "gate_checks", "gate_blocked", "closing_issues",
-    "closing_issues_truncated",
+    "bot_approved", "ci_state", "ci_state_truncated", "failing_checks", "review_decision", "gate_checks", "gate_blocked",
+    "closing_issues", "closing_issues_truncated",
     "external_references", "maintainer_can_modify", "staled_at", "last_commit_at",
     "comment_count", "author_comments_since_stale",
 )
@@ -470,7 +566,7 @@ _DIGEST_FILE_LIST_MAX = 10
 def _pr_digest(pr: dict[str, Any]) -> dict[str, Any]:
     if "error" in pr:
         return pr
-    digest = {k: pr[k] for k in _PR_DIGEST_FIELDS if k in pr}
+    digest = {k: v for k, v in _public(pr).items() if k in _PR_DIGEST_FIELDS}
     files = digest.get("changed_files") or []
     if len(files) > _DIGEST_FILE_LIST_MAX:
         digest["changed_dirs"] = sorted({os.path.dirname(f) or "." for f in files})
@@ -532,14 +628,14 @@ def fit(result: dict[str, Any], key: str, digest) -> dict[str, Any]:
 
 _REPO_STATE_QUERY = """
 query($owner: String!, $name: String!) {
-  repository(owner: $owner, name: $name) { defaultBranchRef { name } }
+  repository(owner: $owner, name: $name) { defaultBranchRef { name target { oid } } }
 }
 """
 
 _REPO_STATE_GATE_QUERY = """
 query($owner: String!, $name: String!, $label: String!, $after: String) {
   repository(owner: $owner, name: $name) {
-    defaultBranchRef { name }
+    defaultBranchRef { name target { oid } }
     issues(first: 100, after: $after, states: OPEN, labels: [$label]) {
       pageInfo { hasNextPage endCursor } nodes { number title url body }
     }
@@ -589,6 +685,7 @@ def repo_state(owner: str, name: str, rules: Rules) -> dict[str, Any]:
                 "blocks_all_branches": truncated or any(i["branch"] is None for i in issues),
             },
         }
+    state["default_oid"] = ((data["defaultBranchRef"] or {}).get("target") or {}).get("oid")
     _REPO_STATE[key] = (time.time(), state)
     return state
 
@@ -711,35 +808,45 @@ def _fetch_one_stale(owner: str, name: str, number: int, rules: Rules) -> dict[s
 _DIGEST_LIMIT_CEILING = 60
 
 
-def fetch_pr_candidates(
-    repo: str, search_query: str, limit: int = 15, include_stale_detail: bool = False,
-    detail: str = "full",
-) -> dict[str, Any]:
-    if "/" not in repo:
-        raise FetchError(f"repo must be 'owner/name', got {repo!r}")
-    owner, name = repo.split("/", 1)
-    if detail == "digest":
-        limit = min(limit, _DIGEST_LIMIT_CEILING)
-
-    full_search = f"repo:{repo} is:pr is:open draft:false {search_query}".strip()
-    search_data = _graphql(_SEARCH_QUERY, {"search": full_search, "first": min(limit, 100)})
-    search_result = search_data["search"]
-    numbers = [n["number"] for n in search_result["nodes"] if n]
-    total_count = search_result["issueCount"]
-
-    rules = _rules(repo)
-    fetch_one = _fetch_one_stale if include_stale_detail else _fetch_one
-    prs: list[dict[str, Any]] = []
+def _fetch_many(fn, owner: str, name: str, numbers: list[int], *extra) -> tuple[list[dict[str, Any]], list[str]]:
+    out: list[dict[str, Any]] = []
     errors: list[str] = []
     if numbers:
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(_MAX_WORKERS, len(numbers))) as pool:
-            futures = {pool.submit(fetch_one, owner, name, n, rules): n for n in numbers}
+            futures = {pool.submit(fn, owner, name, n, *extra): n for n in numbers}
             for future in concurrent.futures.as_completed(futures):
-                n = futures[future]
                 try:
-                    prs.append(future.result())
+                    out.append(future.result())
                 except FetchError as exc:
-                    errors.append(f"PR #{n}: {exc}")
+                    errors.append(f"#{futures[future]}: {exc}")
+    return out, errors
+
+
+def collect_prs(repo: str, search_query: str, limit: int = 15,
+                include_stale_detail: bool = False) -> tuple[list[dict[str, Any]], int, list[str], dict[str, Any], Rules]:
+    """Full records for the open, non-draft PRs a search finds, gate marked and cached: (records, total_count, errors,
+    repo_state, rules). A cached record whose updatedAt has not moved is reused instead of fetched again."""
+    if "/" not in repo:
+        raise FetchError(f"repo must be 'owner/name', got {repo!r}")
+    owner, name = repo.split("/", 1)
+
+    full_search = f"repo:{repo} is:pr is:open draft:false {search_query}".strip()
+    search_result = _graphql(_SEARCH_QUERY, {"search": full_search, "first": min(limit, 100)})["search"]
+    hits = [n for n in search_result["nodes"] if n]
+    total_count = search_result["issueCount"]
+
+    rules = _rules(repo)
+    prs: list[dict[str, Any]] = []
+    to_fetch: list[int] = []
+    for h in hits:
+        rec = None if include_stale_detail else cached_pr(repo, h["number"], h.get("updatedAt"))
+        if rec is not None:
+            prs.append(rec)
+        else:
+            to_fetch.append(h["number"])
+    fetched, errors = _fetch_many(_fetch_one_stale if include_stale_detail else _fetch_one, owner, name, to_fetch, rules)
+    prs += fetched
+    errors = [f"PR {e}" for e in errors]
 
     # A PR's body can reference another PR ("Depends on #N", "Parent: #N", "Stacks on top of
     # #N") that isn't in this fetched set — stale/already-merged, or just outside the slice.
@@ -749,6 +856,8 @@ def fetch_pr_candidates(
     refs_by_pr: dict[int, set[int]] = {}
     current_repo = f"{owner}/{name}".lower()
     for p in prs:
+        if "error" in p or "external_references" in p:
+            continue
         refs: set[int] = set()
         for match in CROSS_REF_PATTERN.finditer(p.get("body") or ""):
             repo_part, num_str = match.group(1), match.group(2)
@@ -760,7 +869,7 @@ def fetch_pr_candidates(
             refs_by_pr[p["number"]] = external
 
     if refs_by_pr:
-        unique_external = {r for refs in refs_by_pr.values() for r in refs}
+        unique_external = sorted({r for refs in refs_by_pr.values() for r in refs})
         resolved: dict[int, dict[str, Any]] = {}
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(_MAX_WORKERS, len(unique_external))) as pool:
             futures = {pool.submit(_resolve_ref_state, owner, name, n): n for n in unique_external}
@@ -771,23 +880,31 @@ def fetch_pr_candidates(
                 except FetchError as exc:
                     resolved[n] = {"number": n, "state": "UNKNOWN", "title": None, "error": str(exc)}
         for p in prs:
-            if p["number"] in refs_by_pr:
+            if p.get("number") in refs_by_pr:
                 p["external_references"] = [resolved[n] for n in sorted(refs_by_pr[p["number"]])]
 
     state = repo_state(owner, name, rules)
     _mark_gate(prs, state, rules)
     _remember(repo, prs)
-    if detail == "digest":
-        prs = [_pr_digest(p) for p in prs]
-
     prs.sort(key=lambda p: p.get("number", 0))
+    return prs, total_count, errors, state, rules
+
+
+def fetch_pr_candidates(
+    repo: str, search_query: str, limit: int = 15, include_stale_detail: bool = False,
+    detail: str = "full",
+) -> dict[str, Any]:
+    if detail == "digest":
+        limit = min(limit, _DIGEST_LIMIT_CEILING)
+    prs, total_count, errors, state, rules = collect_prs(repo, search_query, limit, include_stale_detail)
+    shown = [_pr_digest(p) if detail == "digest" else _public(p) for p in prs]
     result: dict[str, Any] = {
         "total_count": total_count,
-        "fetched": len(prs),
-        "truncated": total_count > len(prs),
+        "fetched": len(shown),
+        "truncated": total_count > len(shown),
         "default_branch": state["default_branch"],
         **({"gate": state["gate"]} if state["gate"] else {}),
-        "prs": prs,
+        "prs": shown,
         "errors": errors,
     }
     if repo.lower() not in _PACK_SHOWN:
@@ -799,41 +916,44 @@ def fetch_pr_candidates(
     return result
 
 
+def pr_records(repo: str, pr_numbers: list[int], include_stale_detail: bool = False,
+               reuse: bool = False) -> tuple[list[dict[str, Any]], list[str], dict[str, Any], Rules]:
+    """Full records for explicit PR numbers, gate marked and cached. reuse=True takes a fresh cached record instead."""
+    if "/" not in repo:
+        raise FetchError(f"repo must be 'owner/name', got {repo!r}")
+    owner, name = repo.split("/", 1)
+    rules = _rules(repo)
+    prs: list[dict[str, Any]] = []
+    to_fetch = []
+    for n in pr_numbers:
+        rec = cached_pr(repo, n) if reuse and not include_stale_detail else None
+        if rec is not None:
+            prs.append(rec)
+        else:
+            to_fetch.append(n)
+    fetched, errors = _fetch_many(_fetch_one_stale if include_stale_detail else _fetch_one, owner, name, to_fetch, rules)
+    prs += fetched
+    state = repo_state(owner, name, rules)
+    _mark_gate(prs, state, rules)
+    _remember(repo, prs)
+    prs.sort(key=lambda p: p.get("number", 0))
+    return prs, [f"PR {e}" for e in errors], state, rules
+
+
 def fetch_pr_details(
     repo: str, pr_numbers: list[int], include_stale_detail: bool = False
 ) -> dict[str, Any]:
     """Phase 2 of the digest/full split: full detail (body, diffs, review text) for an explicit
     list of PR numbers already chosen by a digest-ranked pass — skips the search step."""
-    if "/" not in repo:
-        raise FetchError(f"repo must be 'owner/name', got {repo!r}")
-    owner, name = repo.split("/", 1)
-
-    rules = _rules(repo)
-    fetch_one = _fetch_one_stale if include_stale_detail else _fetch_one
-    prs: list[dict[str, Any]] = []
-    errors: list[str] = []
-    if pr_numbers:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=min(_MAX_WORKERS, len(pr_numbers))) as pool:
-            futures = {pool.submit(fetch_one, owner, name, n, rules): n for n in pr_numbers}
-            for future in concurrent.futures.as_completed(futures):
-                n = futures[future]
-                try:
-                    prs.append(future.result())
-                except FetchError as exc:
-                    errors.append(f"PR #{n}: {exc}")
-
-    state = repo_state(owner, name, rules)
-    _mark_gate(prs, state, rules)
-    _remember(repo, prs)
-    prs.sort(key=lambda p: p.get("number", 0))
-    return fit({"fetched": len(prs), "prs": prs, "errors": errors}, "prs", _pr_digest)
+    prs, errors, _state, _rules_ = pr_records(repo, pr_numbers, include_stale_detail)
+    return fit({"fetched": len(prs), "prs": [_public(p) for p in prs], "errors": errors}, "prs", _pr_digest)
 
 
 _ISSUE_SEARCH_QUERY = """
 query($search: String!, $first: Int!) {
   search(query: $search, type: ISSUE, first: $first) {
     issueCount
-    nodes { ... on Issue { number } }
+    nodes { ... on Issue { number updatedAt } }
   }
 }
 """
@@ -853,6 +973,8 @@ query($owner: String!, $name: String!, $number: Int!) {
       author { login }
       authorAssociation
       createdAt
+      updatedAt
+      reactions { totalCount }
       state
       stateReason
       milestone { title dueOn state }
@@ -921,6 +1043,8 @@ def _fetch_issue_one(owner: str, name: str, number: int) -> dict[str, Any]:
         "author": (issue["author"] or {}).get("login"),
         "author_association": issue["authorAssociation"],
         "created_at": issue["createdAt"],
+        "updated_at": issue.get("updatedAt"),
+        "reactions": (issue.get("reactions") or {}).get("totalCount", 0),
         "state": issue["state"],
         "state_reason": issue["stateReason"],
         "milestone": milestone.get("title"),
@@ -957,7 +1081,7 @@ def _fetch_issue_one(owner: str, name: str, number: int) -> dict[str, Any]:
 # Same idea as _PR_DIGEST_FIELDS: everything a relational default (no linked PR, milestone
 # health, duplicate-effort detection) needs, minus the issue body and comment text.
 _ISSUE_DIGEST_FIELDS = (
-    "number", "title", "url", "author", "author_association", "created_at", "state",
+    "number", "title", "url", "author", "author_association", "created_at", "updated_at", "reactions", "state",
     "state_reason", "milestone", "milestone_open", "milestone_due_on", "labels",
     "labels_truncated", "assignees", "assignees_truncated", "comment_count", "closing_prs",
     "closing_prs_truncated", "closed_by", "reopened_since_closed", "parent", "sub_issues",
@@ -971,35 +1095,50 @@ def _issue_digest(issue: dict[str, Any]) -> dict[str, Any]:
     return {k: issue[k] for k in _ISSUE_DIGEST_FIELDS if k in issue}
 
 
-def fetch_issue_candidates(
-    repo: str, search_query: str, limit: int = 15, detail: str = "full"
-) -> dict[str, Any]:
+def collect_issues(repo: str, search_query: str, limit: int = 15) -> tuple[list[dict[str, Any]], int, list[str]]:
+    """Full records for the issues a search finds, cached: (records, total_count, errors). A cached record whose
+    updatedAt has not moved is reused."""
     if "/" not in repo:
         raise FetchError(f"repo must be 'owner/name', got {repo!r}")
     owner, name = repo.split("/", 1)
-
     full_search = f"repo:{repo} is:issue {search_query}".strip()
-    search_data = _graphql(_ISSUE_SEARCH_QUERY, {"search": full_search, "first": min(limit, 100)})
-    search_result = search_data["search"]
-    numbers = [n["number"] for n in search_result["nodes"] if n]
-    total_count = search_result["issueCount"]
-
+    search_result = _graphql(_ISSUE_SEARCH_QUERY, {"search": full_search, "first": min(limit, 100)})["search"]
     issues: list[dict[str, Any]] = []
-    errors: list[str] = []
-    if numbers:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=min(_MAX_WORKERS, len(numbers))) as pool:
-            futures = {pool.submit(_fetch_issue_one, owner, name, n): n for n in numbers}
-            for future in concurrent.futures.as_completed(futures):
-                n = futures[future]
-                try:
-                    issues.append(future.result())
-                except FetchError as exc:
-                    errors.append(f"Issue #{n}: {exc}")
+    to_fetch = []
+    for h in (n for n in search_result["nodes"] if n):
+        rec = cached_issue(repo, h["number"], h.get("updatedAt"))
+        if rec is not None:
+            issues.append(rec)
+        else:
+            to_fetch.append(h["number"])
+    fetched, errors = _fetch_many(_fetch_issue_one, owner, name, to_fetch)
+    issues += fetched
+    _remember_issues(repo, issues)
+    issues.sort(key=lambda i: i.get("number", 0))
+    return issues, search_result["issueCount"], [f"Issue {e}" for e in errors]
 
+
+def issue_records(repo: str, numbers: list[int], reuse: bool = False) -> tuple[list[dict[str, Any]], list[str]]:
+    if "/" not in repo:
+        raise FetchError(f"repo must be 'owner/name', got {repo!r}")
+    owner, name = repo.split("/", 1)
+    issues, to_fetch = [], []
+    for n in numbers:
+        rec = cached_issue(repo, n) if reuse else None
+        (issues.append(rec) if rec is not None else to_fetch.append(n))
+    fetched, errors = _fetch_many(_fetch_issue_one, owner, name, to_fetch)
+    issues += fetched
+    _remember_issues(repo, issues)
+    issues.sort(key=lambda i: i.get("number", 0))
+    return issues, [f"Issue {e}" for e in errors]
+
+
+def fetch_issue_candidates(
+    repo: str, search_query: str, limit: int = 15, detail: str = "full"
+) -> dict[str, Any]:
+    issues, total_count, errors = collect_issues(repo, search_query, limit)
     if detail == "digest":
         issues = [_issue_digest(i) for i in issues]
-
-    issues.sort(key=lambda i: i.get("number", 0))
     return fit({
         "total_count": total_count,
         "fetched": len(issues),
@@ -1012,23 +1151,7 @@ def fetch_issue_candidates(
 def fetch_issue_details(repo: str, issue_numbers: list[int]) -> dict[str, Any]:
     """Phase 2 of the digest/full split: full detail (body, comments) for an explicit list of
     issue numbers already chosen by a digest-ranked pass — skips the search step entirely."""
-    if "/" not in repo:
-        raise FetchError(f"repo must be 'owner/name', got {repo!r}")
-    owner, name = repo.split("/", 1)
-
-    issues: list[dict[str, Any]] = []
-    errors: list[str] = []
-    if issue_numbers:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=min(_MAX_WORKERS, len(issue_numbers))) as pool:
-            futures = {pool.submit(_fetch_issue_one, owner, name, n): n for n in issue_numbers}
-            for future in concurrent.futures.as_completed(futures):
-                n = futures[future]
-                try:
-                    issues.append(future.result())
-                except FetchError as exc:
-                    errors.append(f"Issue #{n}: {exc}")
-
-    issues.sort(key=lambda i: i.get("number", 0))
+    issues, errors = issue_records(repo, issue_numbers)
     return fit({"fetched": len(issues), "issues": issues, "errors": errors}, "issues", _issue_digest)
 
 
@@ -1062,3 +1185,114 @@ def fetch_file_diff_overlap(repo: str, path: str, pr_numbers: list[int]) -> dict
             by_pr[futures[future]] = future.result()
 
     return {"path": path, "by_pr": by_pr}
+
+
+# -- for the engine: data keyed by a commit, so it is fetched once and reused until the commit moves -------------
+
+def pr_patches(repo: str, number: int, head_oid: Optional[str]) -> dict[str, Optional[str]]:
+    """{path: patch} for one PR, from REST (GraphQL has no patch field). A patch is None for a binary file or one too
+    large for GitHub to show. Cached by head commit; without one (an old record) it is fetched every time."""
+    key = ("patches", repo.lower(), number, head_oid)
+    if head_oid and key in _BY_COMMIT:
+        return _BY_COMMIT[key]
+    owner, name = repo.split("/", 1)
+    out: dict[str, Optional[str]] = {}
+    for page in range(1, 4):              # 300 files; past that the profile from line counts is what there is
+        files = _rest_get(f"repos/{owner}/{name}/pulls/{number}/files?per_page=100&page={page}")
+        for f in files:
+            out[f.get("filename")] = f.get("patch")
+        if len(files) < 100:
+            break
+    if head_oid:
+        _BY_COMMIT[key] = out
+    return out
+
+
+def patches_for(repo: str, records: list[dict[str, Any]]) -> tuple[dict[int, dict[str, Optional[str]]], list[str]]:
+    """Patches for several PRs at once: ({number: {path: patch}}, errors)."""
+    out: dict[int, dict[str, Optional[str]]] = {}
+    errors: list[str] = []
+    if not records:
+        return out, errors
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(_MAX_WORKERS, len(records))) as pool:
+        futures = {pool.submit(pr_patches, repo, r["number"], r.get("head_oid")): r["number"] for r in records}
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                out[futures[future]] = future.result()
+            except FetchError as exc:
+                errors.append(f"patches for #{futures[future]}: {exc}")
+    return out, errors
+
+
+def file_text(repo: str, path: str, ref: Optional[str]) -> Optional[str]:
+    """A file's text at `ref`, or None when it does not exist there. Cached by ref when ref is a commit."""
+    key = ("file", repo.lower(), path, ref)
+    if ref and key in _BY_COMMIT:
+        return _BY_COMMIT[key]
+    import base64
+    owner, name = repo.split("/", 1)
+    try:
+        data = _rest_get(f"repos/{owner}/{name}/contents/{urllib.parse.quote(path)}" + (f"?ref={ref}" if ref else ""))
+    except NotFound:
+        data = None
+    text = None
+    if isinstance(data, dict) and data.get("encoding") == "base64":
+        text = base64.b64decode(data.get("content") or "").decode("utf-8", "replace")
+    if ref:
+        _BY_COMMIT[key] = text
+    return text
+
+
+def codeowners(repo: str, rules: Rules, ref: Optional[str]) -> tuple[list, Optional[str]]:
+    """(parsed CODEOWNERS rules, the path they came from), from the default branch. Where GitHub looks: the pack's
+    path, then .github/, the root and docs/."""
+    from .engine.owners import parse_codeowners
+
+    for path in dict.fromkeys([rules.codeowners or ".github/CODEOWNERS", ".github/CODEOWNERS", "CODEOWNERS",
+                               "docs/CODEOWNERS"]):
+        text = file_text(repo, path, ref)
+        if text is not None:
+            return parse_codeowners(text), path
+    return [], None
+
+
+def agent_doc_paths(repo: str, ref: Optional[str]) -> list[str]:
+    """Every AGENTS.md in the repository at `ref` (one tree read, cached by commit)."""
+    key = ("agent-docs", repo.lower(), ref)
+    if ref and key in _BY_COMMIT:
+        return _BY_COMMIT[key]
+    owner, name = repo.split("/", 1)
+    tree = _rest_get(f"repos/{owner}/{name}/git/trees/{ref or 'HEAD'}?recursive=1")
+    paths = sorted(t["path"] for t in tree.get("tree") or []
+                   if t.get("type") == "blob" and re.search(r"(^|/)AGENTS\.md$", t.get("path") or "", re.I))
+    if ref:
+        _BY_COMMIT[key] = paths
+    return paths
+
+
+_MILESTONES_QUERY = """
+query($owner: String!, $name: String!) {
+  repository(owner: $owner, name: $name) {
+    milestones(states: OPEN, first: 10, orderBy: {field: DUE_DATE, direction: ASC}) {
+      nodes { title dueOn url issues(states: OPEN) { totalCount } pullRequests(states: OPEN) { totalCount } }
+    }
+  }
+}
+"""
+
+_COUNT_QUERY = """
+query($search: String!) { search(query: $search, type: ISSUE, first: 1) { issueCount } }
+"""
+
+
+def milestones(repo: str) -> list[dict[str, Any]]:
+    """Open milestones, soonest due first; those with no due date last."""
+    owner, name = repo.split("/", 1)
+    nodes = _graphql(_MILESTONES_QUERY, {"owner": owner, "name": name})["repository"]["milestones"]["nodes"]
+    out = [{"title": m["title"], "due_on": m.get("dueOn"), "url": m.get("url"),
+            "open_issues": m["issues"]["totalCount"], "open_prs": m["pullRequests"]["totalCount"]} for m in nodes]
+    return sorted(out, key=lambda m: (m["due_on"] is None, m["due_on"] or "", m["title"]))
+
+
+def count(repo: str, qualifiers: str) -> int:
+    return _graphql(_COUNT_QUERY, {"search": f"repo:{repo} {qualifiers}"})["search"]["issueCount"]

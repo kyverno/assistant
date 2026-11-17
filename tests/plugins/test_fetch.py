@@ -22,7 +22,7 @@ def pr_node(number, base="main", body="", files=(), contexts=(), closing=(), mor
     return {
         "number": number, "title": f"PR {number}", "url": f"https://github.com/{REPO}/pull/{number}", "body": body,
         "author": {"login": "someone"}, "authorAssociation": "CONTRIBUTOR", "createdAt": "2026-11-01T00:00:00Z",
-        "baseRefName": base, "headRefName": f"b{number}", "additions": 1, "deletions": 1, "changedFiles": len(files),
+        "baseRefName": base, "headRefName": f"b{number}", "headRefOid": f"sha{number}", "additions": 1, "deletions": 1, "changedFiles": len(files),
         "milestone": None,
         "labels": {"pageInfo": {"hasNextPage": False}, "nodes": []},
         "files": {"pageInfo": {"hasNextPage": False}, "nodes": [{"path": f} for f in files]},
