@@ -105,6 +105,7 @@ if [ "${#SANDBOX}" -gt 19 ] || [[ ! "$SANDBOX" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?
   echo "invalid sandbox name '$SANDBOX': use at most 19 lowercase letters, digits and dashes" >&2
   exit 2
 fi
+banner "$KIND" "$SANDBOX"
 
 # Register a provider profile, or bring an existing one up to date: OpenShell wants the current
 # resource_version for an update, so older installs pick up changes to these files.
@@ -285,8 +286,7 @@ if [ "$PUSH" = 1 ]; then
       pass "using your gh sign-in (it can write to repositories you can write to; the network rule is what limits it)"
     else
       info "Paste a fine-grained token of your own account with Contents: Read and write on your fork."
-      { read -r -s -p "  GitHub token: " PUSH_TOKEN </dev/tty; } 2>/dev/null
-      echo
+      read_token PUSH_TOKEN "GitHub token"
     fi
     [ -z "$PUSH_TOKEN" ] && { fail "no token for pushing"; exit 1; }
   fi
@@ -365,8 +365,7 @@ for P in "${WANT_PROVIDERS[@]+"${WANT_PROVIDERS[@]}"}"; do
     pass "$P key already stored in OpenShell"
   else
     KEY=""
-    { read -r -s -p "  $P API key: " KEY </dev/tty; } 2>/dev/null
-    echo
+    read_token KEY "$P API key"
     [ -z "$KEY" ] && { fail "no $P key entered (this step needs a terminal to ask for it)"; exit 1; }
     # Exported in a subshell, not passed through env(1): an argument would show in the process list.
     ( export "$VAR=$KEY"; openshell provider create --name "assistant-$P" --type "assistant-$P" --credential "$VAR" >/dev/null 2>&1 ) \
@@ -429,6 +428,7 @@ for P in "${WANT_PROVIDERS[@]+"${WANT_PROVIDERS[@]}"}"; do
 done
 [ "$PUSH" = 1 ] && openshell sandbox provider attach "$SANDBOX" "$PUSH_PROVIDER" >/dev/null 2>&1
 pass "sandbox '$SANDBOX' is ready"
+ready_row Sandbox "$SANDBOX ($KIND)"
 
 # The Slack digest, if it is on: attach the token to a sandbox that was made without it, store where and when (kept
 # across --upgrade), and make sure the gateway that fires the schedule is running with the token.
@@ -439,6 +439,9 @@ if [ "$KIND" = maintainer ] && openshell provider get "$SLACK_PROVIDER" >/dev/nu
     sandbox_env_set "SLACK_HOME_CHANNEL=$SLACK_CHANNEL" "SLACK_DIGEST_TIME=$SLACK_TIME" "SLACK_DIGEST_TZ=$SLACK_TZ" \
       && pass "digest on weekdays at $SLACK_TIME ($SLACK_TZ), to $SLACK_CHANNEL"
   fi
+  DIGEST_AT="$(instance_exec sh -c "sed -n 's/^SLACK_DIGEST_TIME=//p' /opt/hermes-home/.hermes/profiles/$HERMES_PROFILE/.env" 2>/dev/null)"
+  DIGEST_TZ="$(instance_exec sh -c "sed -n 's/^SLACK_DIGEST_TZ=//p' /opt/hermes-home/.hermes/profiles/$HERMES_PROFILE/.env" 2>/dev/null)"
+  [ -n "$DIGEST_AT" ] && ready_row Digest "weekdays $DIGEST_AT ($DIGEST_TZ), in Slack"
   # Start the gateway if it is not running, and replace one that was started before you set the digest up.
   if [ "$DIGEST" = 1 ] || ! instance_exec sh -c 'pgrep -f "[g]ateway run"' >/dev/null 2>&1; then
     instance_exec sh -c 'setsid nohup kyverno-digest --restart >> /tmp/gateway.log 2>&1 < /dev/null &' >/dev/null 2>&1
@@ -451,7 +454,7 @@ if [ "$KIND" = maintainer ]; then
     if ! openshell forward list 2>/dev/null | awk -v n="$SANDBOX" -v p="$DASH_PORT" '$2==n && $4==p{f=1} END{exit !f}'; then
       openshell forward start "127.0.0.1:$DASH_PORT" "$SANDBOX" -d >/dev/null 2>&1 || info "could not forward port $DASH_PORT (is it in use?); set ASSISTANT_DASHBOARD_PORT to another one"
     fi
-    info "dashboard: http://127.0.0.1:$DASH_PORT/maintainer?profile=$HERMES_PROFILE"
+    ready_row Dashboard "http://127.0.0.1:$DASH_PORT/maintainer?profile=$HERMES_PROFILE"
   else
     info "note: this sandbox was made before the dashboard existed; run with --upgrade to get it"
   fi
@@ -467,6 +470,7 @@ if [ -n "$BACKUP_DIR" ]; then
 fi
 
 step "5. Assistant"
+ready_box
 ARGS=()
 [ -n "$REPO" ] && ARGS+=(--repo "$REPO")
 [ -n "$LOGIN" ] && ARGS+=(--login "$LOGIN")

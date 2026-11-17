@@ -3,10 +3,43 @@
 # Sourced, never run. The caller sets HERE, REPO_ROOT, IMAGE, BUILD and UPGRADE first, and defines
 # instance_exists (is the sandbox or container already there?) and INSTANCE (its name).
 
-pass() { printf '  \033[32m✓\033[0m %s\n' "$1"; }
-fail() { printf '  \033[31m✗\033[0m %s\n' "$1" >&2; }
+# Colour only on a terminal, and not when NO_COLOR is set (https://no-color.org).
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+  C_BOLD=$'\033[1m'; C_DIM=$'\033[2m'; C_GREEN=$'\033[32m'; C_RED=$'\033[31m'; C_YELLOW=$'\033[33m'; C_CYAN=$'\033[36m'; C_OFF=$'\033[0m'
+else
+  C_BOLD=""; C_DIM=""; C_GREEN=""; C_RED=""; C_YELLOW=""; C_CYAN=""; C_OFF=""
+fi
+pass() { printf '  %s✓%s %s\n' "$C_GREEN" "$C_OFF" "$1"; }
+fail() { printf '  %s✗%s %s\n' "$C_RED" "$C_OFF" "$1" >&2; }
+warn() { printf '  %s!%s %s\n' "$C_YELLOW" "$C_OFF" "$1"; }
 info() { printf '  %s\n' "$1"; }
-step() { printf '\n\033[1m%s\033[0m\n' "$1"; }
+step() { printf '\n%s▌ %s%s\n' "$C_CYAN$C_BOLD" "$1" "$C_OFF"; }
+# What this run is, once, at the top: the assistant, the profile and the sandbox.
+banner() { printf '\n  %sKyverno assistant%s %s· %s · %s%s\n' "$C_BOLD" "$C_OFF" "$C_DIM" "$1" "$2" "$C_OFF"; }
+# A short table of what is ready, printed before the chat opens. ready_row LABEL VALUE, then ready_box.
+READY_ROWS=()
+ready_row() { READY_ROWS+=("$(printf '%-10s %s' "$1" "$2")"); }
+ready_box() {
+  local r
+  [ "${#READY_ROWS[@]}" -gt 0 ] || return 0
+  printf '  %s┌─ Ready ──────────────────────────────────%s\n' "$C_DIM" "$C_OFF"
+  for r in "${READY_ROWS[@]}"; do printf '  %s│%s %s\n' "$C_DIM" "$C_OFF" "$r"; done
+  printf '  %s└──────────────────────────────────────────%s\n' "$C_DIM" "$C_OFF"
+}
+# Reads a token or key into the variable named by $1, asking with $2. What you paste stays visible until you press
+# Enter, then the line is replaced by a masked one with a tick. A hidden prompt looks stuck (macOS Terminal shows a key
+# symbol and nothing else), and people paste twice.
+read_token() {
+  local __t="" __n __cols
+  read -r -p "  $2: " __t </dev/tty
+  if [ -n "$__t" ]; then
+    __cols=$(tput cols 2>/dev/null || echo 80)
+    __n=$(( (${#2} + 4 + ${#__t}) / __cols + 1 ))
+    printf '\033[%dA\r\033[J' "$__n" >/dev/tty
+    printf '  %s: %s…%s  %s✓%s %d characters\n' "$2" "${__t:0:5}" "${__t: -4}" "$C_GREEN" "$C_OFF" "${#__t}" >/dev/tty
+  fi
+  printf -v "$1" '%s' "$__t"
+}
 
 # gh's own sign-in only: a GH_TOKEN or GITHUB_TOKEN in the environment is not what we mean to store.
 gh_token() { env -u GH_TOKEN -u GITHUB_TOKEN gh auth token --hostname github.com 2>/dev/null; }
@@ -165,8 +198,7 @@ acquire_github_token() {
     fi
   else
     token_note_paste
-    read -r -s -p "  GitHub token: " PAT </dev/tty
-    echo
+    read_token PAT "GitHub token"
   fi
   [ -z "$PAT" ] && { fail "no token entered (this step needs a terminal to ask for it)"; exit 1; }
   # Check it before storing it. The token goes in through stdin, so it never shows in a process list.
@@ -255,14 +287,15 @@ acquire_slack() {
   if ! openshell provider get "$SLACK_PROVIDER" >/dev/null 2>&1; then
     SLACK_TOKEN="${ASSISTANT_SLACK_TOKEN:-}"
     if [ -z "$SLACK_TOKEN" ]; then
-      info "It needs a Slack bot token. Two minutes:"
-      info "  1. Open this link, pick your workspace, and click Create:"
+      info "The assistant will post a short review digest on weekdays. It needs a Slack bot token (about two minutes):"
+      info ""
+      info "  ${C_BOLD}1${C_OFF}  Open this link, choose your workspace and click Create:"
       info "     $SLACK_MANIFEST_URL"
-      info "  2. Click Install to Workspace and Allow."
-      info "  3. Under OAuth & Permissions, copy the Bot User OAuth Token (xoxb-...)."
-      info "The token goes to OpenShell, never into the sandbox. If your workspace does not let you add apps, ask an admin."
-      read -r -s -p "  Slack bot token: " SLACK_TOKEN </dev/tty
-      echo
+      info "  ${C_BOLD}2${C_OFF}  Click Install to Workspace, then Allow."
+      info "  ${C_BOLD}3${C_OFF}  Under OAuth & Permissions, copy the Bot User OAuth Token (it starts with xoxb-)."
+      info ""
+      info "${C_DIM}The token goes to OpenShell, never into the sandbox. No permission to add apps? Ask a workspace admin.${C_OFF}"
+      read_token SLACK_TOKEN "Slack bot token"
     fi
     [ -z "$SLACK_TOKEN" ] && { fail "no Slack token entered (this step needs a terminal to ask for it)"; exit 1; }
     # Check it before storing it. The token goes in through stdin, so it never shows in a process list.
@@ -275,8 +308,9 @@ acquire_slack() {
   fi
   SLACK_CHANNEL="${ASSISTANT_SLACK_CHANNEL:-}"
   if [ -z "$SLACK_CHANNEL" ]; then
-    info "Where should it post? Your Slack member ID (U...: it sends you a DM; profile menu, Copy member ID) or a"
-    info "channel ID (C...: invite the bot there first with /invite @assistant)."
+    info ""
+    info "Where should it post? Your Slack member ID (U...) sends you a DM: profile menu, Copy member ID."
+    info "Or a channel ID (C...): invite the bot there first with /invite @assistant."
     read -r -p "  Member or channel ID: " SLACK_CHANNEL </dev/tty
   fi
   [[ "$SLACK_CHANNEL" =~ ^[CDGUW][A-Z0-9]{7,}$ ]] || { fail "'$SLACK_CHANNEL' is not a Slack member or channel ID (it starts with U, W, C, G or D)"; exit 1; }
