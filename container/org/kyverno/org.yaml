@@ -125,3 +125,10 @@ maintainer:
     open_milestone_label: milestone-pr      # the PR closes an issue under a still-open milestone
     # Set by hand on an issue to mark urgency toward a milestone; not applied by any workflow.
     issue_urgency_labels: [release-critical, release-high, release-medium, release-low]
+
+  # Which labels mean which severity, on a PR's closing issue (or the PR itself when it closes none). Highest first.
+  severity_labels:
+    critical: [kind/security, security]
+    high: [regression]
+    medium: [bug, performance]
+    low: [enhancement, feature parity, Documentation, kind/documentation, kind/tests, test]
