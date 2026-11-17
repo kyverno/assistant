@@ -1,6 +1,14 @@
 # repo-intel
 
-A bundled Hermes plugin, not a skill. Registers seven tools: five fetch tools (`fetch.py`, `fetch_tools.py`), the sequencer (`sequencer.py`, `sequence_tools.py`) and `repo_pack` (`pack_tools.py`), which returns the organisation pack's rules and facts.
+A bundled Hermes plugin, not a skill. Registers nine tools: `queue` and `item` (`queue_tools.py`, over `engine/`), five fetch tools (`fetch.py`, `fetch_tools.py`), the sequencer (`sequencer.py`, `sequence_tools.py`) and `repo_pack` (`pack_tools.py`), which returns the organisation pack's rules and facts.
+
+## Queue and item
+
+`queue(focus, kind, limit, prefer, avoid)` is where `pr-queue` starts: the top items for a focus, ranked in code, one
+line each with the reasons, the next step and who takes it, what the code changes, risk, and relations to other PRs.
+`item(number, level)` is one PR or issue: a card, or with `level="code"` the patches of the files that matter most and
+the nearest `AGENTS.md` excerpt. Each view has a character budget (`engine/layers.py`) that tests check. The engine
+(`engine/`) has no GitHub or Hermes imports; `docs/architecture.md` describes the ranking rules.
 
 ## Fetch
 
