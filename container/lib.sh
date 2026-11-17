@@ -27,7 +27,7 @@ ready_box() {
   printf '  %s└──────────────────────────────────────────%s\n' "$C_DIM" "$C_OFF"
 }
 # Reads a token or key into the variable named by $1, asking with $2. What you paste stays visible until you press
-# Enter, then the line is replaced by a masked one with a tick. A hidden prompt looks stuck (macOS Terminal shows a key
+# Enter, then the line is replaced by a fixed mask, a tick and the length. A hidden prompt looks stuck (macOS Terminal shows a key
 # symbol and nothing else), and people paste twice.
 read_token() {
   local __t="" __n __cols
@@ -36,7 +36,7 @@ read_token() {
     __cols=$(tput cols 2>/dev/null || echo 80)
     __n=$(( (${#2} + 4 + ${#__t}) / __cols + 1 ))
     printf '\033[%dA\r\033[J' "$__n" >/dev/tty
-    printf '  %s: %s…%s  %s✓%s %d characters\n' "$2" "${__t:0:5}" "${__t: -4}" "$C_GREEN" "$C_OFF" "${#__t}" >/dev/tty
+    printf '  %s: ••••••••  %s✓%s %d characters\n' "$2" "$C_GREEN" "$C_OFF" "${#__t}" >/dev/tty
   fi
   printf -v "$1" '%s' "$__t"
 }

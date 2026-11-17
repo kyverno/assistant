@@ -17,7 +17,9 @@ dashboard, no questions.
 
 1. `repo_pack` for the ready labels (`readiness.ready_labels`) and the severity labels of closing issues. No ready
    labels: post one line saying the repository has not adopted them, and stop.
-2. `fetch_pr_candidates(repo=ASSISTANT_REPO, search_query="label:<ready label>", detail="digest", limit=60)`.
+2. `fetch_pr_candidates(repo=ASSISTANT_REPO, search_query="label:<ready labels joined by commas>", detail="digest",
+   limit=60)`. A comma between labels means either one, so every ready label is covered in this one call (for example
+   `label:ready-for-review,needs-review`).
 3. Since last time: your previous digest is in context. Take the PR numbers it listed that are not in the fetched set
    and call `fetch_pr_details` once for them (at most 10). `state` and `merged_at` say merged or closed. Count the new
    PRs (in the set, not in the previous digest). No previous digest: leave the "Since" section out.
@@ -37,8 +39,9 @@ nothing rots). Work out what each PR needs, using the first line that fits:
 - Anything else: "needs a first review".
 
 Put a PR under **Review now** when its action is for a maintainer (approve, review, resolve), and under **Waiting on
-the author** when the next move is the author's. Show the age ("opened 12d ago") or "no activity for 9d" only when it is
-over a week.
+the author** when the next move is the author's. Together the two sections list at most 7 PRs: fill Review now first,
+then Waiting on the author with what is left, and say "and N more" on the last line if any were cut. Show the age ("opened 12d ago") or "no activity for 9d" only when it
+is over a week.
 
 ## Output
 
@@ -57,12 +60,12 @@ Only the digest, in this shape, nothing before or after. Plain Markdown (Hermes 
 **Review now** (maintainer action)
 1. [#18252](url) chi v5.4.0, CVE fix: ready to approve, 0 approvals so far, closes a critical issue
 2. [#18290](url) CEL cache for policies: 2 open threads to resolve, opened 9d ago
-(at most 6, one line each: what it does, then what is needed)
+(one line each: what it does, then what is needed)
 
 **Waiting on the author**
 - [#18613](url) E2E gate hardening: CI red (conformance gate), no activity for 8d
 - [#18590](url) title: needs a rebase
-(at most 5, the same shape)
+(the same shape)
 
 **Bot PRs:** 5 Dependabot bumps, 3 green, one major (#18400 go-jose v4)
 

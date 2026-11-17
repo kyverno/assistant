@@ -99,6 +99,10 @@ done
 
 choose_profile "$(openshell sandbox list 2>/dev/null | awk 'NR>1{print $1}')" assistant-maint assistant-contrib
 select_profile "$KIND"
+if [ "$KIND" != maintainer ] && [ "$SLACK$NO_SLACK" != 00 ]; then
+  echo "--slack and --no-slack are for the maintainer profile (the digest reviews the PR queue of a repository you maintain)" >&2
+  exit 2
+fi
 SANDBOX="${SANDBOX:-$DEFAULT_NAME}"
 # OpenShell limits a sandbox name to 19 characters.
 if [ "${#SANDBOX}" -gt 19 ] || [[ ! "$SANDBOX" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]]; then

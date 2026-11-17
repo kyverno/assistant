@@ -120,7 +120,7 @@ query($owner: String!, $name: String!, $number: Int!) {
       labels(first: 100) { pageInfo { hasNextPage } nodes { name } }
       files(first: 100) { pageInfo { hasNextPage } nodes { path } }
       reviewThreads(first: 100) { pageInfo { hasNextPage } nodes { isResolved } }
-      reviews(last: 50) { nodes { author { login } state submittedAt body } }
+      reviews(last: 100) { nodes { author { login } state submittedAt body } }
       mergeStateStatus
       bumpCommits: commits(first: 10) { nodes { commit { messageBody } } }
       commits(last: 1) { nodes { commit {
@@ -284,7 +284,7 @@ def _fetch_one(owner: str, name: str, number: int, rules: Rules) -> dict[str, An
         r["author"] and r["author"]["login"] in rules.approval_bots and r["state"] == "APPROVED"
         for r in reviews
     )
-    # Each reviewer's latest verdict counts, in submission order (reviews(last: 50) comes oldest first).
+    # Each reviewer's latest verdict counts, in submission order (reviews(last: 100) comes oldest first).
     verdicts = {
         r["author"]["login"]: r["state"] for r in reviews
         if r["author"] and r["state"] in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED")
