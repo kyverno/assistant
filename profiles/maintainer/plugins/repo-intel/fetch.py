@@ -108,6 +108,9 @@ query($owner: String!, $name: String!, $number: Int!) {
       author { login }
       authorAssociation
       createdAt
+      state
+      mergedAt
+      closedAt
       baseRefName
       headRefName
       additions
@@ -281,6 +284,12 @@ def _fetch_one(owner: str, name: str, number: int, rules: Rules) -> dict[str, An
         r["author"] and r["author"]["login"] in rules.approval_bots and r["state"] == "APPROVED"
         for r in reviews
     )
+    # Each reviewer's latest verdict counts, in submission order (reviews(last: 50) comes oldest first).
+    verdicts = {
+        r["author"]["login"]: r["state"] for r in reviews
+        if r["author"] and r["state"] in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED")
+    }
+    human = {k: v for k, v in verdicts.items() if k not in rules.approval_bots}
     author_login = (pr["author"] or {}).get("login")
     is_dependabot = author_login in ("dependabot", "dependabot[bot]", "app/dependabot")
     bumps = (
@@ -302,6 +311,11 @@ def _fetch_one(owner: str, name: str, number: int, rules: Rules) -> dict[str, An
         "author": author_login,
         "is_dependabot": is_dependabot,
         "merge_state": pr["mergeStateStatus"],
+        "state": pr["state"],
+        "merged_at": pr["mergedAt"],
+        "closed_at": pr["closedAt"],
+        "human_approvals": sum(v == "APPROVED" for v in human.values()),
+        "changes_requested": any(v == "CHANGES_REQUESTED" for v in human.values()),
         "copilot_review": _copilot_review(reviews),
         "dependency_bumps": [b["name"] for b in bumps],
         "bumps": bumps,
@@ -340,7 +354,8 @@ def _fetch_one(owner: str, name: str, number: int, rules: Rules) -> dict[str, An
 # Everything sequence_prs/the severity ladder read, minus the free text that causes spillover
 # (body, copilot_review's parsed text) — keeps a whole-candidate-set ranking pass small.
 _PR_DIGEST_FIELDS = (
-    "number", "title", "url", "author", "is_dependabot", "merge_state", "dependency_bumps",
+    "number", "title", "url", "author", "is_dependabot", "merge_state", "state", "merged_at", "closed_at",
+    "human_approvals", "changes_requested", "dependency_bumps",
     "bumps", "semver_level", "author_association", "created_at", "base_branch", "head_branch",
     "size", "milestone", "milestone_due_on", "labels", "labels_truncated", "changed_files",
     "files_truncated", "unresolved_review_threads", "review_threads_truncated",
