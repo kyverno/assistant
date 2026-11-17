@@ -23,10 +23,22 @@ have been trialled on a few repositories (the spare repo first, then real ones, 
    does not suit organisations, grow the deterministic side instead: rules that sort issues without a model (labels,
    keywords, linked PRs), more of the queue report, and the prow commands (`/label`, `/remove-label`) for people.
 
+## Trial result (queue triage)
+
+Run once, staged, in kyverno/test-ai-assistants on 10 seeded copies of issues Jim had already labelled (first 1,200
+characters, no comments). The org's Copilot billing worked through `copilot-requests: write`; nothing was written.
+It agreed with Jim on 6 of 10. The misses were verify-closure judged as needs-repro (it could not see that a fix had
+shipped) and scope-review judged as decision (it read a feature request as a decision). The seeds lacked the
+discussion Jim had, so the real rate is unknown.
+
+The prompt now tells the agent to check the evidence first (the whole discussion, merged pull requests and releases,
+ownership documents). Not done yet, to be tried only if that is not enough: let the agent read the three most recent
+issues of each queue as examples, let it abstain and leave an issue for a person, hand it per-issue facts computed by
+the sweep's code, put an area-to-queue table in the prompt. Measure each on a larger seed set with full text and
+comments, staged.
+
 ## Open points
 
 - The queue-triage workflow has no per-issue limit across label calls; "one queue per issue" rests on the prompt.
-- Its staged output has not been seen on GitHub yet.
+- A run lists a default label, `agentic-workflows`; check whether a live run would add it before going live.
 - A merge commit (or a pin bump after a squash) is needed so `issue-management.yml`'s pin stays in main's history.
-- This branch predates #65 and later PR-automation commits; merge or rebase onto main before it lands, and expect
-  `scripts/adopt-ci.sh` and the adoption docs to need reconciling with the launcher change.
