@@ -136,7 +136,7 @@ query($owner: String!, $name: String!, $number: Int!) {
         }
       } } }
       closingIssuesReferences(first: 20) {
-        nodes { number milestone { title state } labels(first: 20) { nodes { name } } }
+        nodes { number state milestone { title state } labels(first: 20) { nodes { name } } }
       }
     }
   }
@@ -339,6 +339,7 @@ def _fetch_one(owner: str, name: str, number: int, rules: Rules) -> dict[str, An
         "closing_issues": [
             {
                 "number": n["number"],
+                "state": n["state"],  # CLOSED means another change already fixed it
                 "milestone": (n["milestone"] or {}).get("title"),
                 "milestone_open": bool(n["milestone"] and n["milestone"]["state"] == "OPEN"),
                 # release-critical/-high/-medium/-low live here, on the issue — never on the

@@ -197,9 +197,11 @@ brief or a discussion reply, without being asked to remember it.
 
 A scheduled job ships with the profile (`cron/jobs.json`) — weekday
 mornings, it posts a digest to Slack on its own: what merged, closed or
-arrived since the last one, the PRs to review now and what each needs, and
-the ones waiting on their author. A few short sections, not the full
-`pr-queue` report (the `review-digest` skill). It arrives paused; `hermes cron resume
+arrived since the last one; 10 to 15 PRs in merge order, each with its
+author, why it ranks there and what to do; the author-blocked PRs that
+matter; related and competing PRs; issues to look at; and what to close or
+reassign. It is the `pr-queue` ranking in a fixed form, not an
+open-ended report (the `review-digest` skill). It arrives paused; `hermes cron resume
 review-digest` turns it on, and `hermes cron edit
 review-digest --schedule "..."` changes the timing. Each run
 remembers its own last output, so the digest says what changed rather than

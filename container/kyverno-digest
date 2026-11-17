@@ -10,6 +10,8 @@ set -u
 export HERMES_HOME=/opt/hermes-home/.hermes
 export PATH="/opt/hermes-home/.local/bin:$PATH"
 PROFILE=maintainer
+# The digest makes several GitHub calls; Hermes' default of 10 minutes without activity is tight on a slow connection.
+export HERMES_CRON_TIMEOUT=1800
 ENV_FILE="$HERMES_HOME/profiles/$PROFILE/.env"
 JOB=review-digest
 
