@@ -567,6 +567,10 @@ The agent runs in an [OpenShell](https://github.com/NVIDIA/OpenShell) sandbox, a
 outside it, where the agent cannot edit them.** That is what lets you run it next to private work, and what makes a tricked
 agent harmless: it has nothing to steal and nowhere to send it.
 
+![Where each piece runs: the OpenShell gateway on your laptop, the sandbox and supervisor containers in Docker, and the listed services outside](public/highlevel_arch.png)
+
+*Where each piece runs. The gateway is a background service on your laptop; the sandbox and its supervisor are two Docker containers.*
+
 - **It cannot see your computer.** Nothing is mounted into the sandbox: not your files, your other projects, your employer's
   code, your SSH keys or your browser sessions.
 - **Your GitHub token never enters it.** The sandbox holds a placeholder; OpenShell swaps in the real token on the way out, only
