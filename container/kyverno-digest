@@ -38,6 +38,12 @@ while true; do
     hermes -p "$PROFILE" config set timezone "${TZ_NAME:-UTC}" >/dev/null 2>&1
     hermes -p "$PROFILE" cron edit "$JOB" --schedule "${TIME#*:} ${TIME%:*} * * 1-5" --deliver "slack:$CHANNEL" >/dev/null 2>&1
     hermes -p "$PROFILE" cron resume "$JOB" >/dev/null 2>&1
+    # Hermes checks the model key before a scheduled run loads the profile's .env, so a gateway that starts without it
+    # blocks every run ("No usable credentials found for provider 'copilot'"). Give it this one key; the line is read,
+    # never sourced, so nothing in the file can run.
+    COPILOT_TOKEN="$(env_get COPILOT_GITHUB_TOKEN)"
+    [ -n "$COPILOT_TOKEN" ] && export COPILOT_GITHUB_TOKEN="$COPILOT_TOKEN"
+    unset COPILOT_TOKEN
     hermes gateway run
   fi
   sleep 10
