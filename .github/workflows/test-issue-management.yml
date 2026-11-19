@@ -5,20 +5,20 @@ on:
     paths:
       - .github/actions/issue-management/**
       - .github/workflows/issue-management.yml
-      - .github/workflows/issue-management-validate.yml
       - .github/workflows/test-issue-management.yml
       - scripts/adopt-ci.sh
       - scripts/test-adopt-ci-pins.sh
+      - scripts/test-adopt-ci-issue-labels.sh
       - adopt-ci-templates/**
   push:
     branches: [main]
     paths:
       - .github/actions/issue-management/**
       - .github/workflows/issue-management.yml
-      - .github/workflows/issue-management-validate.yml
       - .github/workflows/test-issue-management.yml
       - scripts/adopt-ci.sh
       - scripts/test-adopt-ci-pins.sh
+      - scripts/test-adopt-ci-issue-labels.sh
       - adopt-ci-templates/**
 
 permissions:
@@ -38,5 +38,9 @@ jobs:
         run: python3 -m unittest discover -s .github/actions/issue-management/tests -v
       - name: Pin pattern of adopt-ci.sh
         run: scripts/test-adopt-ci-pins.sh
+      - name: Labels appended by the issue adoption
+        run: scripts/test-adopt-ci-issue-labels.sh
       - name: Validate shell syntax
         run: bash -n scripts/adopt-ci.sh
+      - name: Lint the shell scripts
+        run: shellcheck -S warning scripts/adopt-ci.sh scripts/test-adopt-ci-pins.sh scripts/test-adopt-ci-issue-labels.sh

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Opens a pull request in each named repository that adds the shared CI actions (PR labelling, readiness and stale
-# handling; or, with --issues, issue management), in preview mode. Run it once, from a laptop, with your own `gh` login; nothing is stored anywhere.
+# handling; or, with --issues, issue management), in preview mode. Run it once, from a laptop, with your own `gh`
+# login; nothing is stored anywhere.
 #
 #   scripts/adopt-ci.sh --reviewers @your-org/maintainers your-org/repo-a your-org/repo-b
 #   scripts/adopt-ci.sh --reviewers @your-org/maintainers --dry-run your-org/repo-a
@@ -384,6 +385,44 @@ team_from_codeowners() { # owner/repo
   return 1
 }
 
+append_issue_labels() { # runs in the clone once the config is in place; appends only the catalog entries it lacks
+  # Same catalog and Sync labels workflow as the PR automation: an existing labels.yml keeps everything it has.
+  local cfg=.github/issue-management.json label labels_created=false appended=false
+  [[ -e .github/labels.yml ]] || { : > .github/labels.yml; labels_created=true; }
+  # Only a label the config leaves at its default needs a catalog entry; any other name is the repo's own label.
+  for label in needs-info stale-issue possibly-resolved; do
+    case "$label" in
+      needs-info) jq -e '(.needs_info_labels // ["needs-info"]) | index("needs-info")' "$cfg" > /dev/null || continue ;;
+      stale-issue) jq -e '(.stale_label // "stale-issue") == "stale-issue"' "$cfg" > /dev/null || continue ;;
+      possibly-resolved) jq -e '.resolved_label == "possibly-resolved"' "$cfg" > /dev/null || continue ;;
+    esac
+    grep -qE "^[\"']?${label}[\"']?:" .github/labels.yml && continue
+    [[ ! -s .github/labels.yml || -z "$(tail -c1 .github/labels.yml)" ]] || echo >> .github/labels.yml
+    awk -v key="${label}:" '$0 == key { on = 1; print; next } on && /^[ \t]/ { print; next } { on = 0 }' "$templates/issue-labels.yml" >> .github/labels.yml
+    echo "  append '${label}' to .github/labels.yml"
+    appended=true
+  done
+  [[ "$appended" != "true" ]] || added+=(.github/labels.yml)
+  # With a label catalog present the repo needs the Sync labels caller; add_file keeps an existing one.
+  if [[ -s .github/labels.yml ]]; then
+    add_file "$templates/workflows/sync-labels.yaml" .github/workflows/sync-labels.yaml
+  elif [[ "$labels_created" == "true" ]]; then
+    rm -f .github/labels.yml # only the empty file this run made, never one the repository had
+  fi
+}
+
+adopt_issue_files() { # runs in the clone; adds what issue management needs and records it in `added`
+  local overlap name
+  overlap=$(grep -lE 'actions/stale|probot/stale|stale-issue|close-stale|stale-bot' .github/workflows/* 2> /dev/null || true)
+  if [[ -n "$overlap" ]]; then
+    echo "  warning: existing workflows overlap with this automation; retire one before switching it on:" >&2
+    printf '%s\n' "$overlap" | sed 's/^/    /' >&2
+  fi
+  for name in "${workflows[@]}"; do add_file "$templates/workflows/$name.yaml" ".github/workflows/$name.yaml"; done
+  add_file "${issue_config:-$templates/issue-management.json}" .github/issue-management.json
+  append_issue_labels
+}
+
 adopt() {
   local repo="$1" default_branch writable work
   echo "== $repo"
@@ -435,39 +474,7 @@ adopt() {
     fi
     added=()
     if [[ "$issues" == "true" ]]; then
-      overlap=$(grep -lE 'actions/stale|probot/stale|stale-issue|close-stale|stale-bot' .github/workflows/* 2> /dev/null || true)
-      if [[ -n "$overlap" ]]; then
-        echo "  warning: existing workflows overlap with this automation; retire one before switching it on:" >&2
-        printf '%s\n' "$overlap" | sed 's/^/    /' >&2
-      fi
-      for name in "${workflows[@]}"; do add_file "$templates/workflows/$name.yaml" ".github/workflows/$name.yaml"; done
-      add_file "${issue_config:-$templates/issue-management.json}" .github/issue-management.json
-      # Same catalog and Sync labels workflow as the PR automation: an existing labels.yml keeps everything it has and
-      # only the issue labels it lacks are appended.
-      labels_created=false
-      [[ -e .github/labels.yml ]] || { : > .github/labels.yml; labels_created=true; }
-      labels_appended=false
-      # Only a label the config leaves at its default needs a catalog entry; any other name is the repo's own label.
-      cfg=.github/issue-management.json
-      for label in needs-info stale-issue possibly-resolved; do
-        case "$label" in
-          needs-info) jq -e '(.needs_info_labels // ["needs-info"]) | index("needs-info")' "$cfg" > /dev/null || continue ;;
-          stale-issue) jq -e '(.stale_label // "stale-issue") == "stale-issue"' "$cfg" > /dev/null || continue ;;
-          possibly-resolved) jq -e '.resolved_label == "possibly-resolved"' "$cfg" > /dev/null || continue ;;
-        esac
-        grep -qE "^[\"']?${label}[\"']?:" .github/labels.yml && continue
-        [[ ! -s .github/labels.yml || -z "$(tail -c1 .github/labels.yml)" ]] || echo >> .github/labels.yml
-        awk -v key="${label}:" '$0 == key { on = 1; print; next } on && /^[ \t]/ { print; next } { on = 0 }' "$templates/issue-labels.yml" >> .github/labels.yml
-        echo "  append '${label}' to .github/labels.yml"
-        labels_appended=true
-      done
-      [[ "$labels_appended" != "true" ]] || added+=(.github/labels.yml)
-      # With a label catalog present the repo needs the Sync labels caller; add_file keeps an existing one.
-      if [[ -s .github/labels.yml ]]; then
-        add_file "$templates/workflows/sync-labels.yaml" .github/workflows/sync-labels.yaml
-      elif [[ "$labels_created" == "true" ]]; then
-        rm -f .github/labels.yml  # only the empty file this run made, never one the repository had
-      fi
+      adopt_issue_files
       [[ ${#added[@]} -gt 0 ]] || { echo "  already adopted, nothing to add"; exit 0; }
       [[ "$dry_run" == "false" ]] || { echo "  dry run: nothing pushed"; exit 0; }
       git add -- "${added[@]}"

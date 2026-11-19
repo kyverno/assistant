@@ -53,7 +53,7 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
       - name: Label, warn and close issues
-        uses: kyverno/assistant/.github/actions/issue-management@e78566f55f77369ce1e96f99e7a8a46106621bab
+        uses: kyverno/assistant/.github/actions/issue-management@d807387ea77c06df0979f7fc87f0c271c45c90c7
         with:
           dry-run: ${{ env.DRY_RUN }}
           max-actions: ${{ inputs.max-actions }}
