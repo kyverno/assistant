@@ -183,8 +183,7 @@ for P in "${WANT_PROVIDERS[@]+"${WANT_PROVIDERS[@]}"}"; do
     pass "$P key already in the secrets file"
   else
     KEY=""
-    { read -r -s -p "  $P API key: " KEY </dev/tty; } 2>/dev/null
-    echo
+    read_token KEY "$P API key"
     [ -z "$KEY" ] && { fail "no $P key entered (this step needs a terminal to ask for it)"; exit 1; }
     secrets_set "$VAR" "$KEY" || { fail "could not write the secrets file"; exit 1; }
     unset KEY

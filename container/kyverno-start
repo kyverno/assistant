@@ -22,7 +22,7 @@ valid_login() { [[ "$1" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,38})$ ]]; }
 pass() { printf '  \033[32m✓\033[0m %s\n' "$1"; }
 fail() { printf '  \033[31m✗\033[0m %s\n' "$1" >&2; }
 info() { printf '  %s\n' "$1"; }
-step() { printf '\n\033[1m%s\033[0m\n' "$1"; }
+step() { printf '\n\033[1;36m▌ %s\033[0m\n' "$1"; }
 
 REPO="${ASSISTANT_REPO:-}"
 LOGIN=""

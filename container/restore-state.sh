@@ -35,7 +35,7 @@ fi
 if [ -f "$TMP/.env" ]; then
   OLD_ENV="$TMP/.env" NEW_ENV="$P/.env" python3 - <<'PY'
 import os
-KEYS = ("COPILOT_GITHUB_TOKEN", "ASSISTANT_REPO", "MAINTAINER_GITHUB_LOGIN", "CONTRIBUTOR_GITHUB_LOGIN")
+KEYS = ("COPILOT_GITHUB_TOKEN", "SLACK_HOME_CHANNEL", "SLACK_DIGEST_TIME", "SLACK_DIGEST_TZ", "ASSISTANT_REPO", "MAINTAINER_GITHUB_LOGIN", "CONTRIBUTOR_GITHUB_LOGIN")
 old = {}
 for line in open(os.environ["OLD_ENV"]):
     line = line.strip()

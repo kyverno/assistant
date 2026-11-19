@@ -68,21 +68,9 @@ Three independent layers. Take one, or all of them:
 The layers share data: the CI actions label things in a fixed way, and the assistants read those labels instead of
 recomputing them. A repository that runs the actions gives the maintainer assistant its signals for free.
 
-```
- your machine
- ┌─────────────────────────────────────────────────────────────────────────────┐
- │  you ──► the launcher ──► OpenShell gateway   (holds your GitHub token and  │
- │          (from the image)  any model API key, outside the sandbox; an       │
- │                            allowlist proxy decides what it may reach)       │
- │                                     │                                       │
- │            ┌────────────────────────▼───────────────────────────────┐       │
- │            │ SANDBOX: Hermes + a profile (maintainer or contributor)│       │
- │            │ skills · plugins · memory · a terminal for coding      │       │
- │            └────────────────────────────────────────────────────────┘       │
- └──────────────────────────────────────┬──────────────────────────────────────┘
-                                        ▼
-                  GitHub (read APIs, the GitHub MCP server) · GitHub Copilot or your model
-```
+![Where each piece runs: the OpenShell gateway on your laptop, the sandbox and supervisor containers in Docker, and the listed services outside](public/highlevel_arch.png)
+
+*Where each piece runs. The gateway is a background service on your laptop; the sandbox and its supervisor are two Docker containers.*
 
 ## Key features
 
@@ -112,7 +100,7 @@ recomputing them. A repository that runs the actions gives the maintainer assist
 - 🏢 **Built to be adopted:** one organisation pack for your file rules and merge gate, and an organisation policy for which
   repositories and token types are allowed
 - 🔄 **Upgrades that keep your state:** memory, history, sign-in, model and cloned repositories
-- 📡 **Slack digests and scheduled jobs** in the [host install](docs/host-install.md)
+- 📡 **A weekday review digest in Slack**, from the sandbox (`assistant --slack`). Slack chat and the other scheduled jobs are in the [host install](docs/host-install.md)
 
 ## The two assistants
 
@@ -200,6 +188,7 @@ Then `assistant`, `assistant --profile contributor`, `assistant --upgrade` and s
 | 3. GitHub | Asks which assistant (**maintainer** or **contributor**), then the repository as `owner/repo` (it offers a default only if a policy gives one). If your organisation publishes a policy, it offers to use it. Then asks how to authorize GitHub, checks the token against the repository, and stores it **in OpenShell, not in the sandbox** | Type the repository, then sign in |
 | 3a. Your repository (maintainer, first run) | Looks at the repository: is there an organisation pack, and is the PR automation adopted? Offers to set up what is missing (each opens a pull request; it asks first), says how to edit each one and where the reference is, and can wait for you to merge them, then run Sync labels and switch the automation on. `assistant setup owner/repo` does the same later. Skipped with no terminal, no `gh` login or `ASSISTANT_SKIP_SETUP=1` | Tick what you want, or none |
 | 4. Sandbox | Creates the sandbox and applies the network policy | Wait a minute or two |
+| 3c. Slack digest (maintainer, optional) | Asks "Post a daily review digest to Slack?". If yes: a bot token (it prints a prefilled link to create the Slack app), your member or channel ID, and a time. The token is stored **in OpenShell**. `assistant --slack` does this later; `--no-slack` removes it | Answer, then paste one token |
 | 5. Copilot | Reads your GitHub username from the token, then starts the GitHub Copilot sign-in: it shows a **code and a page** | Open <https://github.com/login/device>, enter the code, approve it, then pick a model |
 
 The chat opens after about 30 seconds. Only the first run asks questions: after that, `assistant` takes you straight back
@@ -605,8 +594,8 @@ The full list of policies, what happens when the agent is tricked, and the limit
 | Organisation policy on repositories and token types | ✅ | ✅ | |
 | Merging | stays yours (no merge tool) | stays yours (no merge tool) | stays yours |
 
-Everything each assistant can do, in detail: [`docs/capabilities.md`](docs/capabilities.md). Slack and scheduled digests work in
-the [host install](docs/host-install.md) only, not in the sandbox.
+Everything each assistant can do, in detail: [`docs/capabilities.md`](docs/capabilities.md). The review digest works in the sandbox
+(`--slack`); Slack chat and the other scheduled jobs work in the [host install](docs/host-install.md) only.
 
 ## What is verified, and the limits
 
@@ -616,7 +605,7 @@ the dashboard; GitHub Copilot sign-in and a model reply; state kept across `--up
 also run against several repositories that are not Kyverno's, with only a pack.
 
 **Not verified yet:** a full conversation on a non-Kyverno repository; a real reply from Anthropic, OpenAI or NVIDIA keys (the
-request reaches them with the key swapped in); Slack and cron inside the sandbox; the contributor assistant on a project
+request reaches them with the key swapped in); a real Slack post and a full model-driven digest (the schedule, the gateway and the delivery path were checked with a placeholder token); the contributor assistant on a project
 other than Kyverno.
 
 **Limits to know about:**
