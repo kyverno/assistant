@@ -1,0 +1,5 @@
+{
+  "needs_info_labels": ["needs-info"],
+  "exempt_labels": ["no-stale", "hold", "security"],
+  "queue_labels": []
+}
