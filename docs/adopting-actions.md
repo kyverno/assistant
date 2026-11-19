@@ -143,10 +143,12 @@ cd your-repo
 gh aw add kyverno/assistant/issue-queue-triage      # adds .github/workflows/issue-queue-triage.md and its .lock.yml
 ```
 
-The queue names and their definitions in it are Kyverno's. Edit the `allowed` list, the `skip-if-no-match` query, the
-queue and exempt lists at the top of the `facts` step, the list of ownership files and the definitions in the prompt to
-match your repository, and create the labels first: a label that does not exist is rejected.
-Then run `gh aw compile` and commit both files. `gh aw update` later pulls upstream changes and keeps your edits.
+The copied `issue-queue-triage.md` is your repository's own configuration; the behaviour lives in a shared component,
+`workflows/shared/issue-queue-triage.md`, that it imports (pin the import to a full commit SHA of the assistant
+repository and move the pin on purpose). Edit the `with:` block in your copy: your five queue labels, the labels that
+exempt an issue, the files the agent reads to learn who owns what, how many issues one run sorts, and any rule specific
+to your repository. Create the labels first: a label that does not exist is rejected. Then run `gh aw compile` and
+commit both files. `gh aw update` later pulls upstream changes and keeps your edits.
 
 It ships in **preview**: `staged: true` in its `safe-outputs` makes a run report the labels it would add and write
 nothing to any issue. Read a few runs, then delete that line, run `gh aw compile` and commit to let it label. Unlike the
