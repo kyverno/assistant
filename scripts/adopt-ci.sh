@@ -73,7 +73,7 @@ done
 [[ ${#repos[@]} -gt 0 ]] || { usage >&2; die "name at least one owner/repo"; }
 [[ -z "$issue_config" || "$issues" == "true" ]] || die "--issue-config needs --issues"
 if [[ -n "$issue_config" ]]; then
-  [[ -f "$issue_config" ]] && jq -e 'type == "object"' "$issue_config" > /dev/null 2>&1 || die "--issue-config must be a JSON object file"
+  { [[ -f "$issue_config" ]] && jq -e 'type == "object"' "$issue_config" > /dev/null 2>&1; } || die "--issue-config must be a JSON object file"
   issue_config="$(cd "$(dirname "$issue_config")" && pwd)/$(basename "$issue_config")"
 fi
 [[ "$issues" == "false" || "$update_pin" == "false" ]] || die "--issues and --update-pin cannot be combined: --update-pin moves the pins of both"
