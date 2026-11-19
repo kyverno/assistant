@@ -127,11 +127,14 @@ name it, and any other name is treated as a label you already have). The rules a
 `workflows/issue-queue-triage.md` is a [GitHub Agentic Workflow](https://github.github.com/gh-aw/): once a day it sorts
 open issues that are in no review queue into one queue each, by adding a label and one short comment that says why. It
 never closes, edits or removes anything, and a person still reviews every queue. A labelled issue is in a queue, so the
-next run does not look at it again: the labels are the record of what was sorted, and each run takes the oldest issues
-still in no queue. Before choosing it reads the whole issue with its comments,
-looks for merged pull requests that mention it and for the latest releases, and reads the repository's ownership
-documents (CODEOWNERS, ARCHITECTURE.md and similar) once per run, so a fix that shipped or a different owner can
-show. Its reason for each issue names that evidence. It is not a shared `uses:` workflow like the others: gh-aw
+next run does not look at it again: the labels are the record of what was sorted.
+
+A step that runs before the agent, with plain `gh` calls, chooses the issues and gathers the facts: the newest 20 open
+issues in no queue and with no exempt label (so a run never starts on the old backlog), the merged pull requests that
+mention each one and the first release that contains each merge, and other issues, open or closed, with a similar
+title. The agent reads those leads, the whole issue with its comments, and the repository's ownership files (CODEOWNERS,
+OWNERS.md, the repository-boundaries doc, ARCHITECTURE.md), then picks the queue. Its reason names the pull request,
+release, issue or file it relied on. It is not a shared `uses:` workflow like the others: gh-aw
 copies it into your repository and compiles a lock file there, so each repository commits both files.
 
 ```bash
@@ -140,8 +143,9 @@ cd your-repo
 gh aw add kyverno/assistant/issue-queue-triage      # adds .github/workflows/issue-queue-triage.md and its .lock.yml
 ```
 
-The queue names and their definitions in it are Kyverno's. Edit the `allowed` list, the `skip-if-no-match` query and the
-definitions in the prompt to match your queues, and create the labels first: a label that does not exist is rejected.
+The queue names and their definitions in it are Kyverno's. Edit the `allowed` list, the `skip-if-no-match` query, the
+queue and exempt lists at the top of the `facts` step, the list of ownership files and the definitions in the prompt to
+match your repository, and create the labels first: a label that does not exist is rejected.
 Then run `gh aw compile` and commit both files. `gh aw update` later pulls upstream changes and keeps your edits.
 
 It ships in **preview**: `staged: true` in its `safe-outputs` makes a run report the labels it would add and write

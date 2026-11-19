@@ -31,6 +31,11 @@ It agreed with Jim on 6 of 10. The misses were verify-closure judged as needs-re
 shipped) and scope-review judged as decision (it read a feature request as a decision). The seeds lacked the
 discussion Jim had, so the real rate is unknown.
 
+The triage now picks the newest 20 queue-less issues in a step before the agent and hands it, per issue, the merged
+pull requests that mention it with the first release containing each, and similar open and closed issues. Its scope
+rule points at the ownership files (CODEOWNERS, OWNERS.md, the repository-boundaries doc). Not yet measured on a
+labelled set.
+
 The triage also posts one short comment per labelled issue with the reason, so the reason is on the issue and not only
 in the run log (`add-comment`, same cap as the labels, staged with them).
 
