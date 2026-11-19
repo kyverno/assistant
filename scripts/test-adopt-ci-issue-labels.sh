@@ -10,9 +10,13 @@ templates="$here/../adopt-ci-templates"
 source_repo=kyverno/assistant
 # shellcheck disable=SC2034
 ref=$(printf 'a%.0s' {1..40})
-for fn in add_file append_issue_labels; do
+for fn in add_file append_issue_labels issue_body overlap_section; do
   eval "$(sed -n "/^${fn}()/,/^}/p" "$here/adopt-ci.sh")"
 done
+# shellcheck disable=SC2034
+repo=acme/widgets
+# shellcheck disable=SC2034
+overlap=""
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 fail=0
@@ -40,6 +44,10 @@ check "fresh: possibly-resolved not added" "$(lacks '^possibly-resolved:' .githu
 check "fresh: sync-labels workflow added" "$(has 'uses: kyverno/assistant/' .github/workflows/sync-labels.yaml)"
 check "fresh: color kept with its label" "$(has '^  color: d876e3' .github/labels.yml)"
 
+body=$(issue_body)
+check "fresh: the text tells the adopter to run Sync labels first" "$(grep -qF '1. Run **Sync labels**' <<< "$body" && echo 0 || echo 1)"
+check "fresh: the next step is numbered 2" "$(grep -qF '2. Run **Issue management**' <<< "$body" && echo 0 || echo 1)"
+
 # 2. the config names possibly-resolved: it is added too
 run_case resolved '{"resolved_label": "possibly-resolved"}' -
 check "resolved: possibly-resolved added" "$(has '^possibly-resolved:' .github/labels.yml)"
@@ -61,6 +69,10 @@ run_case custom '{"needs_info_labels": ["cannot reproduce"], "stale_label": "sta
 check "custom: no labels.yml left behind" "$([[ ! -e .github/labels.yml ]] && echo 0 || echo 1)"
 check "custom: no sync-labels workflow" "$([[ ! -e .github/workflows/sync-labels.yaml ]] && echo 0 || echo 1)"
 check "custom: nothing recorded as added" "$([[ ${#added[@]} == 0 ]] && echo 0 || echo 1)"
+body=$(issue_body)
+check "custom: the text does not mention a Sync labels workflow that is not there" "$(grep -qF 'Run **Sync labels**' <<< "$body" && echo 1 || echo 0)"
+check "custom: the text says the labels must already exist" "$(grep -qF 'make sure they exist' <<< "$body" && echo 0 || echo 1)"
+check "custom: the steps start at 1" "$(grep -qF '1. Run **Issue management**' <<< "$body" && echo 0 || echo 1)"
 
 # 6. every name is the repository's own and it already has a catalog: that file is left exactly as it was
 run_case customexisting '{"needs_info_labels": ["cannot reproduce"], "stale_label": "stale-x"}' 'bug:\n  color: d73a4a\n'

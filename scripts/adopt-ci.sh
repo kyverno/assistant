@@ -195,7 +195,7 @@ EOF
 
 issue_body() {
   # Runs in the clone, so these describe the config that is actually being adopted.
-  local resolved clears resolved_text comment_text
+  local resolved clears resolved_text comment_text labels_step labels_note n=1
   resolved=$(jq -r '.resolved_label // empty' .github/issue-management.json)
   clears=$(jq -r 'if .resolved_clears_on_comment == false then "no" else "yes" end' .github/issue-management.json)
   if [[ -z "$resolved" ]]; then
@@ -211,6 +211,18 @@ issue_body() {
     else
       comment_text="any human comment removes \`stale-issue\`; \`${resolved}\` stays, because a person clears it."
     fi
+  fi
+  # The Sync labels caller is there when a label catalog was added or the repository already had the workflow; a config
+  # that names only the repository's own labels adds neither, and then the labels must already exist.
+  labels_step="" labels_note=""
+  if [[ -e .github/workflows/sync-labels.yaml ]]; then
+    labels_step="1. Run **Sync labels** from the Actions tab with dry run off, so the labels the config uses exist (\`needs-info\` and \`stale-issue\` by default).
+   Only labels the config leaves at their defaults were added to \`.github/labels.yml\`.
+   The action never creates a label; its report lists any configured label that is missing.
+"
+    n=2
+  else
+    labels_note=" (the labels in the config are the repository's own, so no label catalog or Sync labels workflow was added: make sure they exist, because the action never creates a label and its report lists any that are missing)"
   fi
   cat << EOF
 ## What this does
@@ -233,16 +245,13 @@ Issues with an exempt label or a milestone are never labelled or closed, and ${c
 The scheduled run is a **preview**: it writes what it would do to the job summary and changes nothing. A repository
 admin turns it on afterwards.
 
-**Before the switch**
+**Before the switch**${labels_note}
 
-1. Run **Sync labels** from the Actions tab with dry run off, so the labels the config uses exist (\`needs-info\` and \`stale-issue\` by default).
-   Only labels the config leaves at their defaults were added to \`.github/labels.yml\`.
-   The action never creates a label; its report lists any configured label that is missing.
-2. Run **Issue management** from the Actions tab with dry run on, and read the job summary.
-3. Edit \`.github/issue-management.json\` for the repository: the labels that mean "waiting on the reporter"
+${labels_step}${n}. Run **Issue management** from the Actions tab with dry run on, and read the job summary.
+$((n + 1)). Edit \`.github/issue-management.json\` for the repository: the labels that mean "waiting on the reporter"
    (\`needs_info_labels\`), the labels that exempt an issue (\`exempt_labels\`), and, if you sort issues into review
    queues with labels, \`queue_labels\`.
-4. If the organisation restricts which actions may run (Settings, Actions, General), allow \`${source_repo}@*\`.
+$((n + 2)). If the organisation restricts which actions may run (Settings, Actions, General), allow \`${source_repo}@*\`.
 
 **The switch**: set the repository variable \`ISSUE_AUTOMATION_LIVE\` to \`true\` (Settings, Secrets and variables,
 Actions, Variables), or run \`gh variable set ISSUE_AUTOMATION_LIVE --body true --repo ${repo}\`. Creating a variable
