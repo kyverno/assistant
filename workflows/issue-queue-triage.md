@@ -42,3 +42,7 @@ imports:
       # Anything specific to your repository that changes how issues are sorted.
       extra_rules: "None."
 ---
+
+# Issue queue triage
+
+The instructions for this workflow come from the imported shared component. Follow them.
