@@ -43,7 +43,7 @@ activity, because a search can give that without reading each issue.
    the bot's own comments are the state. Only a Bot's comment counts as a marker, so a user cannot plant one. A step
    already marked for the same state is not repeated.
 4. **One guard makes every write.** In a dry run it prints and does nothing; otherwise it waits a second before each
-   write, to stay under GitHub's secondary rate limit. Reads retry; writes never do, so a comment cannot double. A
+   write, to stay under GitHub's secondary rate limit. Reads retry (a 404 or a rejected login is not retried); writes never do, so a comment cannot double. If a label is added and its comment then fails, the label is taken off again, so the issue is not left marked without an explanation. A
    GraphQL answer with `errors` or no `data` is rejected.
 5. **One failing issue does not stop the rest.** Failures are counted, logged as `::error::`, and make the run exit 1
    at the end.

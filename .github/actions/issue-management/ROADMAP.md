@@ -4,7 +4,7 @@ Status and plans for the issue management. Update it as these land.
 
 ## Not in the setup launcher yet
 
-`assistant setup` (added to main in #65) offers the PR automation and runs the adoption for it. Issue management is
+`assistant setup` offers the PR automation and runs the adoption for it. Issue management is
 **not** offered there. It is only adopted by running `scripts/adopt-ci.sh --issues` by hand.
 
 Why: the PR automation went in after it had been tested on real repos. The issue sweep has only had offline tests and

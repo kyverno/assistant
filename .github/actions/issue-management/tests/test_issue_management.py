@@ -456,6 +456,37 @@ class GhGuard(unittest.TestCase):
             gh.write("issue", "comment", "1")
         self.assertEqual(len(calls), 1)
 
+    def test_a_permanent_read_failure_is_not_retried(self):
+        calls, sleeps = [], []
+        gh = run.Gh(True, runner=lambda a: calls.append(a) or (1, "", "gh: Not Found (HTTP 404)"), sleep=sleeps.append)
+        with self.assertRaises(run.GhError):
+            gh.read("api", "x")
+        self.assertEqual((len(calls), sleeps), (1, []))
+
+    def test_a_label_whose_comment_failed_is_taken_off_again(self):
+        calls = []
+
+        def runner(args):
+            calls.append(args)
+            return (1, "", "boom") if args[:2] == ["issue", "comment"] else (0, "", "")
+
+        gh = run.Gh(False, runner=runner, sleep=lambda s: None)
+        with self.assertRaises(run.GhError), contextlib.redirect_stderr(io.StringIO()):
+            run.apply(gh, "o/r", issue(["needs-info"]), ("label", "stale-issue", "text"), CFG)
+        self.assertEqual([c[2:] for c in calls if c[0] == "issue"][-1][3:], ["--remove-label", "stale-issue"])
+
+    def test_a_label_that_was_already_there_is_not_taken_off(self):
+        calls = []
+
+        def runner(args):
+            calls.append(args)
+            return (1, "", "boom") if args[:2] == ["issue", "comment"] else (0, "", "")
+
+        gh = run.Gh(False, runner=runner, sleep=lambda s: None)
+        with self.assertRaises(run.GhError):
+            run.apply(gh, "o/r", issue(["needs-info", "stale-issue"]), ("label", "stale-issue", "text"), CFG)
+        self.assertNotIn("--remove-label", [part for c in calls for part in c])
+
     def test_graphql_errors_are_rejected(self):
         gh = run.Gh(True, runner=lambda a: (0, json.dumps({"errors": [{"message": "x"}], "data": {}}), ""), sleep=lambda s: None)
         with self.assertRaises(run.GhError):
@@ -465,6 +496,22 @@ class GhGuard(unittest.TestCase):
         gh = run.Gh(True, runner=lambda a: (0, json.dumps({"data": None}), ""), sleep=lambda s: None)
         with self.assertRaises(run.GhError):
             gh.graphql("query { x }")
+
+
+class People(unittest.TestCase):
+    def test_a_deleted_account_counts_as_a_person(self):
+        self.assertFalse(run.is_bot(None))
+        self.assertTrue(run.is_bot({"login": "github-actions[bot]", "__typename": "Bot"}))
+        self.assertFalse(run.is_bot({"login": "maint", "__typename": "User"}))
+
+    def test_two_deleted_accounts_are_not_the_same_reporter(self):
+        i = issue(["needs-info"], comments=[(5, "maint")], author=None)
+        i["comments"][0]["login"] = None
+        self.assertIsNone(run.last_human_comment(i, by_author=True))
+        self.assertIsNotNone(run.last_human_comment(i))
+
+    def test_a_title_is_safe_in_a_table(self):
+        self.assertEqual(run.short("a|b `c` <x> [y]"), "ab c x y")
 
 
 class Paging(unittest.TestCase):

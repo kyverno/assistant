@@ -1,5 +1,5 @@
 name: Shared issue management
-description: Label issues a merged PR may have resolved, warn and close issues waiting on their reporter, and flag idle untriaged issues
+description: Label issues a merged PR may have resolved, and warn and close issues waiting on their reporter
 inputs:
   config:
     description: Trusted repository configuration JSON; every key is optional

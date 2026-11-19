@@ -86,6 +86,8 @@ MARKER_RE = re.compile(r"<!-- issue-management: (.+?) -->")
 # Search stops at 1000 results; a connection is paged at most this many times.
 SEARCH_CAP = 1000
 MAX_PAGES = 100
+# A read that fails like this will fail again, so it is not retried.
+PERMANENT = re.compile(r"HTTP (401|403|404|410|422)|Not Found|Bad credentials|Could not resolve", re.IGNORECASE)
 
 ISSUE_QUERY = """
 query($owner: String!, $name: String!, $number: Int!) {
@@ -194,7 +196,7 @@ class Gh:
             code, out, err = self.runner(list(args))
             if code == 0:
                 return out
-            if attempt == self.retries:
+            if attempt == self.retries or PERMANENT.search(err):
                 raise GhError(f"gh {' '.join(args[:3])} failed: {err.strip()}")
             self.sleep(self.retry_wait)
 
@@ -265,7 +267,9 @@ def parse_time(value):
 
 
 def is_bot(author):
-    return author is None or author["__typename"] == "Bot" or author["login"].endswith("[bot]")
+    """A deleted account has no author at all; it was a person, and counting its comments as human activity is the
+    cautious reading, since activity only ever stops a warning or a close."""
+    return author is not None and (author["__typename"] == "Bot" or author["login"].endswith("[bot]"))
 
 
 def search_nodes(gh, query, fragment):
@@ -394,7 +398,9 @@ def last_human_comment(issue, after=None, by_author=False):
     times = [
         c["at"]
         for c in issue["comments"]
-        if not c["bot"] and (not by_author or c["login"] == issue["author"]) and (after is None or c["at"] > after)
+        if not c["bot"]
+        and (not by_author or (c["login"] is not None and c["login"] == issue["author"]))
+        and (after is None or c["at"] > after)
     ]
     return max(times, default=None)
 
@@ -615,7 +621,17 @@ def apply(gh, repo, issue, action, cfg):
     kind, number = action[0], str(issue["number"])
     if kind == "label":
         gh.write("issue", "edit", number, "-R", repo, "--add-label", action[1])
-        gh.write("issue", "comment", number, "-R", repo, "--body", action[2])
+        try:
+            gh.write("issue", "comment", number, "-R", repo, "--body", action[2])
+        except GhError:
+            # The label without its comment would never be explained, because the rule sees the label and stops.
+            # Take it off again (only if this run put it there) so the next run starts clean.
+            if action[1] not in issue["labels"]:
+                try:
+                    gh.write("issue", "edit", number, "-R", repo, "--remove-label", action[1])
+                except GhError as err:
+                    log(f"::warning::#{number}: could not take `{action[1]}` off again: {err}")
+            raise
     elif kind == "unlabel":
         gh.write("issue", "edit", number, "-R", repo, "--remove-label", action[1])
     elif kind == "close":
@@ -633,7 +649,8 @@ def describe(action):
 
 
 def short(title):
-    return title[:70].replace("|", "/")
+    """A title safe to put in a Markdown table: no pipes, code spans or markup."""
+    return re.sub(r"[|`<>\[\]]", "", title[:70]).strip()
 
 
 def main():
