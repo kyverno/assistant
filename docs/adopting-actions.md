@@ -122,45 +122,6 @@ default; set `"resolved_label"` in the config to turn it on (`possibly-resolved`
 name it, and any other name is treated as a label you already have). The rules and keys are in
 [`.github/actions/issue-management/README.md`](../.github/actions/issue-management/README.md).
 
-### Issue queue triage (agentic)
-
-`workflows/issue-queue-triage.md` is a [GitHub Agentic Workflow](https://github.github.com/gh-aw/): once a day it sorts
-open issues that are in no review queue into one queue each, by adding a label and one short comment that says why. It
-never closes, edits or removes anything, and a person still reviews every queue. A labelled issue is in a queue, so the
-next run does not look at it again: the labels are the record of what was sorted.
-
-A step that runs before the agent, with plain `gh` calls, chooses the issues and gathers the facts: the newest 20 open
-issues in no queue and with no exempt label (so a run never starts on the old backlog), the merged pull requests that
-mention each one and the first release that contains each merge, and other issues, open or closed, with a similar
-title. The agent reads those leads, the whole issue with its comments, and the repository's ownership files (CODEOWNERS,
-OWNERS.md, the repository-boundaries doc, ARCHITECTURE.md), then picks the queue. Its reason names the pull request,
-release, issue or file it relied on. It is not a shared `uses:` workflow like the others: gh-aw
-copies it into your repository and compiles a lock file there, so each repository commits both files.
-
-```bash
-gh extension install github/gh-aw
-cd your-repo
-gh aw add kyverno/assistant/issue-queue-triage      # adds .github/workflows/issue-queue-triage.md and its .lock.yml
-```
-
-The copied `issue-queue-triage.md` is your repository's own configuration; the behaviour lives in a shared component,
-`workflows/shared/issue-queue-triage.md`, that it imports (pin the import to a full commit SHA of the assistant
-repository and move the pin on purpose). Edit the `with:` block in your copy: your five queue labels, the labels that
-exempt an issue, the files the agent reads to learn who owns what, how many issues one run sorts, and any rule specific
-to your repository. Create the labels first: a label that does not exist is rejected. Then run `gh aw compile` and
-commit both files. `gh aw update` later pulls upstream changes and keeps your edits.
-
-It ships in **preview**: `staged: true` in its `safe-outputs` makes a run report the labels it would add and write
-nothing to any issue. Read a few runs, then delete that line, run `gh aw compile` and commit to let it label. Unlike the
-sweep this switch is a committed edit, not the `ISSUE_AUTOMATION_LIVE` variable, because gh-aw fixes it at compile time.
-
-It runs on a daily schedule (scattered to a fixed time) and only when the `skip-if-no-match` search finds an issue in
-no queue. gh-aw also adds a manual trigger. The agent job holds `contents: read`, `issues: read` and
-`copilot-requests: write`, which lets it use the built-in token for Copilot, billed to the organization, so no secret
-is stored. The labels are applied by a separate job. If the organization's billing does not allow that, remove
-`copilot-requests: write` and set a `COPILOT_GITHUB_TOKEN` secret instead. Read the compiled lock file before relying on
-it, as with any generated workflow.
-
 ## Why a script, and what else was considered
 
 | Approach | Used by | Why not the main route |
