@@ -78,6 +78,13 @@ step "hooks: approve our own hooks up front"
 # approve them here. These are the profile's own scripts, inside the sandbox.
 hq config set hooks_auto_accept true
 
+step "scheduled jobs: no pre-run check (maintainer)"
+# Before a scheduled run, Hermes checks that the model key is set and that the delivery platform (Slack) is "connected"
+# in the gateway's own environment. It does that before the run loads the profile's .env, and the Slack token is a
+# placeholder here (the proxy swaps in the real one), so the check blocks the digest although the run itself works.
+# The check only avoids a wasted model call; it guards nothing. The image's config is kept across --upgrade.
+[ "$KIND" = maintainer ] && hq config set cron.preflight false
+
 step "memory plugin: never go online for its embedding model (it is already in the profile's cache)"
 # Without this, HuggingFace can still be asked whether the cached model is current, and in the sandbox that
 # request is refused and retried. Hermes loads the profile's .env into every process (the image's own ENV
@@ -98,6 +105,7 @@ require "hook commands point at $SRC/hooks" grep -qE "command: \".*$SRC/hooks/" 
 forbid "the Slack tool is still in the config" grep -q 'mcp-slack' "$CFG"
 require "hooks_auto_accept is on" grep -qE '^hooks_auto_accept: *true' "$CFG"
 require "the terminal backend is local" grep -qE '^ +backend: *local' "$CFG"
+[ "$KIND" = maintainer ] && require "the cron pre-run check is off" grep -qE '^ +preflight: *false' "$CFG"
 require "terminal is enabled" grep -qE '^    - terminal$' "$CFG"
 require "file is enabled" grep -qE '^    - file$' "$CFG"
 [ "$bad" = 0 ] || exit 1
