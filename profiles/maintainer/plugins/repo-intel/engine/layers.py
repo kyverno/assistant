@@ -97,7 +97,7 @@ def queue_view(head: dict, lines: list[dict], tail: dict) -> dict:
 
     def drop_brief(v: dict) -> bool:
         for k in ("pack", "now"):
-            if k in v:
+            if isinstance(v.get(k), dict):  # a brief already replaced by the note has nothing left to cut
                 v[k] = "left out to fit; call queue again for it"
                 return True
         return False

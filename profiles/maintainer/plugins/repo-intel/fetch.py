@@ -315,7 +315,8 @@ def _compute_ci_state(contexts: list[dict], gate_contexts: frozenset = frozenset
     status context (already surfaced separately via gate_blocked) in with the PR's own checks,
     so a gated PR shows FAILURE here even when every real check is green. Exclude the pack's
     gate contexts and derive the real state from what's left."""
-    relevant = [c for c in contexts if c.get("context") not in gate_contexts]
+    # A gate can report as a StatusContext (context) or a CheckRun (name); match both, as _failing_checks does.
+    relevant = [c for c in contexts if (c.get("name") or c.get("context")) not in gate_contexts]
     if not relevant:
         return "UNKNOWN"
     has_failure = False

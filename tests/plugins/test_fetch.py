@@ -134,6 +134,14 @@ class Gate(Base):
         self.assertEqual(prs[1]["ci_state"], "SUCCESS")
         self.assertEqual(prs[2]["gate_checks"], {"release-gate": "MISSING"})
 
+    def test_a_gate_reported_as_a_check_run_is_left_out_of_ci_state(self):
+        contexts = [{"__typename": "CheckRun", "name": "Release Gate", "status": "COMPLETED", "conclusion": "FAILURE"},
+                    {"__typename": "CheckRun", "name": "unit", "status": "COMPLETED", "conclusion": "SUCCESS"}]
+        self.github([pr_node(1, contexts=contexts)])
+        pr = fetch.fetch_pr_candidates(REPO, "label:ready")["prs"][0]
+        self.assertEqual(pr["gate_checks"], {"release-gate": "FAILURE"})
+        self.assertEqual(pr["ci_state"], "SUCCESS")
+
     def test_no_gate_in_the_pack_means_no_gate_fields(self):
         self.rules = NO_PACK
         gh = self.github([pr_node(1)])

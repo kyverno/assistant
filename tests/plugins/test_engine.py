@@ -243,6 +243,13 @@ class Budgets(unittest.TestCase):
         self.assertLessEqual(layers.size(view), layers.QUEUE_BUDGET)
         self.assertTrue(view["not_shown"])
 
+    def test_queue_view_stops_when_the_briefs_are_already_cut(self):
+        # Three items (the floor) and two briefs still over budget once replaced: fit must move on, not loop.
+        lines = [{"n": n, "why": "w" * 5000} for n in range(1, 4)]
+        view = layers.queue_view({"kind": "pr", "pack": {"x": "p" * 9000}, "now": {"x": "y" * 9000}}, lines, {})
+        self.assertLessEqual(layers.size(view), layers.QUEUE_BUDGET)
+        self.assertEqual(view["pack"], "left out to fit; call queue again for it")
+
     def test_card_fits(self):
         rec = pr(1, body="b" * 5000, labels=[f"l{i}" for i in range(30)],
                  closing_issues=[issue(i, [f"x{j}" for j in range(10)], title="t" * 100, body_excerpt="e" * 600,
