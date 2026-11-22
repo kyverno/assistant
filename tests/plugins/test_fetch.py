@@ -206,6 +206,19 @@ class SequenceByNumber(Base):
         self.assertIn("closing issues", out["incomplete"][1])
 
 
+    def test_a_sequence_with_a_huge_gate_stays_under_the_cap(self):
+        issues = [{"number": n, "title": "t" * 200, "url": "u" * 100, "body": "<!-- broken:main -->"} for n in range(1, 400)]
+        self.github([pr_node(1), pr_node(2, body="Requires #1")], failure_issues=issues)
+        with mock.patch.object(fetch, "RESULT_CHAR_CAP", 20_000):
+            raw = sequence_tools.handle_sequence_prs({"pr_numbers": [1, 2], "repo": REPO})
+        out = json.loads(raw)
+        self.assertLessEqual(len(raw), 20_000)
+        self.assertEqual([[p["pr"] for p in t["prs"]] for t in out["tiers"]], [[1], [2]])
+        g = out["gate_status"]
+        self.assertEqual(len(g["open_failure_issues"]) + g["open_failure_issues_not_shown"], 399)
+        self.assertTrue(out["tiers"][0]["prs"][0]["gate_blocked"])
+
+
 class SizeCap(Base):
     def test_a_result_over_the_cap_drops_bodies_then_trailing_prs(self):
         self.github([pr_node(n, body="x" * 3000, files=[f"d{n}/f{i}.go" for i in range(30)]) for n in range(1, 41)])
@@ -218,7 +231,7 @@ class SizeCap(Base):
 
     def test_a_huge_gate_list_is_cut_and_the_cap_still_holds(self):
         issues = [{"number": n, "title": "t" * 200, "url": "u" * 100, "body": "<!-- broken:main -->"} for n in range(1, 400)]
-        self.github([pr_node(n) for n in range(1, 6)], failure_issues=issues)
+        gh = self.github([pr_node(n) for n in range(1, 6)], failure_issues=issues)
         with mock.patch.object(fetch, "RESULT_CHAR_CAP", 20_000):
             out = fetch.fetch_pr_candidates(REPO, "label:ready")
         self.assertLessEqual(len(json.dumps(out)), 20_000)
@@ -226,12 +239,21 @@ class SizeCap(Base):
         self.assertEqual(len(out["gate"]["open_failure_issues"]) + out["gate"]["open_failure_issues_not_shown"], 399)
         self.assertEqual(out["gate"]["blocking_branches"], ["main"])
         self.assertTrue(out["prs"][0]["gate_blocked"])
+        self.assertIsInstance(out["pack"], str)
+        del gh.failure_issues[1:]
+        self.assertIsInstance(fetch.fetch_pr_candidates(REPO, "label:ready")["pack"], dict)  # the brief comes now
+
+    def test_omitted_counts_add_up_over_repeated_cuts(self):
+        holder = {"xs": list(range(50))}
+        fetch.cut_list(holder, "xs", 10)
+        fetch.cut_list(holder, "xs", 5)
+        self.assertEqual((len(holder["xs"]), holder["xs_not_shown"]), (5, 45))
 
     def test_the_cap_holds_even_when_the_rest_alone_is_too_big(self):
         out = fetch.fit({"prs": [{"number": 1}], "errors": [f"PR #{n}: " + "x" * 500 for n in range(200)]},
                         "prs", lambda p: p)
         self.assertLessEqual(len(json.dumps(out)), fetch.RESULT_CHAR_CAP)
-        self.assertIn("more errors", out["errors"][-1])
+        self.assertEqual(len(out["errors"]) + out["errors_not_shown"], 200)
 
     def test_a_digest_lists_directories_for_a_large_pr(self):
         self.github([pr_node(1, files=[f"pkg/a/f{i}.go" for i in range(12)] + ["pkg/b/x.go"])])

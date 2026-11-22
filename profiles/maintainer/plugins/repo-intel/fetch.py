@@ -484,18 +484,24 @@ def _pr_digest(pr: dict[str, Any]) -> dict[str, Any]:
 _SIDE_LIST_MAX = 10
 
 
+def cut_list(holder: Optional[dict[str, Any]], key: str, keep: int) -> bool:
+    """Keep the first `keep` entries of holder[key] and add the number removed to holder[key + "_not_shown"], so the
+    count stays right however many times a list is cut. Returns whether it cut anything."""
+    items = (holder or {}).get(key)
+    if not isinstance(items, list) or len(items) <= keep:
+        return False
+    holder[key] = items[:keep]
+    holder[f"{key}_not_shown"] = holder.get(f"{key}_not_shown", 0) + len(items) - keep
+    return True
+
+
 def _shrink_sides(result: dict[str, Any], keep: int) -> bool:
     """Cut the gate's failure-issue list and the errors to `keep` entries each, and replace the pack brief with a
     pointer. The gate's blocking_branches stay whole, so gate_blocked is still right. Returns whether it cut anything."""
-    cut = False
-    gate = result.get("gate")
-    if gate and len(gate.get("open_failure_issues") or []) > keep:
-        issues = gate["open_failure_issues"]
-        result["gate"] = {**gate, "open_failure_issues": issues[:keep], "open_failure_issues_not_shown": len(issues) - keep}
-        cut = True
-    if len(result.get("errors") or []) > keep:
-        result["errors"] = result["errors"][:keep] + [f"{len(result['errors']) - keep} more errors"]
-        cut = True
+    if result.get("gate"):
+        result["gate"] = dict(result["gate"])  # the repository state is shared; never cut it in place
+    cut = cut_list(result.get("gate"), "open_failure_issues", keep)
+    cut = cut_list(result, "errors", keep) or cut
     if isinstance(result.get("pack"), dict):
         result["pack"] = "left out to fit; the next call shows it"
         cut = True
@@ -785,9 +791,12 @@ def fetch_pr_candidates(
         "errors": errors,
     }
     if repo.lower() not in _PACK_SHOWN:
-        _PACK_SHOWN.add(repo.lower())
         result["pack"] = _pack_brief(rules)
-    return fit(result, "prs", _pr_digest)
+    result = fit(result, "prs", _pr_digest)
+    # Marked shown only once the brief itself went out, not the "left out to fit" pointer.
+    if isinstance(result.get("pack"), dict):
+        _PACK_SHOWN.add(repo.lower())
+    return result
 
 
 def fetch_pr_details(

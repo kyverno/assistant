@@ -86,8 +86,26 @@ def handle_sequence_prs(args: Dict[str, Any], **_kw) -> str:
         repo=repo,
     )
     if gate:
-        result["gate_status"]["open_failure_issues"] = gate["open_failure_issues"]
-    return json.dumps({"success": True, "pack": rules.source or "none (no file classes or gate)",
-                       **({"not_sequenced": unread} if unread else {}),
-                       **({"incomplete": incomplete} if incomplete else {}),
-                       **({"errors": errors} if errors else {}), **result})
+        result["gate_status"]["open_failure_issues"] = list(gate["open_failure_issues"])
+    out = {"success": True, "pack": rules.source or "none (no file classes or gate)",
+           **({"not_sequenced": unread} if unread else {}),
+           **({"incomplete": incomplete} if incomplete else {}),
+           **({"errors": errors} if errors else {}), **result}
+    return json.dumps(_cap(out))
+
+
+def _cap(out: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep the result under fetch.RESULT_CHAR_CAP. The tiers are never cut (they are the answer); the lists around
+    them are cut together, each with a *_not_shown count, halving until the result fits."""
+    keep = 20
+    while len(json.dumps(out)) > fetch.RESULT_CHAR_CAP and keep > 0:
+        keep //= 2
+        fetch.cut_list(out.get("gate_status"), "open_failure_issues", keep)
+        for key in ("package_overlaps", "file_overlaps", "errors", "incomplete", "unresolved"):
+            fetch.cut_list(out, key, keep)
+    if len(json.dumps(out)) > fetch.RESULT_CHAR_CAP:
+        # Only the tiers are left: drop each PR's per-PR detail, keeping its number, tier and gate_blocked.
+        for tier in out.get("tiers") or []:
+            tier["prs"] = [{k: p[k] for k in ("pr", "gate_blocked") if k in p} for p in tier["prs"]]
+        out["trimmed"] = "per-PR detail dropped to fit; ask about fewer PRs for it"
+    return out
