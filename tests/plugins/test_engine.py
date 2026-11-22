@@ -300,6 +300,10 @@ class Focus(unittest.TestCase):
         self.assertEqual(self.parse("area:area/cli")[:2], ('label:"area/cli"', []))
         self.assertEqual(self.parse('milestone:"1.0" area:core')[:2], ('milestone:"1.0"', [("area", "core")]))
 
+    def test_all_is_not_narrowed_to_the_ready_set(self):
+        self.assertEqual(self.parse("all area:core")[:2], ("", [("area", "core")]))
+        self.assertEqual(self.parse("all mine")[:2], ("", [("mine", "")]))
+
     def test_mine_and_release(self):
         self.assertEqual(self.parse("mine")[1], [("mine", "")])
         self.assertEqual(self.parse("mine", "issue")[0], "is:open assignee:me")

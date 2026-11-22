@@ -92,7 +92,8 @@ def parse_focus(focus: str, kind: str, rules, login: Optional[str]) -> tuple[str
             # Anything else is passed to GitHub search as it is.
             search.append(t)
             said.append(t)
-    if needs_ready and kind == "pr":
+    # An explicit `all` keeps every open PR, whatever else (area, mine, release) would narrow it to the ready set.
+    if needs_ready and kind == "pr" and not any(t.lower() == "all" for t in terms):
         if rules.ready_labels:
             search.append("label:" + ",".join(f'"{l}"' for l in rules.ready_labels))
             said.insert(0, "ready for review (" + ", ".join(rules.ready_labels) + ")")
