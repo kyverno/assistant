@@ -28,7 +28,8 @@ SEQUENCE_PRS_SCHEMA = _schema(
     "dependency; order them yourself and cite why. Also returns file_overlaps, package_overlaps (same directory, "
     "a review-together signal) and, when the organisation pack has a gate, gate_status (read from the repository's "
     "open failure issues by this tool) and gate_blocked per PR. State gate_blocked plainly; a bypass suggestion is "
-    "your own read of the failure issue, never mechanical.",
+    "your own read of the failure issue, never mechanical. A requested PR that could not be read is listed in "
+    "not_sequenced, and incomplete names PRs whose closing issues or competing PRs were cut off: say so.",
     {
         "pr_numbers": {"type": "array", "items": {"type": "integer"}, "description": "The candidate PRs."},
         "repo": {"type": "string", "description": "'owner/repo'. Omit to use the profile's repository."},
@@ -53,10 +54,20 @@ def handle_sequence_prs(args: Dict[str, Any], **_kw) -> str:
         numbers = [int(n) for n in numbers]
         prs, missing = fetch.cached_prs(repo, numbers)
         errors: list[str] = []
+        why: dict[int, str] = {}
         if missing:
             got = fetch.fetch_pr_details(repo, missing)
             errors = got["errors"]
+            why = {p["number"]: p["error"] for p in got["prs"] if "error" in p}
             prs += fetch.cached_prs(repo, missing)[0]
+        have = {p["number"] for p in prs}
+        # A requested PR that could not be read is named, never silently left out of the sequence.
+        unread = [{"pr": n, "why": why.get(n, "could not be fetched; see errors")} for n in numbers if n not in have]
+        incomplete = [f"#{p['number']}: " + ("more than 20 closing issues, some not read"
+                                             if p.get("closing_issues_truncated") else
+                                             "an issue it closes has more claiming PRs than were read")
+                      for p in prs if p.get("closing_issues_truncated")
+                      or any(i.get("other_prs_truncated") for i in p.get("closing_issues") or [])]
         owner, name = repo.split("/", 1)
         state = fetch.repo_state(owner, name, rules)
     except fetch.FetchError as exc:
@@ -77,4 +88,6 @@ def handle_sequence_prs(args: Dict[str, Any], **_kw) -> str:
     if gate:
         result["gate_status"]["open_failure_issues"] = gate["open_failure_issues"]
     return json.dumps({"success": True, "pack": rules.source or "none (no file classes or gate)",
+                       **({"not_sequenced": unread} if unread else {}),
+                       **({"incomplete": incomplete} if incomplete else {}),
                        **({"errors": errors} if errors else {}), **result})

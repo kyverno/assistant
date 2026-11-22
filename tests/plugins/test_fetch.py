@@ -18,7 +18,7 @@ NO_PACK = pack.Rules()
 REPO = "acme/widget"
 
 
-def pr_node(number, base="main", body="", files=(), contexts=(), closing=()):
+def pr_node(number, base="main", body="", files=(), contexts=(), closing=(), more_closing=False):
     return {
         "number": number, "title": f"PR {number}", "url": f"https://github.com/{REPO}/pull/{number}", "body": body,
         "author": {"login": "someone"}, "authorAssociation": "CONTRIBUTOR", "createdAt": "2026-11-01T00:00:00Z",
@@ -30,13 +30,14 @@ def pr_node(number, base="main", body="", files=(), contexts=(), closing=()):
         "reviews": {"nodes": []}, "mergeStateStatus": "CLEAN", "bumpCommits": {"nodes": []},
         "commits": {"nodes": [{"commit": {"statusCheckRollup": {"contexts": {
             "pageInfo": {"hasNextPage": False}, "nodes": list(contexts)}}}}]},
-        "closingIssuesReferences": {"nodes": list(closing)},
+        "closingIssuesReferences": {"pageInfo": {"hasNextPage": more_closing}, "nodes": list(closing)},
     }
 
 
-def issue_ref(number, *others):
+def issue_ref(number, *others, more=False):
     return {"number": number, "state": "OPEN", "milestone": None, "labels": {"nodes": []},
-            "closedByPullRequestsReferences": {"nodes": [{"number": n, "title": f"PR {n}", "state": s} for n, s in others]}}
+            "closedByPullRequestsReferences": {"pageInfo": {"hasNextPage": more},
+                                               "nodes": [{"number": n, "title": f"PR {n}", "state": s} for n, s in others]}}
 
 
 class FakeGitHub:
@@ -54,7 +55,11 @@ class FakeGitHub:
         if "defaultBranchRef" in query:
             repo = {"defaultBranchRef": {"name": "main"}}
             if "issues(" in query:
-                repo["issues"] = {"totalCount": len(self.failure_issues), "nodes": self.failure_issues}
+                start = int(variables.get("after") or 0)
+                page = self.failure_issues[start:start + 100]
+                more = start + 100 < len(self.failure_issues)
+                repo["issues"] = {"pageInfo": {"hasNextPage": more, "endCursor": str(start + 100) if more else None},
+                                  "nodes": page}
             return {"repository": repo}
         raise AssertionError(f"unexpected query: {query[:80]}")
 
@@ -87,6 +92,24 @@ class Gate(Base):
         self.assertFalse(out["gate"]["blocks_all_branches"])
         blocked = {p["number"]: p["gate_blocked"] for p in out["prs"]}
         self.assertEqual(blocked, {1: True, 2: False})
+
+    def test_every_page_of_failure_issues_is_read(self):
+        issues = [{"number": n, "title": "t", "url": "u", "body": "<!-- broken:release-1.0 -->"} for n in range(1, 151)]
+        issues.append({"number": 999, "title": "t", "url": "u", "body": "<!-- broken:main -->"})
+        self.github([pr_node(1)], failure_issues=issues)
+        out = fetch.fetch_pr_candidates(REPO, "label:ready")
+        self.assertEqual(out["gate"]["blocking_branches"], ["main", "release-1.0"])
+        self.assertFalse(out["gate"]["open_failure_issues_truncated"])
+        self.assertTrue(out["prs"][0]["gate_blocked"])
+
+    def test_more_failure_issues_than_it_reads_blocks_every_branch(self):
+        issues = [{"number": n, "title": "t", "url": "u", "body": "<!-- broken:release-1.0 -->"}
+                  for n in range(1, fetch._GATE_PAGES_MAX * 100 + 2)]
+        self.github([pr_node(1)], failure_issues=issues)
+        out = fetch.fetch_pr_candidates(REPO, "label:ready")
+        self.assertTrue(out["gate"]["open_failure_issues_truncated"])
+        self.assertTrue(out["gate"]["blocks_all_branches"])
+        self.assertTrue(out["prs"][0]["gate_blocked"])
 
     def test_a_failure_issue_without_a_branch_blocks_every_branch(self):
         self.github([pr_node(1, base="release-1.0")],
@@ -158,6 +181,22 @@ class SequenceByNumber(Base):
         out = self.run_tool([1])
         self.assertTrue(out["tiers"][0]["prs"][0]["gate_blocked"])
         self.assertEqual(out["gate_status"]["open_failure_issues"][0]["number"], 90)
+
+
+    def test_a_pr_that_cannot_be_read_is_named_not_dropped(self):
+        self.github([pr_node(1)])
+        out = self.run_tool([1, 404])
+        self.assertTrue(out["success"])
+        self.assertEqual([p["pr"] for t in out["tiers"] for p in t["prs"]], [1])
+        self.assertEqual(out["not_sequenced"][0]["pr"], 404)
+        self.assertIn("not found", out["not_sequenced"][0]["why"])
+
+    def test_cut_off_closing_issues_and_competitors_are_reported(self):
+        self.github([pr_node(1, closing=[issue_ref(5, (9, "OPEN"), more=True)]), pr_node(2, more_closing=True)])
+        out = self.run_tool([1, 2])
+        self.assertEqual(len(out["incomplete"]), 2)
+        self.assertTrue(out["incomplete"][0].startswith("#1:"))
+        self.assertIn("closing issues", out["incomplete"][1])
 
 
 class SizeCap(Base):

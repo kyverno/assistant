@@ -196,9 +196,12 @@ query($owner: String!, $name: String!, $number: Int!) {
         }
       } } }
       closingIssuesReferences(first: 20) {
+        pageInfo { hasNextPage }
         nodes {
           number state milestone { title state } labels(first: 20) { nodes { name } }
-          closedByPullRequestsReferences(first: 10, includeClosedPrs: true) { nodes { number title state } }
+          closedByPullRequestsReferences(first: 25, includeClosedPrs: true) {
+            pageInfo { hasNextPage } nodes { number title state }
+          }
         }
       }
     }
@@ -437,9 +440,12 @@ def _fetch_one(owner: str, name: str, number: int, rules: Rules) -> dict[str, An
                     for o in (n.get("closedByPullRequestsReferences") or {}).get("nodes", [])
                     if o["number"] != pr["number"]
                 ],
+                **({"other_prs_truncated": True}
+                   if ((n.get("closedByPullRequestsReferences") or {}).get("pageInfo") or {}).get("hasNextPage") else {}),
             }
             for n in pr["closingIssuesReferences"]["nodes"]
         ],
+        "closing_issues_truncated": bool((pr["closingIssuesReferences"].get("pageInfo") or {}).get("hasNextPage")),
     }
 
 
@@ -452,6 +458,7 @@ _PR_DIGEST_FIELDS = (
     "size", "milestone", "milestone_due_on", "labels", "labels_truncated", "changed_files",
     "files_truncated", "unresolved_review_threads", "review_threads_truncated",
     "bot_approved", "ci_state", "ci_state_truncated", "gate_checks", "gate_blocked", "closing_issues",
+    "closing_issues_truncated",
     "external_references", "maintainer_can_modify", "staled_at", "last_commit_at",
     "comment_count", "author_comments_since_stale",
 )
@@ -495,13 +502,17 @@ query($owner: String!, $name: String!) {
 """
 
 _REPO_STATE_GATE_QUERY = """
-query($owner: String!, $name: String!, $label: String!) {
+query($owner: String!, $name: String!, $label: String!, $after: String) {
   repository(owner: $owner, name: $name) {
     defaultBranchRef { name }
-    issues(first: 20, states: OPEN, labels: [$label]) { totalCount nodes { number title url body } }
+    issues(first: 100, after: $after, states: OPEN, labels: [$label]) {
+      pageInfo { hasNextPage endCursor } nodes { number title url body }
+    }
   }
 }
 """
+# Pages of open failure issues read before giving up. Past that the gate fails closed: every branch counts as blocked.
+_GATE_PAGES_MAX = 5
 
 
 def repo_state(owner: str, name: str, rules: Rules) -> dict[str, Any]:
@@ -516,21 +527,29 @@ def repo_state(owner: str, name: str, rules: Rules) -> dict[str, Any]:
         data = _graphql(_REPO_STATE_QUERY, {"owner": owner, "name": name})["repository"]
         state: dict[str, Any] = {"default_branch": (data["defaultBranchRef"] or {}).get("name") or "main", "gate": None}
     else:
-        data = _graphql(_REPO_STATE_GATE_QUERY, {"owner": owner, "name": name, "label": g.failure_issue_label})["repository"]
-        issues = []
-        for i in data["issues"]["nodes"]:
-            m = g.branch_marker.search(i["body"] or "") if g.branch_marker else None
-            # No marker in the pack, or none in this issue: the issue blocks every branch.
-            issues.append({"number": i["number"], "title": i["title"], "url": i["url"],
-                           "branch": m.group("branch") if m else None})
+        issues, after, truncated = [], None, False
+        for page in range(_GATE_PAGES_MAX):
+            data = _graphql(_REPO_STATE_GATE_QUERY, {"owner": owner, "name": name, "label": g.failure_issue_label,
+                                                     "after": after})["repository"]
+            for i in data["issues"]["nodes"]:
+                m = g.branch_marker.search(i["body"] or "") if g.branch_marker else None
+                # No marker in the pack, or none in this issue: the issue blocks every branch.
+                issues.append({"number": i["number"], "title": i["title"], "url": i["url"],
+                               "branch": m.group("branch") if m else None})
+            info = data["issues"]["pageInfo"]
+            if not info["hasNextPage"]:
+                break
+            after = info["endCursor"]
+            truncated = page == _GATE_PAGES_MAX - 1
         state = {
             "default_branch": (data["defaultBranchRef"] or {}).get("name") or "main",
             "gate": {
                 "name": g.name, "failure_issue_label": g.failure_issue_label, "bypass_label": g.bypass_label,
                 "open_failure_issues": issues,
-                "open_failure_issues_truncated": data["issues"]["totalCount"] > len(issues),
+                "open_failure_issues_truncated": truncated,
                 "blocking_branches": sorted({i["branch"] for i in issues if i["branch"]}),
-                "blocks_all_branches": any(i["branch"] is None for i in issues),
+                # Issues left unread could block any branch, so a truncated list blocks them all.
+                "blocks_all_branches": truncated or any(i["branch"] is None for i in issues),
             },
         }
     _REPO_STATE[key] = (time.time(), state)
