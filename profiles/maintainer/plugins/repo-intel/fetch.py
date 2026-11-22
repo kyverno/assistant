@@ -236,7 +236,7 @@ query($owner: String!, $name: String!, $number: Int!) {
       headRefName
       headRefOid
       reviewDecision
-      reviewRequests(first: 10) { nodes { requestedReviewer { __typename ... on User { login } ... on Team { slug } } } }
+      reviewRequests(first: 100) { pageInfo { hasNextPage } nodes { requestedReviewer { __typename ... on User { login } ... on Team { slug } } } }
       additions
       deletions
       changedFiles
@@ -503,6 +503,7 @@ def _fetch_one(owner: str, name: str, number: int, rules: Rules) -> dict[str, An
             r["requestedReviewer"].get("login") or "team:" + (r["requestedReviewer"].get("slug") or "")
             for r in (pr.get("reviewRequests") or {}).get("nodes", []) if r.get("requestedReviewer")
         ],
+        "review_requests_truncated": ((pr.get("reviewRequests") or {}).get("pageInfo") or {}).get("hasNextPage", False),
         "files": [{"path": n["path"], "additions": n.get("additions") or 0, "deletions": n.get("deletions") or 0,
                    "change": n.get("changeType") or "MODIFIED"} for n in pr["files"]["nodes"]],
         "changed_files": [n["path"] for n in pr["files"]["nodes"]],

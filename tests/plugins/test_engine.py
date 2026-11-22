@@ -140,6 +140,15 @@ class Readiness(unittest.TestCase):
         self.assertEqual(self.r(labels=["workflow-approval-required"])["next"], "approve the workflow run")
         self.assertFalse(self.r(author="me")["actionable"])
 
+    def test_a_failing_infrastructure_check_is_not_the_authors(self):
+        rules = pack.parse({"readiness": {"infra_checks": ["Codecov"]}})
+        r = rank.pr_readiness(pr(1, ci_state="FAILURE", failing_checks=["Codecov"]), rules, "me")
+        self.assertEqual(r["next"], "review")
+        self.assertIn("infrastructure check failing (Codecov), not the author's to fix", r["blockers"])
+        r = rank.pr_readiness(pr(1, ci_state="FAILURE", failing_checks=["Codecov", "unit"]), rules, "me")
+        self.assertEqual(r["next"], "waiting on author")
+        self.assertIn("CI failing (unit)", r["blockers"])
+
     def test_the_gate_blocks_merging_not_reviewing(self):
         r = self.r(gate_blocked=True)
         self.assertEqual(r["next"], "review")
@@ -260,6 +269,12 @@ class Budgets(unittest.TestCase):
         self.assertLessEqual(layers.size(card), layers.CARD_BUDGET)
         big = {"number": 1, "body": "b" * 9000, "recent_comments": [{"author": "a", "body": "c" * 2000}] * 20}
         self.assertLessEqual(layers.size(layers.issue_card(big, None)), layers.CARD_BUDGET)
+
+    def test_code_view_fits_with_many_files_left_out(self):
+        files = [{"path": f"gen/{'d' * 150}/f{i}.pb.go", "additions": 1, "deletions": 0} for i in range(100)]
+        view = layers.code_view(pr(1, files=files), {}, RULES)
+        self.assertLessEqual(layers.size(view), layers.CODE_BUDGET)
+        self.assertEqual(len(view["not_shown"]) + view["not_shown_more"], 100)
 
     def test_code_view_fits_and_leaves_generated_out(self):
         files = [{"path": f"core/f{i}.go", "additions": 300, "deletions": 0} for i in range(6)]

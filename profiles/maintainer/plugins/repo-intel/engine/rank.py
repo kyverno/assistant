@@ -134,9 +134,15 @@ def pr_readiness(pr: dict, rules, login: Optional[str]) -> dict[str, Any]:
     """{next, who, blockers, actionable}. who is "you", "author", "ci" or "gate"; actionable means you can do the next
     step now. The gate blocks merging, never reviewing."""
     author_side: list[str] = []
+    infra: list[str] = []
     if pr.get("ci_state") == "FAILURE":
         failing = pr.get("failing_checks") or []
-        author_side.append("CI failing" + (f" ({', '.join(failing[:3])})" if failing else ""))
+        own = [c for c in failing if c not in rules.infra_checks]
+        # failing_checks holds at most 5 names; only a shorter list is known to be complete.
+        if failing and not own and len(failing) < 5:
+            infra.append(f"infrastructure check failing ({', '.join(failing[:3])}), not the author's to fix")
+        else:
+            author_side.append("CI failing" + (f" ({', '.join((own or failing)[:3])})" if failing else ""))
     if pr.get("merge_state") == "DIRTY":
         author_side.append("merge conflicts")
     if pr.get("review_decision") == "CHANGES_REQUESTED":
@@ -152,7 +158,7 @@ def pr_readiness(pr: dict, rules, login: Optional[str]) -> dict[str, Any]:
         elif label in rules.attention_labels and "conflict" not in low:
             (yours_to_do if "hold" in low else author_side).append(f"labelled {label}")
     gate = "merging blocked by the gate" if pr.get("gate_blocked") else None
-    blockers = author_side + yours_to_do + ([gate] if gate else [])
+    blockers = author_side + yours_to_do + infra + ([gate] if gate else [])
 
     if login and (pr.get("author") or "").lower() == login.lower():
         return {"next": "your own PR" + (": " + ", ".join(author_side) if author_side else ": waiting for review"),

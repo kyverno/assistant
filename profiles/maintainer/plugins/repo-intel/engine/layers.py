@@ -224,6 +224,20 @@ def _trim_patch(patch: str, max_lines: int) -> tuple[str, int]:
     return "\n".join(lines[:max_lines]), len(lines) - max_lines
 
 
+NOT_SHOWN_MAX = 20
+
+
+def cut_names(view: dict, keep: int) -> bool:
+    """Keep the first `keep` names in not_shown (at least 3) and count the rest in not_shown_more."""
+    names = view.get("not_shown") or []
+    keep = max(keep, 3)
+    if len(names) <= keep:
+        return False
+    view["not_shown"] = names[:keep]
+    view["not_shown_more"] = view.get("not_shown_more", 0) + len(names) - keep
+    return True
+
+
 def code_view(record: dict, patches: dict[str, Optional[str]], rules, docs: Optional[dict] = None) -> dict:
     """The patches that say most about the change: API surface, then critical, then the rest; tests and generated
     output last. At most LINES_PER_FILE per file and LINES_PER_PR in all; files left out are named."""
@@ -248,6 +262,7 @@ def code_view(record: dict, patches: dict[str, Optional[str]], rules, docs: Opti
     view: dict[str, Any] = {"n": record["number"], "head": record.get("head_oid"), "files": out}
     if left:
         view["not_shown"] = left
+        cut_names(view, NOT_SHOWN_MAX)
     if docs:
         view["docs"] = docs
 
@@ -273,4 +288,4 @@ def code_view(record: dict, patches: dict[str, Optional[str]], rules, docs: Opti
         f["lines_cut"] = f.get("lines_cut", 0) + len(lines) - len(lines) // 2
         return True
 
-    return fit(view, CODE_BUDGET, [shorter_docs, drop_file, shorter_patch])
+    return fit(view, CODE_BUDGET, [shorter_docs, drop_file, shorter_patch, lambda v: cut_names(v, len(v.get("not_shown") or []) // 2)])
