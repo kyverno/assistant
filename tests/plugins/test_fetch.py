@@ -111,6 +111,12 @@ class Gate(Base):
         self.assertTrue(out["gate"]["blocks_all_branches"])
         self.assertTrue(out["prs"][0]["gate_blocked"])
 
+    def test_the_gate_is_read_again_on_every_fetch(self):
+        gh = self.github([pr_node(1)])
+        self.assertFalse(fetch.fetch_pr_candidates(REPO, "label:ready")["prs"][0]["gate_blocked"])
+        gh.failure_issues.append({"number": 90, "title": "t", "url": "u", "body": "<!-- broken:main -->"})
+        self.assertTrue(fetch.fetch_pr_candidates(REPO, "label:ready")["prs"][0]["gate_blocked"])
+
     def test_a_failure_issue_without_a_branch_blocks_every_branch(self):
         self.github([pr_node(1, base="release-1.0")],
                     failure_issues=[{"number": 90, "title": "broken", "url": "u", "body": "no marker"}])
@@ -208,6 +214,23 @@ class SizeCap(Base):
         self.assertIn("trimmed", out)
         self.assertNotIn("body", out["prs"][0])
         self.assertEqual(len(out["prs"]) + len(out["not_shown"]), 40)
+
+    def test_a_huge_gate_list_is_cut_and_the_cap_still_holds(self):
+        issues = [{"number": n, "title": "t" * 200, "url": "u" * 100, "body": "<!-- broken:main -->"} for n in range(1, 400)]
+        self.github([pr_node(n) for n in range(1, 6)], failure_issues=issues)
+        with mock.patch.object(fetch, "RESULT_CHAR_CAP", 20_000):
+            out = fetch.fetch_pr_candidates(REPO, "label:ready")
+        self.assertLessEqual(len(json.dumps(out)), 20_000)
+        self.assertEqual(len(out["prs"]), 5)
+        self.assertEqual(len(out["gate"]["open_failure_issues"]) + out["gate"]["open_failure_issues_not_shown"], 399)
+        self.assertEqual(out["gate"]["blocking_branches"], ["main"])
+        self.assertTrue(out["prs"][0]["gate_blocked"])
+
+    def test_the_cap_holds_even_when_the_rest_alone_is_too_big(self):
+        out = fetch.fit({"prs": [{"number": 1}], "errors": [f"PR #{n}: " + "x" * 500 for n in range(200)]},
+                        "prs", lambda p: p)
+        self.assertLessEqual(len(json.dumps(out)), fetch.RESULT_CHAR_CAP)
+        self.assertIn("more errors", out["errors"][-1])
 
     def test_a_digest_lists_directories_for_a_large_pr(self):
         self.github([pr_node(1, files=[f"pkg/a/f{i}.go" for i in range(12)] + ["pkg/b/x.go"])])

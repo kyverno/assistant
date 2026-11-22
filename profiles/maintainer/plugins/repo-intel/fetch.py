@@ -480,18 +480,47 @@ def _pr_digest(pr: dict[str, Any]) -> dict[str, Any]:
     return digest
 
 
+# Lists outside the items (the gate's failure issues, errors) are cut to this many when they crowd the items out.
+_SIDE_LIST_MAX = 10
+
+
+def _shrink_sides(result: dict[str, Any], keep: int) -> bool:
+    """Cut the gate's failure-issue list and the errors to `keep` entries each, and replace the pack brief with a
+    pointer. The gate's blocking_branches stay whole, so gate_blocked is still right. Returns whether it cut anything."""
+    cut = False
+    gate = result.get("gate")
+    if gate and len(gate.get("open_failure_issues") or []) > keep:
+        issues = gate["open_failure_issues"]
+        result["gate"] = {**gate, "open_failure_issues": issues[:keep], "open_failure_issues_not_shown": len(issues) - keep}
+        cut = True
+    if len(result.get("errors") or []) > keep:
+        result["errors"] = result["errors"][:keep] + [f"{len(result['errors']) - keep} more errors"]
+        cut = True
+    if isinstance(result.get("pack"), dict):
+        result["pack"] = "left out to fit; the next call shows it"
+        cut = True
+    return cut
+
+
 def fit(result: dict[str, Any], key: str, digest) -> dict[str, Any]:
-    """Keep a result under RESULT_CHAR_CAP: first drop free text (the digest form), then trailing items, naming what
-    was left out so it can be fetched by number."""
+    """Keep a result under RESULT_CHAR_CAP: first drop free text (the digest form), then cut the lists outside the
+    items if they take more than a quarter of the cap, then drop trailing items, naming what was left out so it can be
+    fetched by number. If the rest alone is still over the cap, its lists are cut further."""
     if len(json.dumps(result)) <= RESULT_CHAR_CAP:
         return result
     items = [digest(i) for i in result[key]]
     result = {**result, key: items, "trimmed": "long text dropped to fit; fetch the full detail by number"}
+    if len(json.dumps({k: v for k, v in result.items() if k != key})) > RESULT_CHAR_CAP // 4:
+        _shrink_sides(result, _SIDE_LIST_MAX)
     left_out: list[int] = []
     while items and len(json.dumps(result)) > RESULT_CHAR_CAP:
         left_out.insert(0, items.pop().get("number"))
         result[key] = items
         result["not_shown"] = left_out
+    keep = _SIDE_LIST_MAX
+    while len(json.dumps(result)) > RESULT_CHAR_CAP and keep > 0:
+        keep //= 2
+        _shrink_sides(result, keep)
     return result
 
 
@@ -517,12 +546,14 @@ _GATE_PAGES_MAX = 5
 
 def repo_state(owner: str, name: str, rules: Rules) -> dict[str, Any]:
     """The default branch and, when the pack has a gate, its open failure issues and the branches they block. Read
-    from the repository's issue list, not search, so an open failure issue is never missed. Remembered briefly."""
+    from the repository's issue list, not search, so an open failure issue is never missed. Without a gate, remembered
+    briefly."""
     key = f"{owner}/{name}".lower()
-    hit = _REPO_STATE.get(key)
-    if hit and time.time() - hit[0] < _REPO_STATE_TTL:
-        return hit[1]
     g = rules.gate
+    hit = _REPO_STATE.get(key)
+    # Only the default branch is reused: a gate can open or close between two calls, so it is read every time.
+    if g is None and hit and time.time() - hit[0] < _REPO_STATE_TTL:
+        return hit[1]
     if g is None:
         data = _graphql(_REPO_STATE_QUERY, {"owner": owner, "name": name})["repository"]
         state: dict[str, Any] = {"default_branch": (data["defaultBranchRef"] or {}).get("name") or "main", "gate": None}

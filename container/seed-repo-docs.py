@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Write a Mnemosyne import file holding the repository's AGENTS.md and ARCHITECTURE.md files, one entry each with
-the id repo-doc:<path>, so the maintainer's skills can recall a package's own docs on a fresh sandbox.
+the id repo-doc:<owner/repo>:<path>, so the maintainer's skills can recall a package's own docs on a fresh sandbox.
 
     kyverno-seed-repo-docs owner/repo OUTPUT.json
 
@@ -43,7 +43,8 @@ def main():
         except (OSError, urllib.error.URLError, KeyError, ValueError):
             failed.append(path)
             continue
-        entries.append({"id": f"repo-doc:{path}", "content": f"--- {path} ---\n{text}", "source": "install-seed",
+        # The repository is in the id: memory is shared by the profile, which may later point at another repository.
+        entries.append({"id": f"repo-doc:{repo}:{path}", "content": f"--- {repo}:{path} ---\n{text}", "source": "install-seed",
                         "timestamp": "2026-01-01T00:00:00", "session_id": "install-seed", "importance": 0.9,
                         "scope": "global", "pinned": 1})
     if not entries:

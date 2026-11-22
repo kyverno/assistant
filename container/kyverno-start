@@ -136,7 +136,7 @@ print(json.load(urllib.request.urlopen(req, timeout=10)).get("login", ""))' 2>/d
 fi
 pass "repo $(env_get ASSISTANT_REPO), $KIND $(env_get "$LOGIN_VAR")"
 
-# Once per repository: cache its AGENTS.md and ARCHITECTURE.md files in memory as repo-doc:<path>, which the
+# Once per repository: cache its AGENTS.md and ARCHITECTURE.md files in memory as repo-doc:<owner/repo>:<path>, which the
 # maintainer's skills recall. The host installer does the same; a sandbox would otherwise start with none.
 DOCS_MARK="$PROFILE_DIR/.repo-docs-$(env_get ASSISTANT_REPO | tr '/' '_')"
 if [ "$KIND" = maintainer ] && [ ! -f "$DOCS_MARK" ]; then
