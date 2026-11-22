@@ -37,7 +37,9 @@ Call `repo_pack` once per session and keep the answer. It returns:
 
 - `branch_gates`: a branch-wide merge gate, if the repository has one: its status name, the label on its failure
   issues, whether an issue's body names the branch, and the label that bypasses it. While a gate is open, every PR on
-  the branch is blocked whatever it touches. No gates listed means there is no gate: never mention one.
+  the branch is blocked whatever it touches. `fetch_pr_candidates` and `sequence_prs` read the open failure issues
+  themselves and return the gate's state; never check it with another tool. No gates listed means there is no gate:
+  never mention one.
 - `file_classes`, `generated_inputs`, `dependency_bots`: which paths are generated, API surface, critical (elevated risk
   after merge) or test-only, which paths and modules feed generated files, and which dependency bumps need regenerated
   output. `sequence_prs` applies these; you explain them.
@@ -67,8 +69,8 @@ repository, and a stale answer from one is wrong for another.
    title format is `milestones.title_format` from the pack. The pack's `open_milestone_label`, if any, is a secondary
    label: do not treat it as equivalent to the PR having a milestone; check both independently.
 4. **Agent docs**: the files the pack's `agent_docs` globs name (`AGENTS.md` and `ARCHITECTURE.md` at the root and per
-   package, instructions files). `scripts/install.sh` caches the ones it finds into mnemosyne under `repo-doc:<path>`
-   (for example `repo-doc:pkg/engine/AGENTS.md`). `mnemosyne_recall` the one for the package in play before falling back
+   package, instructions files). `scripts/install.sh` caches the ones it finds into mnemosyne under `repo-doc:<owner/repo>:<path>`
+   (for example `repo-doc:kyverno/kyverno:pkg/engine/AGENTS.md`); recall only the ones for `${ASSISTANT_REPO}`. `mnemosyne_recall` the one for the package in play before falling back
    to `search_code(query="<terms> repo:${ASSISTANT_REPO}")`. The cache is a snapshot from install time: a doc added or
    changed later is not in it, so prefer the live file when a decision turns on its wording. If the repository has no
    such docs, say so: your knowledge of the code is then only what the code, owners and history show.
@@ -130,6 +132,6 @@ slower cadence).
 - With a pack that lists no gate, confirm no answer mentions a gate; with no pack, confirm the answer says which signals
   are missing.
 - Ask about `pkg/engine`'s conventions and confirm `mnemosyne_recall` for
-  `repo-doc:pkg/engine/AGENTS.md` runs before any `search_code` fallback.
+  `repo-doc:${ASSISTANT_REPO}:pkg/engine/AGENTS.md` runs before any `search_code` fallback.
 - Try to `triple_add` a predicate outside the five listed and confirm the hook blocks
   it.

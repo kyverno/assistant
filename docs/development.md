@@ -34,6 +34,7 @@ Run `make help` to see the available commands. The most useful targets are:
 | `make test` | Build the image and run its offline startup, plugin and memory checks |
 | `make scan` | Scan the local image for fixable critical vulnerabilities |
 | `make unit` | Run the plugin and hook tests (`tests/plugins`, `tests/hooks`); needs only Python and PyYAML |
+| `make context` | Show each profile's tool and skill sizes, and the GitHub tools no skill names. `LIVE=1` sizes the GitHub tools with one read-only call (needs `REPO_GITHUB_TOKEN` or `GITHUB_TOKEN`) |
 | `make image-check` | Build the image and run `tests/image/run.sh` against it |
 | `make check` | Run lint, the unit tests and the image checks |
 | `make run ARGS="--provider anthropic"` | Launch the sandbox using the locally built image |

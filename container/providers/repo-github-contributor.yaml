@@ -46,12 +46,9 @@ endpoints:
       - allow:
           tool:
             any: [
-              search_pull_requests, pull_request_read, issue_read, search_issues, list_issues, list_label,
-              get_label, get_file_contents, get_repository_tree, search_code, get_commit, list_commits,
-              list_branches, list_tags, list_releases, get_latest_release, list_pull_requests,
-              search_repositories, search_users, get_me, semantic_issue_similarity_search, actions_list,
-              actions_get, get_job_logs, list_discussion_categories, list_discussions, get_discussion,
-              get_discussion_comments, add_issue_comment, create_pull_request
+              pull_request_read, issue_read, get_file_contents, get_repository_tree, search_code, actions_list,
+              actions_get, get_job_logs, get_discussion, get_discussion_comments, add_issue_comment,
+              create_pull_request
               ]
     deny_rules:
       - { method: tools/call, tool: { any: ["*merge*", "*delete*", "*force_push*"] } }

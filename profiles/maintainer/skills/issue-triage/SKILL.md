@@ -23,7 +23,7 @@ labels/CODEOWNERS — assumed loaded, not re-derived here. Taking an action on a
 
 ## Prerequisites
 
-- `repo-context` loaded this session (live labels, and the `repo-doc:<path>`
+- `repo-context` loaded this session (live labels, and the `repo-doc:<owner/repo>:<path>`
   cache step 2's grounding reads from).
 - `fetch_issue_candidates` (plugin tool, `plugins/repo-intel/`) — one call fetches
   every candidate issue's full metadata, including `closing_prs` (every PR that
@@ -38,7 +38,7 @@ labels/CODEOWNERS — assumed loaded, not re-derived here. Taking an action on a
   PR lookup), `search_code` (grounding an issue in the real code — step 2, required,
   not a fallback), `list_discussions`, `get_discussion`.
 - `mcp-slack`: `conversations_history` — only if configured.
-- `mnemosyne_recall` — `repo-doc:<path>` package docs for step 2's grounding (same
+- `mnemosyne_recall` — `repo-doc:${ASSISTANT_REPO}:<path>` package docs for step 2's grounding (same
   cache `repo-context`/`pr-queue` already use), prior triage decisions, duplicate
   rulings, contributor patterns.
 - Env: `ASSISTANT_REPO`, `MAINTAINER_GITHUB_LOGIN`, `SLACK_HOME_CHANNEL`.
@@ -76,7 +76,7 @@ PR, no assignee). No fetch happens until something is picked.
    - Identify the likely subsystem/package from labels (`area/*`), file paths, symptoms,
      or error text in the body.
    - Ground it the same way a PR review brief already does: `mnemosyne_recall
-     (repo-doc:<path>)` for that package's cached `AGENTS.md`/`ARCHITECTURE.md`, or
+     (repo-doc:${ASSISTANT_REPO}:<path>)` for that package's cached `AGENTS.md`/`ARCHITECTURE.md`, or
      `search_code` for the specific symbol/error/file the issue names if nothing's
      cached. This is required, not optional — classification from the body's claim
      alone, unchecked against the real code, is a guess.

@@ -465,8 +465,8 @@ for path in doc_paths:
         failed.append(path)
         continue
     entries.append({
-        'id': f'repo-doc:{path}',
-        'content': f'--- {path} ---\n{content}',
+        'id': f'repo-doc:{repo}:{path}',
+        'content': f'--- {repo}:{path} ---\n{content}',
         'source': 'install-seed',
         'timestamp': '2026-01-01T00:00:00',
         'session_id': 'install-seed',
@@ -487,7 +487,7 @@ print(f'OK: {len(entries)} cached' + (f', {len(failed)} failed: {failed}' if fai
 
 if grep -q "^OK:" "$AGENTS_SEED_FILE.status"; then
   if hermes -p "$PROFILE" mnemosyne import -i "$AGENTS_SEED_FILE" --force >/dev/null 2>&1; then
-    pass "$(sed 's/^OK: //' "$AGENTS_SEED_FILE.status") (recall by 'repo-doc:<path>' any session)"
+    pass "$(sed 's/^OK: //' "$AGENTS_SEED_FILE.status") (recall by 'repo-doc:<owner/repo>:<path>' any session)"
   else
     info "docs fetched but mnemosyne import failed — run: hermes -p $PROFILE mnemosyne import -i $AGENTS_SEED_FILE --force"
   fi

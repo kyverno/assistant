@@ -23,9 +23,8 @@ fixed, bounded form. Everything in it comes from the tool calls below; a claim w
 3. Author-blocked PRs: `fetch_pr_candidates(search_query="label:needs-author-action", detail="digest", limit=20)`.
 4. Stale PRs: `fetch_pr_candidates(search_query="label:stale", include_stale_detail=true, limit=8)`. This one adds the
    assignees of the closing issue and `author_comments_since_stale`.
-5. `sequence_prs` on the ready PRs from step 2: tiers, `unresolved` (two PRs closing one issue), `file_overlaps`,
-   `package_overlaps`, `gate_blocked`. If the pack declares a gate, first `list_issues(state="open",
-   labels=["<gate failure label>"])` and pass the branches as `blocking_issue_branches`.
+5. `sequence_prs(pr_numbers=[the ready PRs from step 2])`: tiers, `unresolved` (two PRs closing one issue),
+   `file_overlaps`, `package_overlaps`, `gate_blocked`. It reads the gate itself.
 6. Issues: `fetch_issue_candidates(search_query="is:open label:<the pack's critical and high severity labels, comma
    joined>", detail="digest", limit=15)`. Use `closing_prs` to see which have no PR yet.
 7. Since last time: your previous digest is in context. Take the PR numbers it listed that are not in any set above and

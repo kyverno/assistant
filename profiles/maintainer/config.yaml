@@ -24,8 +24,10 @@
 # Do not add a tool to any layer below without re-running the verification
 # in docs/architecture.md.
 
+# The model a new install starts with. The launcher's first-run picker and /model change it; the banner shows it.
 model:
-  default: "anthropic/claude-sonnet-4-6"
+  provider: "copilot"
+  default: "claude-sonnet-5.5"
 
 mcp_servers:
   github:
@@ -37,7 +39,7 @@ mcp_servers:
     url: https://api.githubcopilot.com/mcp/
     headers:
       Authorization: "Bearer ${REPO_GITHUB_TOKEN}"
-      X-MCP-Tools: "search_pull_requests,pull_request_read,issue_read,search_issues,list_issues,list_label,get_label,get_file_contents,get_repository_tree,search_code,get_team_members,get_teams,list_releases,get_latest_release,list_code_scanning_alerts,get_code_scanning_alert,list_dependabot_alerts,get_dependabot_alert,list_secret_scanning_alerts,get_secret_scanning_alert,actions_list,actions_get,get_job_logs,issue_write,add_issue_comment,update_issue_comment,pull_request_review_write,add_comment_to_pending_review,add_reply_to_pull_request_comment,update_pull_request_branch,request_copilot_review,list_discussion_categories,list_discussions,get_discussion,get_discussion_comments,discussion_comment_write,get_commit,list_commits,list_branches,list_tags,get_tag,get_release_by_tag,search_commits,list_pull_requests,search_repositories,search_users,get_me,check_dependency_vulnerabilities,get_global_security_advisory,list_global_security_advisories,get_code_quality_finding,projects_get,projects_list,repository_ruleset_read,list_issue_types,list_issue_fields,custom_properties_read,list_repository_collaborators,semantic_issue_similarity_search,label_write,sub_issue_write,update_pull_request,projects_write,create_pull_request"
+      X-MCP-Tools: "search_pull_requests,pull_request_read,issue_read,search_issues,list_issues,list_label,get_file_contents,search_code,get_team_members,get_teams,list_releases,get_latest_release,list_code_scanning_alerts,get_code_scanning_alert,list_dependabot_alerts,get_dependabot_alert,list_secret_scanning_alerts,get_secret_scanning_alert,actions_list,actions_get,get_job_logs,issue_write,add_issue_comment,update_issue_comment,pull_request_review_write,add_comment_to_pending_review,add_reply_to_pull_request_comment,update_pull_request_branch,request_copilot_review,list_discussion_categories,list_discussions,get_discussion,get_discussion_comments,discussion_comment_write,create_pull_request"
     # Verified live: overlapping tools/call requests run concurrently.
     supports_parallel_tool_calls: true
     tools:
@@ -85,9 +87,7 @@ mcp_servers:
         - search_issues
         - list_issues
         - list_label
-        - get_label
         - get_file_contents
-        - get_repository_tree
         - search_code
         - get_team_members
         - get_teams
@@ -115,33 +115,6 @@ mcp_servers:
         - get_discussion
         - get_discussion_comments
         - discussion_comment_write
-        - get_commit
-        - list_commits
-        - list_branches
-        - list_tags
-        - get_tag
-        - get_release_by_tag
-        - search_commits
-        - list_pull_requests
-        - search_repositories
-        - search_users
-        - get_me
-        - check_dependency_vulnerabilities
-        - get_global_security_advisory
-        - list_global_security_advisories
-        - get_code_quality_finding
-        - projects_get
-        - projects_list
-        - repository_ruleset_read
-        - list_issue_types
-        - list_issue_fields
-        - custom_properties_read
-        - list_repository_collaborators
-        - semantic_issue_similarity_search
-        - label_write
-        - sub_issue_write
-        - update_pull_request
-        - projects_write
         - create_pull_request
 
   slack:
@@ -190,7 +163,7 @@ custom_toolsets:
     # repo-intel: a bundled plugin (plugins/repo-intel/), not an MCP server. Registers the fetch tools
     # (fetch_pr_candidates and friends: GitHub's GraphQL API called directly with this profile's own
     # REPO_GITHUB_TOKEN, replacing N sequential pull_request_read calls with one tool call) and
-    # sequence_prs, a pure function over already-fetched PR metadata. See docs/architecture.md.
+    # sequence_prs, a dependency graph over the PRs a fetch returned, taken by number. See docs/architecture.md.
     - repo-intel
     # maintainer-dashboard: a bundled plugin (plugins/maintainer-dashboard/). Registers update_dashboard,
     # which writes the maintainer's dashboard tab state; no GitHub/Slack access.
@@ -264,6 +237,11 @@ memory:
   # this gate does not cover mnemosyne_triple_add (see the hook above) —
   # verified live, not assumed from the plugin's own docs.
   write_approval: true
+  # The Mnemosyne tools the skills use; the other 36 stay out of the model's context. Only remember stages its
+  # write for approval and the triple hook checks triple_add, so tools that would write past the gate
+  # (forget, update, invalidate, import...) are not exposed.
+  mnemosyne:
+    tools: [mnemosyne_recall, mnemosyne_remember, mnemosyne_sleep, mnemosyne_triple_add, mnemosyne_triple_query]
 
 # Hermes' agent-side "curator" can write new skills on its own mid-session
 # (skill_manage) — found live: it authored a skill of its own accord in an
