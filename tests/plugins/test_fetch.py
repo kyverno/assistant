@@ -28,6 +28,7 @@ def pr_node(number, base="main", body="", files=(), contexts=(), closing=(), mor
         "files": {"pageInfo": {"hasNextPage": False}, "nodes": [{"path": f} for f in files]},
         "reviewThreads": {"pageInfo": {"hasNextPage": False}, "nodes": []},
         "reviews": {"nodes": []}, "mergeStateStatus": "CLEAN", "bumpCommits": {"nodes": []},
+        "state": "OPEN", "mergedAt": None, "closedAt": None,
         "commits": {"nodes": [{"commit": {"statusCheckRollup": {"contexts": {
             "pageInfo": {"hasNextPage": False}, "nodes": list(contexts)}}}}]},
         "closingIssuesReferences": {"pageInfo": {"hasNextPage": more_closing}, "nodes": list(closing)},
