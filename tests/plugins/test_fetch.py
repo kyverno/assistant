@@ -22,7 +22,7 @@ def pr_node(number, base="main", body="", files=(), contexts=(), closing=(), mor
     return {
         "number": number, "title": f"PR {number}", "url": f"https://github.com/{REPO}/pull/{number}", "body": body,
         "author": {"login": "someone"}, "authorAssociation": "CONTRIBUTOR", "createdAt": "2026-11-01T00:00:00Z",
-        "baseRefName": base, "headRefName": f"b{number}", "additions": 1, "deletions": 1, "changedFiles": len(files),
+        "baseRefName": base, "headRefName": f"b{number}", "headRefOid": f"sha{number}", "additions": 1, "deletions": 1, "changedFiles": len(files),
         "milestone": None,
         "labels": {"pageInfo": {"hasNextPage": False}, "nodes": []},
         "files": {"pageInfo": {"hasNextPage": False}, "nodes": [{"path": f} for f in files]},
@@ -41,16 +41,36 @@ def issue_ref(number, *others, more=False):
                                                "nodes": [{"number": n, "title": f"PR {n}", "state": s} for n, s in others]}}
 
 
+def issue_node(number):
+    page = {"pageInfo": {"hasNextPage": False}, "nodes": []}
+    return {"number": number, "title": f"Issue {number}", "url": "u", "body": "", "author": {"login": "a"},
+            "authorAssociation": "NONE", "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z",
+            "reactions": {"totalCount": 0}, "state": "OPEN", "stateReason": None, "milestone": None,
+            "labels": page, "assignees": page, "comments": {"totalCount": 0, "nodes": []},
+            "closedByPullRequestsReferences": page, "timelineItems": page, "parent": None,
+            "subIssues": {"nodes": []}, "trackedInIssues": {"nodes": []}}
+
+
 class FakeGitHub:
-    def __init__(self, prs, failure_issues=()):
+    def __init__(self, prs, failure_issues=(), issues=()):
+        self.issues = {i["number"]: i for i in issues}
         self.prs = {p["number"]: p for p in prs}
         self.failure_issues = list(failure_issues)
         self.calls = []
+        self.reject_batches = False
 
     def __call__(self, query, variables):
         self.calls.append(query)
         if "search(" in query:
             return {"search": {"issueCount": len(self.prs), "nodes": [{"number": n} for n in sorted(self.prs)]}}
+        if "search(" not in query and "p0: issue(number" in query:
+            return {"repository": {k.replace("n", "p", 1): self.issues.get(v) for k, v in variables.items()
+                                   if k.startswith("n") and k[1:].isdigit()}}
+        if "p0: pullRequest(number" in query:
+            if self.reject_batches:
+                raise fetch.FetchError("GitHub GraphQL error: [{'type': 'NOT_FOUND'}]")
+            return {"repository": {k.replace("n", "p", 1): self.prs.get(v) for k, v in variables.items()
+                                   if k.startswith("n") and k[1:].isdigit()}}
         if "pullRequest(number" in query:
             return {"repository": {"pullRequest": self.prs.get(variables["number"])}}
         if "defaultBranchRef" in query:
@@ -134,6 +154,14 @@ class Gate(Base):
         self.assertEqual(prs[1]["ci_state"], "SUCCESS")
         self.assertEqual(prs[2]["gate_checks"], {"release-gate": "MISSING"})
 
+    def test_a_gate_reported_as_a_check_run_is_left_out_of_ci_state(self):
+        contexts = [{"__typename": "CheckRun", "name": "Release Gate", "status": "COMPLETED", "conclusion": "FAILURE"},
+                    {"__typename": "CheckRun", "name": "unit", "status": "COMPLETED", "conclusion": "SUCCESS"}]
+        self.github([pr_node(1, contexts=contexts)])
+        pr = fetch.fetch_pr_candidates(REPO, "label:ready")["prs"][0]
+        self.assertEqual(pr["gate_checks"], {"release-gate": "FAILURE"})
+        self.assertEqual(pr["ci_state"], "SUCCESS")
+
     def test_no_gate_in_the_pack_means_no_gate_fields(self):
         self.rules = NO_PACK
         gh = self.github([pr_node(1)])
@@ -181,7 +209,7 @@ class SequenceByNumber(Base):
         out = self.run_tool([7, 8])
         self.assertTrue(out["success"])
         self.assertEqual(out["file_overlaps"][0]["prs"], [7, 8])
-        self.assertEqual(sum("pullRequest(number" in q for q in gh.calls), 2)
+        self.assertEqual(sum("pullRequest(number" in q for q in gh.calls), 1)  # both in one batched query
 
     def test_sequence_prs_applies_the_gate_itself(self):
         self.github([pr_node(1)], failure_issues=[{"number": 90, "title": "t", "url": "u", "body": "<!-- broken:main -->"}])
@@ -197,6 +225,32 @@ class SequenceByNumber(Base):
         self.assertEqual([p["pr"] for t in out["tiers"] for p in t["prs"]], [1])
         self.assertEqual(out["not_sequenced"][0]["pr"], 404)
         self.assertIn("not found", out["not_sequenced"][0]["why"])
+
+    def test_pr_details_come_ten_to_a_query(self):
+        gh = self.github([pr_node(n) for n in range(1, 26)])
+        out = fetch.fetch_pr_candidates(REPO, "label:ready", limit=25)
+        self.assertEqual(sorted(p["number"] for p in out["prs"]), list(range(1, 26)))
+        self.assertEqual(sum("p0: pullRequest(number" in q for q in gh.calls), 3)
+
+    def test_past_one_round_the_batches_fill_every_round(self):
+        gh = self.github([pr_node(n) for n in range(1, 61)])
+        out = fetch.fetch_pr_candidates(REPO, "label:ready", limit=60)
+        self.assertEqual(len(out["prs"]) + len(out.get("not_shown") or []), 60)
+        self.assertEqual(sum("p0: pullRequest(number" in q for q in gh.calls), 8)
+
+    def test_issue_details_come_ten_to_a_query(self):
+        gh = self.github([], issues=[issue_node(n) for n in range(1, 13)])
+        issues, errors = fetch.issue_records(REPO, list(range(1, 13)) + [404])
+        self.assertEqual([i["number"] for i in issues if "error" not in i], list(range(1, 13)))
+        self.assertIn("not found", issues[-1]["error"])
+        self.assertEqual(sum("p0: issue(number" in q for q in gh.calls), 2)
+
+    def test_a_rejected_batch_is_fetched_one_by_one(self):
+        gh = self.github([pr_node(1), pr_node(2)])
+        gh.reject_batches = True
+        out = self.run_tool([1, 2, 404])
+        self.assertEqual(sorted(p["pr"] for t in out["tiers"] for p in t["prs"]), [1, 2])
+        self.assertEqual(out["not_sequenced"][0]["pr"], 404)
 
     def test_cut_off_closing_issues_and_competitors_are_reported(self):
         self.github([pr_node(1, closing=[issue_ref(5, (9, "OPEN"), more=True)]), pr_node(2, more_closing=True)])

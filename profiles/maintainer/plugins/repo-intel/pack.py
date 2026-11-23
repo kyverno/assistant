@@ -30,6 +30,16 @@ _KNOWN: dict[str, Optional[tuple[str, ...]]] = {
     "generated_inputs": ("paths", "dependency_modules"),
     "dependency_bots": ("codegen_module_globs", "codegen_kind_label"),
     "milestones": ("title_format", "open_milestone_label", "issue_urgency_labels"),
+    "severity_labels": None,
+}
+
+# Severity tiers, highest first. `severity_labels` maps each to the labels that mean it; a tier left out keeps its default.
+SEVERITY_TIERS = ("critical", "high", "medium", "low")
+DEFAULT_SEVERITY_LABELS = {
+    "critical": ("security", "kind/security"),
+    "high": ("regression", "kind/regression"),
+    "medium": ("bug", "kind/bug", "performance"),
+    "low": ("enhancement", "kind/feature", "documentation", "kind/documentation", "kind/tests"),
 }
 
 # Every top-level key a pack may have: `maintainer` is the maintainer assistant's; the rest are shared or the contributor
@@ -246,6 +256,7 @@ class Rules:
     milestone_title_format: Optional[str] = None
     open_milestone_label: Optional[str] = None
     issue_urgency_labels: tuple[str, ...] = ()
+    severity_labels: tuple[tuple[str, tuple[str, ...]], ...] = tuple(DEFAULT_SEVERITY_LABELS.items())
     # Shared with the contributor (top-level keys of the same file); the maintainer only reads them.
     ready_labels: tuple[str, ...] = ()
     attention_labels: tuple[str, ...] = ()
@@ -271,6 +282,7 @@ class Rules:
                                 "codegen_kind_label": self.codegen_kind_label},
             "milestones": {"title_format": self.milestone_title_format, "open_milestone_label": self.open_milestone_label,
                            "issue_urgency_labels": list(self.issue_urgency_labels)},
+            "severity_labels": {tier: list(labels) for tier, labels in self.severity_labels},
             "readiness": {"ready_labels": list(self.ready_labels), "attention_labels": list(self.attention_labels),
                           "infra_checks": list(self.infra_checks)},
             "review_bots": list(self.review_bots),
@@ -340,6 +352,10 @@ def parse(data: Any, source: Optional[str] = None, facts: str = "") -> Rules:
     db = _check_keys(m.get("dependency_bots"), _KNOWN["dependency_bots"], "maintainer.dependency_bots")
     ms = _check_keys(m.get("milestones"), _KNOWN["milestones"], "maintainer.milestones")
 
+    sev = _check_keys(m.get("severity_labels"), SEVERITY_TIERS, "maintainer.severity_labels")
+    severity = tuple((t, _strings(sev[t], f"maintainer.severity_labels.{t}") if t in sev else DEFAULT_SEVERITY_LABELS[t])
+                     for t in SEVERITY_TIERS)
+
     readiness = _check_keys(data.get("readiness"), _READINESS_KEYS, "readiness")
     _text(readiness.get("checks_file"), "readiness.checks_file")
     raw_gates = m.get("branch_gates")
@@ -376,6 +392,7 @@ def parse(data: Any, source: Optional[str] = None, facts: str = "") -> Rules:
         milestone_title_format=_text(ms.get("title_format"), "maintainer.milestones.title_format"),
         open_milestone_label=_text(ms.get("open_milestone_label"), "maintainer.milestones.open_milestone_label"),
         issue_urgency_labels=_strings(ms.get("issue_urgency_labels"), "maintainer.milestones.issue_urgency_labels"),
+        severity_labels=severity,
         ready_labels=_strings(readiness.get("ready_labels"), "readiness.ready_labels"),
         attention_labels=_strings(readiness.get("attention_labels"), "readiness.attention_labels"),
         infra_checks=_strings(readiness.get("infra_checks"), "readiness.infra_checks"),

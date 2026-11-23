@@ -115,6 +115,7 @@ error, so a typo like `maintaner:` is caught instead of silently doing nothing.
 | `generated_inputs` | What feeds the generated files: `paths` (globs) and `dependency_modules` (a bump of one of these also counts). A PR touching an input must merge before one touching the output. |
 | `dependency_bots` | `codegen_module_globs` (dependency bumps that need regenerated output in the same PR) and `codegen_kind_label`. |
 | `milestones` | `title_format` (how your milestones are named), `open_milestone_label`, `issue_urgency_labels` (set by hand on an issue to mark urgency toward a milestone). |
+| `severity_labels` | Which labels mean `critical`, `high`, `medium` and `low`, read on a PR's closing issue (or the PR when it closes none) to rank the queue. A tier you leave out keeps its default (`security`, `regression`, `bug`, `enhancement` and their `kind/` forms). |
 
 **Glob syntax:** `**` crosses directories, `*` does not, `?` is one character. A pattern with no `/` names a file and
 matches it at any depth (`zz_generated.deepcopy.go`).

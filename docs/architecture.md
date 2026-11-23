@@ -77,7 +77,7 @@ per-profile under `~/.hermes/profiles/<profile>/plugins/<name>/`.
   (real cost against a live queue: dozens of PRs, one round trip each). It talks to GitHub's
   GraphQL/REST APIs directly over `urllib` using the profile's own `REPO_GITHUB_TOKEN` — same
   scopes already granted to the `github` MCP server, no new credential — and does its search
-  pass plus a concurrent (`ThreadPoolExecutor`, max 8) per-PR detail pass inside one tool
+  pass plus a detail pass (up to 10 PRs per GraphQL query, 4 queries at a time) inside one tool
   call. Returns per PR: labels, milestone, `author_association`, size, CI state (the PR's own
   checks, with the "E2E Gate" status excluded — see below), CodeRabbit approval,
   `closing_issues` (each with its own milestone/labels/open-state), and `external_references`
@@ -87,7 +87,7 @@ per-profile under `~/.hermes/profiles/<profile>/plugins/<name>/`.
   conflict verdict (two PRs' hunk line numbers are relative to different merge-bases with
   `main`, so comparing them numerically isn't reliable; the agent reads the content itself).
   `fetch_issue_candidates(repo, search_query, limit)` does the same shape for issues:
-  a search pass plus a concurrent per-issue detail pass. Returns per issue: labels,
+  a search pass plus a detail pass batched the same way. Returns per issue: labels,
   assignees, milestone, `comment_count`/`recent_comments`, `closing_prs` (every PR whose
   body/commits name a closing keyword for this issue, via GitHub's own
   `closedByPullRequestsReferences` — resolves multiple competing PRs against one issue
@@ -96,6 +96,14 @@ per-profile under `~/.hermes/profiles/<profile>/plugins/<name>/`.
   `timelineItems`). Verified live against `kyverno/kyverno` (2026-10-05): both
   `closedByPullRequestsReferences` and `ClosedEvent.closer`'s `PullRequest`/`Commit`
   union resolve correctly end to end, not just by schema introspection.
+- **queue and item** (`repo-intel`, `engine/`) — the layered tools `pr-queue` starts from. `queue(focus, kind,
+  prefer, avoid)` fetches up to 60 candidates and returns the top items, ranked in code with their reasons (L1, at most
+  12,000 characters). `item(number, level)` returns one PR or issue as a card (L2, 3,200) or the patches that matter
+  most plus the nearest `AGENTS.md` excerpt (L3, 10,000). `engine/` is pure Python: `profile.py` (lines per file class,
+  functions touched from the patches' hunk headers), `owners.py` (CODEOWNERS), `rank.py` (priority from severity, then
+  urgency, then reactions; readiness and risk kept apart from it; close candidates as their own list) and `layers.py`
+  (the budgets). Patches are cached by head commit and CODEOWNERS and docs by the default branch's commit, and a PR
+  whose `updatedAt` has not moved is not fetched again, so a second question about the same PR costs no GitHub calls.
 - **sequencer** (`repo-intel`) — `sequence_prs` takes PR numbers, reads their records from the last fetch, and builds a hard
   dependency graph, no scoring: 4 edge types (stacked branches — one PR's base branch is
   another's head; generated-file input-before-output; an explicit body reference to another
@@ -104,7 +112,7 @@ per-profile under `~/.hermes/profiles/<profile>/plugins/<name>/`.
   repeated Kahn's-algorithm peeling. Within a tier, no hard edge exists between any member —
   the tool returns them flat and unordered; ordering within a tier is the agent's judgment
   call (session context, Slack/Discussions, maintainer history), made explicit in
-  `profiles/maintainer/skills/pr-queue/SKILL.md`'s precedence ladder, not something the tool decides. Also
+  `engine/rank.py` when it comes through `queue`, not something this tool decides. Also
   computes per-PR annotations: file classification (`GENERATED` > `API_SURFACE` >
   `CRITICAL` > `TEST_ONLY` > `STANDARD`), `rebase_flag` (shares a changed file with
   an earlier tier), `file_overlaps`/`package_overlaps` (no hard edge), `gate_blocked`

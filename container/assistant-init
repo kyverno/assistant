@@ -597,6 +597,7 @@ MORE_KEYS = f"""
 #   maintainer.dependency_bots           dependency bumps that need regenerated output: codegen_module_globs, codegen_kind_label
 #   maintainer.approval_bots             bots whose approval counts as one review signal
 #   maintainer.milestones                title_format, open_milestone_label, issue_urgency_labels
+#   maintainer.severity_labels           labels for each severity: critical, high, medium, low (has defaults)
 #   readiness.infra_checks               check names whose failure is not the author's to fix
 #   ladder, entry_labels, ...            only the contributor assistant reads these"""
 

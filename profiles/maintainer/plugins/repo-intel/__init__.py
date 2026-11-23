@@ -16,10 +16,27 @@ from .fetch_tools import (
     handle_fetch_pr_details,
 )
 from .pack_tools import REPO_PACK_SCHEMA, handle_repo_pack
+from .queue_tools import ITEM_SCHEMA, QUEUE_SCHEMA, handle_item, handle_queue
 from .sequence_tools import SEQUENCE_PRS_SCHEMA, handle_sequence_prs
 
 
 def register(ctx) -> None:
+    ctx.register_tool(
+        name="queue",
+        toolset="repo-intel",
+        schema=QUEUE_SCHEMA,
+        handler=handle_queue,
+        description="The ranked queue for a focus, with reasons, next steps and relations.",
+        emoji="📋",
+    )
+    ctx.register_tool(
+        name="item",
+        toolset="repo-intel",
+        schema=ITEM_SCHEMA,
+        handler=handle_item,
+        description="One PR or issue: a card, or the code that matters most.",
+        emoji="🔎",
+    )
     ctx.register_tool(
         name="fetch_pr_candidates",
         toolset="repo-intel",

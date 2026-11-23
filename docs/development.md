@@ -46,7 +46,7 @@ Override `IMAGE` or `TAG` for a different local image name, for example `make im
 | Workflow | Runs when you change | Checks |
 |---|---|---|
 | `container-lint` | `container/`, `tests/image/` | ShellCheck and Hadolint |
-| `test-plugins` | `profiles/`, `container/org/`, `container/hooks/`, `tests/` | The pack, the sequencer, the dashboard and journey state, and the safety hooks, in seconds |
+| `test-plugins` | `profiles/`, `container/org/`, `container/hooks/`, `tests/` | The pack, the sequencer, the engine (ranking, change profile, budgets), the dashboard and journey state, and the safety hooks, in seconds |
 | `container-build` | `container/`, `profiles/`, `tests/image/` | Builds the image without publishing (so `verify-image.sh` runs), then `tests/image/run.sh`: the launcher as the installer extracts it, another organisation's pack, the hooks inside the image, and state kept across containers |
 
 The tests use small made-up packs and PR lists (`tests/fixtures/`), never recorded GitHub data.
@@ -75,7 +75,8 @@ The files below are the maintainer profile's, under `profiles/maintainer/`.
 
 **Plugins**
 
-- `profiles/maintainer/plugins/repo-intel/`: the fetch tools (`fetch_pr_candidates`, `fetch_file_diff_overlap` and the
+- `profiles/maintainer/plugins/repo-intel/`: `queue` and `item` (the ranked queue and one item's card or code, over
+  `engine/`), the fetch tools (`fetch_pr_candidates`, `fetch_file_diff_overlap` and the
   issue equivalents, one batched call over GitHub's GraphQL and REST APIs) `sequence_prs` (a hard-dependency graph
   with cycle detection and topological layering into tiers), and `repo_pack` (the organisation pack's rules and facts).
 - `profiles/maintainer/plugins/maintainer-dashboard/`: the `update_dashboard` tool and the Maintainer tab in
@@ -86,7 +87,7 @@ The files below are the maintainer profile's, under `profiles/maintainer/`.
 | Skill | Purpose |
 |---|---|
 | `repo-context` | Live labels, CODEOWNERS and milestone lookup, plus the organisation pack's gates, file classes and facts (Kyverno's are in `container/org/kyverno/`) |
-| `pr-queue` | Merge-sequence recommendations and per-PR review briefs |
+| `pr-queue` | The review order and per-PR review briefs, explained from the code |
 | `pr-actions` | Labels, comments, reviews and branch updates via your token |
 | `dependabot-queue` | Dependabot PR verdicts |
 | `issue-triage` | Issue classification, issue and PR relationships, progress, staleness |

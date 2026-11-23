@@ -160,7 +160,8 @@ custom_toolsets:
   maintainer-tools:
     - mcp-github
     - mcp-slack
-    # repo-intel: a bundled plugin (plugins/repo-intel/), not an MCP server. Registers the fetch tools
+    # repo-intel: a bundled plugin (plugins/repo-intel/), not an MCP server. Registers queue and item (the review
+    # queue ranked in code, and one PR or issue's card or code), the fetch tools
     # (fetch_pr_candidates and friends: GitHub's GraphQL API called directly with this profile's own
     # REPO_GITHUB_TOKEN, replacing N sequential pull_request_read calls with one tool call) and
     # sequence_prs, a dependency graph over the PRs a fetch returned, taken by number. See docs/architecture.md.
