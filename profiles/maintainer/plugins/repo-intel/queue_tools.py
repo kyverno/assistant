@@ -228,7 +228,7 @@ def queue(repo: str, focus: str = "", kind: str = "pr", limit: int = 10, prefer:
         lines = []
         for e in result["ranked"][:limit]:
             i = by_n[e["number"]]
-            line = {"n": e["number"], "title": layers._clip(i.get("title"), 90), "priority": rank.priority_label(e),
+            line = {"n": e["number"], "untrusted_title": layers._clip(i.get("title"), 90), "priority": rank.priority_label(e),
                     "why": rank.explain(e), "next": e["readiness"]["next"], "age_days": e["age"]}
             if i.get("reactions"):
                 line["reactions"] = i["reactions"]

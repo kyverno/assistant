@@ -4,7 +4,8 @@ L1 queue  the top items for a focus, one line each with reasons      QUEUE_BUDGE
 L2 card   one PR or issue: change profile, issue, relations, owners   CARD_BUDGET
 L3 code   the patches of the files that matter most, and the docs     CODE_BUDGET
 
-Free text from GitHub (bodies, comments, patches) is written by anyone, so it is put under keys named untrusted_*.
+Free text from GitHub (titles, bodies, comments, patches) is written by anyone, so it is put under keys named
+untrusted_*.
 """
 
 from __future__ import annotations
@@ -81,7 +82,7 @@ def queue_line(e: dict, record: dict, profile: Optional[dict], relations: dict[i
     r = e["readiness"]
     line: dict[str, Any] = {
         "n": e["number"],
-        "title": _clip(record.get("title"), 90),
+        "untrusted_title": _clip(record.get("title"), 90),
         "priority": rank.priority_label(e),
         "why": rank.explain(e),
         "next": r["next"],
@@ -136,14 +137,14 @@ def pr_card(record: dict, e: Optional[dict], profile: dict, owners: dict[str, in
     issues = []
     for i in record.get("closing_issues") or []:
         issues.append({
-            "n": i["number"], "title": _clip(i.get("title"), 90), "state": i.get("state"),
+            "n": i["number"], "untrusted_title": _clip(i.get("title"), 90), "state": i.get("state"),
             "labels": i.get("labels") or [], "milestone": i.get("milestone"), "reactions": i.get("reactions"),
             "untrusted_excerpt": _clip(i.get("body_excerpt"), 300),
             "other_prs": [f"#{o['number']} {o['state']}" for o in i.get("other_prs") or []],
         })
     copilot = record.get("copilot_review") or {}
     card: dict[str, Any] = {
-        "n": record["number"], "title": record.get("title"), "url": record.get("url"),
+        "n": record["number"], "untrusted_title": _clip(record.get("title"), 200), "url": record.get("url"),
         "author": record.get("author"), "author_association": record.get("author_association"),
         "base": record.get("base_branch"), "created_at": record.get("created_at"),
         "labels": record.get("labels") or [],
@@ -207,7 +208,7 @@ def pr_card(record: dict, e: Optional[dict], profile: dict, owners: dict[str, in
 
 def issue_card(issue: dict, e: Optional[dict]) -> dict:
     card: dict[str, Any] = {
-        "n": issue["number"], "title": issue.get("title"), "url": issue.get("url"), "state": issue.get("state"),
+        "n": issue["number"], "untrusted_title": _clip(issue.get("title"), 200), "url": issue.get("url"), "state": issue.get("state"),
         "author": issue.get("author"), "created_at": issue.get("created_at"), "labels": issue.get("labels") or [],
         "milestone": issue.get("milestone"), "assignees": issue.get("assignees") or [],
         "reactions": issue.get("reactions"), "comments": issue.get("comment_count"),

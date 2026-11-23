@@ -386,6 +386,8 @@ class Tools(Base):
         self.assertIn("same function as #1: Validate in core/e.go", top["relations"])
         self.assertEqual(top["yours"], "CODEOWNERS")
         self.assertEqual(out["now"]["milestones"][0]["title"], "1.0")
+        self.assertNotIn("title", top)
+        self.assertEqual(top["untrusted_title"], "PR 2")
         self.assertLessEqual(len(json.dumps(out)), layers.QUEUE_BUDGET + 200)
         again = json.loads(queue_tools.handle_queue({"repo": REPO}))
         self.assertNotIn("now", again)
