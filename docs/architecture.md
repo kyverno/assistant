@@ -77,7 +77,7 @@ per-profile under `~/.hermes/profiles/<profile>/plugins/<name>/`.
   (real cost against a live queue: dozens of PRs, one round trip each). It talks to GitHub's
   GraphQL/REST APIs directly over `urllib` using the profile's own `REPO_GITHUB_TOKEN` — same
   scopes already granted to the `github` MCP server, no new credential — and does its search
-  pass plus a concurrent (`ThreadPoolExecutor`, max 8) per-PR detail pass inside one tool
+  pass plus a detail pass (up to 10 PRs per GraphQL query, 4 queries at a time) inside one tool
   call. Returns per PR: labels, milestone, `author_association`, size, CI state (the PR's own
   checks, with the "E2E Gate" status excluded — see below), CodeRabbit approval,
   `closing_issues` (each with its own milestone/labels/open-state), and `external_references`
@@ -87,7 +87,7 @@ per-profile under `~/.hermes/profiles/<profile>/plugins/<name>/`.
   conflict verdict (two PRs' hunk line numbers are relative to different merge-bases with
   `main`, so comparing them numerically isn't reliable; the agent reads the content itself).
   `fetch_issue_candidates(repo, search_query, limit)` does the same shape for issues:
-  a search pass plus a concurrent per-issue detail pass. Returns per issue: labels,
+  a search pass plus a detail pass batched the same way. Returns per issue: labels,
   assignees, milestone, `comment_count`/`recent_comments`, `closing_prs` (every PR whose
   body/commits name a closing keyword for this issue, via GitHub's own
   `closedByPullRequestsReferences` — resolves multiple competing PRs against one issue

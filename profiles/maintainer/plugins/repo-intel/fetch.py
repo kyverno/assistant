@@ -217,10 +217,7 @@ query($search: String!, $first: Int!) {
 # workflow already proves this shape works at scale against this repo. hasNextPage on each
 # >100-item connection is surfaced as a *_truncated flag rather than fully paginated here —
 # true for an occasional huge PR, not worth the extra round trips for the common case.
-_DETAIL_QUERY = """
-query($owner: String!, $name: String!, $number: Int!) {
-  repository(owner: $owner, name: $name) {
-    pullRequest(number: $number) {
+_PR_FIELDS = """
       number
       title
       url
@@ -269,10 +266,58 @@ query($owner: String!, $name: String!, $number: Int!) {
           }
         }
       }
-    }
-  }
-}
 """
+_DETAIL_QUERY = ("query($owner: String!, $name: String!, $number: Int!) {\n"
+                 "  repository(owner: $owner, name: $name) {\n    pullRequest(number: $number) {"
+                 + _PR_FIELDS + "    }\n  }\n}\n")
+# PRs or issues asked for in one query, and batch queries in flight. One query per PR, two at a time, took about 55 s
+# for 60 Kyverno PRs; ten to a query and four queries at a time, about 13 s. GitHub answers a batch no faster than its
+# PRs one after another, so the gain beyond batching comes from running a few at once.
+_DETAIL_BATCH = 10
+_BATCH_WORKERS = 4
+
+
+def _batch_query(field: str, fields: str, count: int) -> str:
+    args = ", ".join(f"$n{i}: Int!" for i in range(count))
+    items = "".join(f"    p{i}: {field}(number: $n{i}) {{{fields}    }}\n" for i in range(count))
+    return f"query($owner: String!, $name: String!, {args}) {{\n  repository(owner: $owner, name: $name) {{\n{items}  }}\n}}\n"
+
+
+def _fetch_batched(field: str, fields: str, build, one, owner: str, name: str,
+                   numbers: list[int]) -> tuple[list[dict[str, Any]], list[str]]:
+    """Records for `numbers`, _DETAIL_BATCH to a query. build(node, number) makes a record from a node; one(owner, name,
+    number) fetches a single item. If GitHub rejects a batch (one item it cannot read fails the whole query), that
+    batch's items are fetched one by one so the others still come back; a rate limit is not retried."""
+    def batch(nums: list[int]) -> tuple[list[dict[str, Any]], list[str]]:
+        variables: dict[str, Any] = {"owner": owner, "name": name, **{f"n{i}": n for i, n in enumerate(nums)}}
+        try:
+            repo = _graphql(_batch_query(field, fields, len(nums)), variables)["repository"]
+        except FetchError as exc:
+            if "rate limit" in str(exc):
+                return [], [f"#{n}: {exc}" for n in nums]
+            out, errs = [], []
+            for n in nums:
+                try:
+                    out.append(one(owner, name, n))
+                except FetchError as single:
+                    errs.append(f"#{n}: {single}")
+            return out, errs
+        return [build(repo.get(f"p{i}"), n) for i, n in enumerate(nums)], []
+
+    # At most _DETAIL_BATCH to a query. Past one round, a multiple of _BATCH_WORKERS batches of even size, so no round
+    # runs half empty: 60 PRs go as 8 batches of 7 or 8, not 6 of 10 with the last round two queries wide.
+    count = -(-len(numbers) // _DETAIL_BATCH)
+    if count > _BATCH_WORKERS:
+        count = -(-count // _BATCH_WORKERS) * _BATCH_WORKERS
+    batches = [numbers[i::count] for i in range(count)] if numbers else []
+    records: list[dict[str, Any]] = []
+    errors: list[str] = []
+    if batches:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(_BATCH_WORKERS, len(batches))) as pool:
+            for got, errs in pool.map(batch, batches):
+                records += got
+                errors += errs
+    return records, errors
 
 
 def _gate_checks(contexts: list[dict], rules: Rules) -> dict[str, str]:
@@ -439,7 +484,15 @@ def _copilot_review(reviews: list[dict]) -> Optional[dict[str, Any]]:
 
 def _fetch_one(owner: str, name: str, number: int, rules: Rules) -> dict[str, Any]:
     data = _graphql(_DETAIL_QUERY, {"owner": owner, "name": name, "number": number})
-    pr = data["repository"]["pullRequest"]
+    return _pr_record(data["repository"]["pullRequest"], number, rules)
+
+
+def _fetch_details(owner: str, name: str, numbers: list[int], rules: Rules) -> tuple[list[dict[str, Any]], list[str]]:
+    return _fetch_batched("pullRequest", _PR_FIELDS, lambda node, n: _pr_record(node, n, rules),
+                          lambda o, nm, n: _fetch_one(o, nm, n, rules), owner, name, numbers)
+
+
+def _pr_record(pr: Optional[dict[str, Any]], number: int, rules: Rules) -> dict[str, Any]:
     if pr is None:
         return {"number": number, "error": "not found (closed or renumbered mid-fetch?)"}
 
@@ -846,7 +899,10 @@ def collect_prs(repo: str, search_query: str, limit: int = 15,
             prs.append(rec)
         else:
             to_fetch.append(h["number"])
-    fetched, errors = _fetch_many(_fetch_one_stale if include_stale_detail else _fetch_one, owner, name, to_fetch, rules)
+    if include_stale_detail:
+        fetched, errors = _fetch_many(_fetch_one_stale, owner, name, to_fetch, rules)
+    else:
+        fetched, errors = _fetch_details(owner, name, to_fetch, rules)
     prs += fetched
     errors = [f"PR {e}" for e in errors]
 
@@ -933,7 +989,10 @@ def pr_records(repo: str, pr_numbers: list[int], include_stale_detail: bool = Fa
             prs.append(rec)
         else:
             to_fetch.append(n)
-    fetched, errors = _fetch_many(_fetch_one_stale if include_stale_detail else _fetch_one, owner, name, to_fetch, rules)
+    if include_stale_detail:
+        fetched, errors = _fetch_many(_fetch_one_stale, owner, name, to_fetch, rules)
+    else:
+        fetched, errors = _fetch_details(owner, name, to_fetch, rules)
     prs += fetched
     state = repo_state(owner, name, rules)
     _mark_gate(prs, state, rules)
@@ -964,10 +1023,7 @@ query($search: String!, $first: Int!) {
 # for this issue, open or merged — GitHub's own keyword parser, not a body-text regex, so a
 # second competing PR shows up here too. ClosedEvent's `closer` union names the PR or commit
 # that actually closed it, when it did.
-_ISSUE_DETAIL_QUERY = """
-query($owner: String!, $name: String!, $number: Int!) {
-  repository(owner: $owner, name: $name) {
-    issue(number: $number) {
+_ISSUE_FIELDS = """
       number
       title
       url
@@ -1005,15 +1061,22 @@ query($owner: String!, $name: String!, $number: Int!) {
       parent { number title state }
       subIssues(first: 10) { nodes { number title state } }
       trackedInIssues(first: 10) { nodes { number title state } }
-    }
-  }
-}
 """
+_ISSUE_DETAIL_QUERY = ("query($owner: String!, $name: String!, $number: Int!) {\n"
+                       "  repository(owner: $owner, name: $name) {\n    issue(number: $number) {"
+                       + _ISSUE_FIELDS + "    }\n  }\n}\n")
 
 
 def _fetch_issue_one(owner: str, name: str, number: int) -> dict[str, Any]:
     data = _graphql(_ISSUE_DETAIL_QUERY, {"owner": owner, "name": name, "number": number})
-    issue = data["repository"]["issue"]
+    return _issue_record(data["repository"]["issue"], number)
+
+
+def _fetch_issues(owner: str, name: str, numbers: list[int]) -> tuple[list[dict[str, Any]], list[str]]:
+    return _fetch_batched("issue", _ISSUE_FIELDS, _issue_record, _fetch_issue_one, owner, name, numbers)
+
+
+def _issue_record(issue: Optional[dict[str, Any]], number: int) -> dict[str, Any]:
     if issue is None:
         return {"number": number, "error": "not found (deleted, transferred, or renumbered mid-fetch?)"}
 
@@ -1113,7 +1176,7 @@ def collect_issues(repo: str, search_query: str, limit: int = 15) -> tuple[list[
             issues.append(rec)
         else:
             to_fetch.append(h["number"])
-    fetched, errors = _fetch_many(_fetch_issue_one, owner, name, to_fetch)
+    fetched, errors = _fetch_issues(owner, name, to_fetch)
     issues += fetched
     _remember_issues(repo, issues)
     issues.sort(key=lambda i: i.get("number", 0))
@@ -1128,7 +1191,7 @@ def issue_records(repo: str, numbers: list[int], reuse: bool = False) -> tuple[l
     for n in numbers:
         rec = cached_issue(repo, n) if reuse else None
         (issues.append(rec) if rec is not None else to_fetch.append(n))
-    fetched, errors = _fetch_many(_fetch_issue_one, owner, name, to_fetch)
+    fetched, errors = _fetch_issues(owner, name, to_fetch)
     issues += fetched
     _remember_issues(repo, issues)
     issues.sort(key=lambda i: i.get("number", 0))
@@ -1216,7 +1279,7 @@ def patches_for(repo: str, records: list[dict[str, Any]]) -> tuple[dict[int, dic
     errors: list[str] = []
     if not records:
         return out, errors
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(_MAX_WORKERS, len(records))) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(_BATCH_WORKERS, len(records))) as pool:
         futures = {pool.submit(pr_patches, repo, r["number"], r.get("head_oid")): r["number"] for r in records}
         for future in concurrent.futures.as_completed(futures):
             try:
