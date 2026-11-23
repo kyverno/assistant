@@ -56,12 +56,7 @@ _TIERS = (("generated", "GENERATED"), ("api_surface", "API_SURFACE"), ("critical
 
 
 def _home() -> Path:
-    try:
-        from hermes_constants import get_hermes_home  # type: ignore[import-not-found]
-
-        return Path(get_hermes_home())
-    except Exception:
-        return Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes")
+    return Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes")
 
 
 # The pack baked into the image. The sandbox policy keeps /opt/kyverno read-only, so the agent cannot rewrite it, unlike

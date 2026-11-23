@@ -40,7 +40,20 @@ echo "== both profiles are installed, with the plugins they need"
 for profile in maintainer contributor; do
   check "$profile profile exists" inimage <<<"$PRELUDE; test -f \$HERMES_HOME/profiles/$profile/config.yaml"
 done
-check "maintainer has repo-intel and the dashboard" inimage <<<"$PRELUDE; test -f \$MPLUG/repo-intel/plugin.yaml && test -f \$MPLUG/maintainer-dashboard/plugin.yaml"
+check "maintainer has the dashboard plugin, and no repo-intel plugin" inimage <<<"$PRELUDE; test -f \$MPLUG/maintainer-dashboard/plugin.yaml && ! test -e \$MPLUG/repo-intel"
+check "the engine's MCP server, started as the maintainer config says, lists its tools" inimage <<<"$PRELUDE
+HERMES_HOME=\$HERMES_HOME/profiles/maintainer \$PY -I - <<'PYEOF'
+import json, subprocess, sys
+sys.path.insert(0, '/opt/hermes'); import hermes_bootstrap, yaml
+s = yaml.safe_load(open('/opt/hermes-home/.hermes/profiles/maintainer/config.yaml'))['mcp_servers']['repo-intel']
+msgs = [{'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'protocolVersion': '2025-06-18'}},
+        {'jsonrpc': '2.0', 'method': 'notifications/initialized'}, {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/list'}]
+out = subprocess.run([s['command'], *s['args']], input=''.join(json.dumps(m) + '\n' for m in msgs),
+                     capture_output=True, text=True, timeout=60, env={'PATH': '/usr/bin:/bin'}).stdout.splitlines()
+names = sorted(t['name'] for t in json.loads(out[1])['result']['tools'])
+assert names == sorted(s['tools']['include']), names
+PYEOF"
+check "the engine in the image cannot be changed by the agent" docker run --rm --entrypoint sh "$IMAGE" -c '! test -w /opt/kyverno/engine/repo_engine/queue_tools.py'
 check "contributor has its plugin" inimage <<<"$PRELUDE; test -f \$HERMES_HOME/profiles/contributor/plugins/contributor/plugin.yaml"
 
 echo "== the organisation pack"
@@ -48,10 +61,8 @@ check "repo_pack reads the pack from the image" inimage <<<"$PRELUDE
 HERMES_HOME=\$HERMES_HOME/profiles/maintainer \$PY -I - <<'PYEOF'
 import importlib.util, json, sys
 sys.path.insert(0, '/opt/hermes'); import hermes_bootstrap
-d = '/opt/hermes-home/.hermes/profiles/maintainer/plugins/repo-intel'
-spec = importlib.util.spec_from_file_location('repo_intel', d + '/__init__.py', submodule_search_locations=[d])
-m = importlib.util.module_from_spec(spec); sys.modules['repo_intel'] = m; spec.loader.exec_module(m)
-from repo_intel import pack_tools
+sys.path.insert(0, '/opt/kyverno/engine')
+from repo_engine import pack_tools
 out = json.loads(pack_tools.handle_repo_pack({}))
 assert out['success'] and out['branch_gates'], out
 assert out['pack'] == '/opt/kyverno/profiles/maintainer/org/org.yaml', out['pack']
@@ -60,10 +71,8 @@ check "another organisation's pack works from a file, and sequences PRs" inimage
 HERMES_HOME=\$HERMES_HOME/profiles/maintainer \$PY -I - <<'PYEOF'
 import importlib.util, sys
 sys.path.insert(0, '/opt/hermes'); import hermes_bootstrap
-d = '/opt/hermes-home/.hermes/profiles/maintainer/plugins/repo-intel'
-spec = importlib.util.spec_from_file_location('repo_intel', d + '/__init__.py', submodule_search_locations=[d])
-m = importlib.util.module_from_spec(spec); sys.modules['repo_intel'] = m; spec.loader.exec_module(m)
-from repo_intel import pack, sequencer
+sys.path.insert(0, '/opt/kyverno/engine')
+from repo_engine import pack, sequencer
 rules = pack.load('/fixtures/other-org.yaml')
 assert rules.gate.name == 'release-gate' and rules.classify('core/x.go') == 'CRITICAL'
 r = sequencer.sequence([{'number': 1, 'changed_files': ['gen/out.go']}, {'number': 2, 'changed_files': ['schema/a.proto']}], 'main', rules=rules)
@@ -73,10 +82,8 @@ check "no pack means empty rules, not an error" inimage <<<"$PRELUDE
 HERMES_HOME=\$HERMES_HOME/profiles/maintainer \$PY -I - <<'PYEOF'
 import importlib.util, sys
 sys.path.insert(0, '/opt/hermes'); import hermes_bootstrap
-d = '/opt/hermes-home/.hermes/profiles/maintainer/plugins/repo-intel'
-spec = importlib.util.spec_from_file_location('repo_intel', d + '/__init__.py', submodule_search_locations=[d])
-m = importlib.util.module_from_spec(spec); sys.modules['repo_intel'] = m; spec.loader.exec_module(m)
-from repo_intel import pack
+sys.path.insert(0, '/opt/kyverno/engine')
+from repo_engine import pack
 r = pack.load('/nonexistent/org.yaml')
 assert r.gates == () and r.classify('anything.go') == 'STANDARD'
 PYEOF"

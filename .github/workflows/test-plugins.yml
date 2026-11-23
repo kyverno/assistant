@@ -1,4 +1,4 @@
-# Runs the plugin and hook tests (tests/plugins, tests/hooks) on every pull request that touches what they test. They need
+# Runs the engine, plugin and hook tests (tests/plugins, tests/hooks) on every pull request that touches what they test. They need
 # only Python and PyYAML: no Docker, no network, no Hermes.
 name: test-plugins
 
@@ -6,6 +6,7 @@ on:
   pull_request:
     paths:
       - "profiles/**"
+      - "engine/**"
       - "container/org/**"
       - "container/hooks/**"
       - "container/assistant-init"
@@ -19,6 +20,7 @@ on:
     branches: [main]
     paths:
       - "profiles/**"
+      - "engine/**"
       - "container/org/**"
       - "container/hooks/**"
       - "container/assistant-init"

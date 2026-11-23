@@ -1,4 +1,4 @@
-"""repo-intel's fetch and sequence_prs against a fake GitHub: gate state, competing PRs, the PR cache, the size cap."""
+"""The engine's fetch and sequence_prs against a fake GitHub: gate state, competing PRs, the PR cache, the size cap."""
 import io
 import json
 import pathlib
@@ -8,10 +8,10 @@ import urllib.error
 from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
-from _load import FIXTURES, repo_intel
+from _load import FIXTURES, engine
 
-repo_intel()
-from repo_intel import fetch, pack, sequence_tools  # noqa: E402
+engine()
+from repo_engine import fetch, pack, sequence_tools  # noqa: E402
 
 RULES = pack.load(str(FIXTURES / "other-org.yaml"))
 NO_PACK = pack.Rules()

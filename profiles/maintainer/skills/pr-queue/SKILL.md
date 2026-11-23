@@ -23,7 +23,7 @@ organisation's facts.
 
 ## Prerequisites
 
-- `queue` and `item` (plugin tools, `plugins/repo-intel/`): the ranked list (L1) and one PR's card or code (L2, L3).
+- `queue` and `item` (engine tools, the repo-intel MCP server): the ranked list (L1) and one PR's card or code (L2, L3).
 - For deep dives only: `sequence_prs(pr_numbers)` (the full tier report), `fetch_file_diff_overlap` (two PRs' patches
   for one file), `pull_request_read` (review comments, the full diff), `actions_list`/`actions_get`/`get_job_logs`.
 - `mnemosyne_recall` / `mnemosyne_triple_query` (read), `mnemosyne_remember` / `mnemosyne_triple_add` (write): see

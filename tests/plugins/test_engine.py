@@ -1,4 +1,4 @@
-"""The engine (repo-intel/engine/) and the queue and item tools over a fake GitHub: ranking rules, the change profile,
+"""The engine core (engine/repo_engine/core/) and the queue and item tools over a fake GitHub: ranking rules, the change profile,
 CODEOWNERS parity with the contributor plugin, and each layer's character budget."""
 import base64
 import json
@@ -10,13 +10,13 @@ from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
-from _load import FIXTURES, contributor, repo_intel
+from _load import FIXTURES, contributor, engine
 from test_fetch import REPO, Base, FakeGitHub, issue_ref, pr_node
 
-repo_intel()
+engine()
 contributor()
-from repo_intel import fetch, pack, queue_tools  # noqa: E402
-from repo_intel.engine import layers, owners, profile, rank  # noqa: E402
+from repo_engine import fetch, pack, queue_tools  # noqa: E402
+from repo_engine.core import layers, owners, profile, rank  # noqa: E402
 from contributor import rules as contributor_rules  # noqa: E402
 
 RULES = pack.load(str(FIXTURES / "other-org.yaml"))

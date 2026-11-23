@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from . import fetch, sequencer
-from .engine import layers, owners as owners_mod, profile as profile_mod, rank
+from .core import layers, owners as owners_mod, profile as profile_mod, rank
 from .fetch_tools import _repo, _schema
 
 # A queue question fetches at most this many candidates. More takes longer than a maintainer will wait (two requests at
@@ -24,11 +24,7 @@ _NOW_SHOWN: set[str] = set()
 
 
 def _login() -> Optional[str]:
-    try:
-        from agent.secret_scope import get_secret  # type: ignore[import-not-found]
-    except ImportError:
-        get_secret = os.environ.get
-    return get_secret("MAINTAINER_GITHUB_LOGIN") or None
+    return os.environ.get("MAINTAINER_GITHUB_LOGIN") or None
 
 
 # -- focus ---------------------------------------------------------------------------------------------------------

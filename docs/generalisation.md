@@ -81,7 +81,7 @@ assistant is not yet: its pack still requires a contribution-ladder section.
 | Was Kyverno-specific | Now |
 | --- | --- |
 | `KYVERNO_REPO` and the other `KYVERNO_*` settings | `ASSISTANT_REPO` and `ASSISTANT_*`; There is no default repository |
-| File classes, the e2e gate, bot names, `kyverno/api` and the milestone format in `sequencer.py` and `fetch.py` | The `maintainer:` section of the organisation's `assistant-org.yaml`, read by `plugins/repo-intel/pack.py`. No pack means no file classes and no gate |
+| File classes, the e2e gate, bot names, `kyverno/api` and the milestone format in `sequencer.py` and `fetch.py` | The `maintainer:` section of the organisation's `assistant-org.yaml`, read by `engine/repo_engine/pack.py`. No pack means no file classes and no gate |
 | `skills/kyverno-context` | A generic `repo-context` skill, plus `container/org/kyverno/facts.md` for Kyverno's prose. The `repo_pack` tool hands both to the agent |
 | `plugins/kyverno-fetch` and `plugins/kyverno-sequencer` | One plugin, `plugins/repo-intel` |
 | Launcher, sandbox, container and profile names | `container/assistant`, `assistant-maint`, `assistant-contrib`, profiles `maintainer` and `contributor`. |

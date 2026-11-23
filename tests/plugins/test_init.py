@@ -14,10 +14,10 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
-from _load import ROOT, repo_intel
+from _load import ROOT, engine
 
-repo_intel()
-from repo_intel import pack  # noqa: E402
+engine()
+from repo_engine import pack  # noqa: E402
 
 SCRIPT = ROOT / "container" / "assistant-init"
 loader = importlib.machinery.SourceFileLoader("assistant_init", str(SCRIPT))

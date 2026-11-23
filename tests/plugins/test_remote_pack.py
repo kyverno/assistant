@@ -7,12 +7,12 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
-from _load import FIXTURES, ROOT, contributor, repo_intel
+from _load import FIXTURES, ROOT, contributor, engine
 
-repo_intel()
+engine()
 contributor()
 from contributor import github, rules  # noqa: E402
-from repo_intel import pack, pack_tools  # noqa: E402
+from repo_engine import pack, pack_tools  # noqa: E402
 
 KYVERNO = ROOT / "container/org/kyverno/org.yaml"
 OTHER = (FIXTURES / "other-org.yaml").read_bytes()

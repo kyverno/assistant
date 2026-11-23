@@ -80,10 +80,8 @@ test ! -w /opt/kyverno/profiles/maintainer/org/org.yaml
 HERMES_HOME=$HERMES_HOME/profiles/maintainer "$PY" -I - <<'PYEOF'
 import importlib.util, sys
 sys.path.insert(0, "/opt/hermes"); import hermes_bootstrap
-plugin = "/opt/hermes-home/.hermes/profiles/maintainer/plugins/repo-intel"
-spec = importlib.util.spec_from_file_location("repo_intel", plugin + "/__init__.py", submodule_search_locations=[plugin])
-module = importlib.util.module_from_spec(spec); sys.modules["repo_intel"] = module; spec.loader.exec_module(module)
-from repo_intel import pack
+sys.path.insert(0, "/opt/kyverno/engine")
+from repo_engine import pack
 rules = pack.load()
 assert rules.source == str(pack.IMAGE_PACK), "the pack was not read from the image copy: %s" % rules.source
 assert rules.generated and rules.gates, "the pack loaded empty"

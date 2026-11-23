@@ -63,14 +63,18 @@ ever wanted:
   this PR in Slack" is a bounded-window scan with client-side text matching, never a real
   search (Slack's own `search.messages` API doesn't work with a bot token anyway).
 
-## Why a bundled plugin instead of MCP servers
+## The engine and its MCP server
 
-`profiles/maintainer/plugins/repo-intel/` is a bundled Hermes plugin (plain
-Python, not MCP servers) — `__init__.py` exposes `register(ctx)`, which registers each
-tool's schema (from `fetch_tools.py` and `sequence_tools.py`) with Hermes; still needs an explicit `config.yaml` toolset
-grant and a `plugins.enabled:` entry like any other tool — bundled isn't auto-trusted. They
-ship with the repo (no separate packaging step, no extra install) and are discovered
-per-profile under `~/.hermes/profiles/<profile>/plugins/<name>/`.
+`engine/` at the top of the repository holds the repository engine (`engine/repo_engine/`): plain Python with no
+Hermes imports. `engine/serve.py` serves its tools over MCP on stdio (`repo_engine/server.py`, standard library only),
+so Hermes and any other MCP client use the same code. The maintainer profile starts it as `mcp_servers.repo-intel`,
+under Hermes' own interpreter, which is the only one the sandbox proxy lets use the GitHub token; its tools reach the
+model as `mcp__repo_intel__<tool>`. In the image the engine is at `/opt/kyverno/engine`, read-only to the agent. A
+client keeps one server process per session, so the caches below last the session.
+
+Hermes passes a stdio server only `PATH`, `HOME` and a few more variables, so `config.yaml` lists the rest under
+`env`: the token, the repository, the pack file and the proxy variables. A variable that is not set arrives as the
+literal `${NAME}`, which the server treats as unset.
 
 - **fetch** (`repo-intel`) — `fetch_pr_candidates(repo, search_query, limit)` replaces what would
   otherwise be a `search_pull_requests` call plus one sequential `pull_request_read` per PR
@@ -96,10 +100,10 @@ per-profile under `~/.hermes/profiles/<profile>/plugins/<name>/`.
   `timelineItems`). Verified live against `kyverno/kyverno` (2026-10-05): both
   `closedByPullRequestsReferences` and `ClosedEvent.closer`'s `PullRequest`/`Commit`
   union resolve correctly end to end, not just by schema introspection.
-- **queue and item** (`repo-intel`, `engine/`) — the layered tools `pr-queue` starts from. `queue(focus, kind,
+- **queue and item** (`repo-intel`, `repo_engine/core/`) — the layered tools `pr-queue` starts from. `queue(focus, kind,
   prefer, avoid)` fetches up to 60 candidates and returns the top items, ranked in code with their reasons (L1, at most
   12,000 characters). `item(number, level)` returns one PR or issue as a card (L2, 3,200) or the patches that matter
-  most plus the nearest `AGENTS.md` excerpt (L3, 10,000). `engine/` is pure Python: `profile.py` (lines per file class,
+  most plus the nearest `AGENTS.md` excerpt (L3, 10,000). `core/` is pure computation: `profile.py` (lines per file class,
   functions touched from the patches' hunk headers), `owners.py` (CODEOWNERS), `rank.py` (priority from severity, then
   urgency, then reactions; readiness and risk kept apart from it; close candidates as their own list) and `layers.py`
   (the budgets). Patches are cached by head commit and CODEOWNERS and docs by the default branch's commit, and a PR

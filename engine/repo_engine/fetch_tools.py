@@ -17,17 +17,12 @@ from .fetch import (
 
 
 def _repo(args: Dict[str, Any]):
-    """`repo` arg, else this profile's ASSISTANT_REPO,
-    scoped under a multiplexing gateway."""
+    """`repo` arg, else ASSISTANT_REPO from the server's environment (the MCP client's config passes it)."""
     if args.get("repo"):
         return args["repo"]
-    try:
-        from agent.secret_scope import get_secret  # type: ignore[import-not-found]
-    except ImportError:
-        import os
+    import os
 
-        get_secret = os.environ.get
-    return get_secret("ASSISTANT_REPO")
+    return os.environ.get("ASSISTANT_REPO")
 
 
 def _schema(name: str, description: str, properties: Dict[str, Any], required=None) -> Dict[str, Any]:

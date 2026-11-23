@@ -9,6 +9,7 @@ on:
     paths:
       - "container/**"
       - "profiles/**"
+      - "engine/**"
       - "tests/image/**"
       - "tests/fixtures/**"
       - ".github/workflows/container-build.yml"
@@ -17,6 +18,7 @@ on:
     paths:
       - "container/**"
       - "profiles/**"
+      - "engine/**"
       - "tests/image/**"
       - "tests/fixtures/**"
       - ".github/workflows/container-build.yml"

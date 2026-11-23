@@ -25,7 +25,7 @@ labels/CODEOWNERS — assumed loaded, not re-derived here. Taking an action on a
 
 - `repo-context` loaded this session (live labels, and the `repo-doc:<owner/repo>:<path>`
   cache step 2's grounding reads from).
-- `fetch_issue_candidates` (plugin tool, `plugins/repo-intel/`) — one call fetches
+- `fetch_issue_candidates` (engine tool, the repo-intel MCP server) — one call fetches
   every candidate issue's full metadata, including `closing_prs` (every PR that
   references closing it, not just the one that merges), `closed_by`/
   `reopened_since_closed`, and `parent`/`sub_issues`/`tracked_in_issues` (GitHub's own

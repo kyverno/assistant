@@ -153,19 +153,53 @@ mcp_servers:
         - conversations_history
         - conversations_add_message
 
-# Compose the two narrowed MCP toolsets into one named grant. Each is
+  # The repository engine (engine/ at the top of this repository): queue and item (the review queue ranked in code,
+  # and one PR or issue's card or code), the fetch tools (GitHub's GraphQL API called directly, replacing N
+  # sequential pull_request_read calls with one), sequence_prs and repo_pack. Its own MCP server, on stdio, so any
+  # MCP client can use the same tools. The two @...@ values are set at install: Hermes' own interpreter, the only
+  # one the sandbox proxy lets use the GitHub token, and where engine/ is. Hermes passes a stdio server only PATH,
+  # HOME and a few more, so everything else it needs is listed under env; the proxy variables carry its GitHub
+  # calls through the sandbox proxy, where only reads are allowed. A variable that is not set reaches the server
+  # as the literal ${NAME}, which the server treats as unset.
+  repo-intel:
+    command: "@HERMES_PYTHON@"
+    args: ["@ENGINE_DIR@/serve.py"]
+    env:
+      REPO_GITHUB_TOKEN: "${REPO_GITHUB_TOKEN}"
+      ASSISTANT_REPO: "${ASSISTANT_REPO}"
+      MAINTAINER_GITHUB_LOGIN: "${MAINTAINER_GITHUB_LOGIN}"
+      ASSISTANT_ORG_FILE: "${ASSISTANT_ORG_FILE}"
+      HERMES_HOME: "${HERMES_HOME}"
+      HTTPS_PROXY: "${HTTPS_PROXY}"
+      https_proxy: "${https_proxy}"
+      HTTP_PROXY: "${HTTP_PROXY}"
+      http_proxy: "${http_proxy}"
+      NO_PROXY: "${NO_PROXY}"
+      no_proxy: "${no_proxy}"
+      SSL_CERT_FILE: "${SSL_CERT_FILE}"
+    # The first queue of a session fetches up to 60 PRs; give it room.
+    timeout: 300
+    tools:
+      include:
+        - queue
+        - item
+        - fetch_pr_candidates
+        - fetch_pr_details
+        - fetch_issue_candidates
+        - fetch_issue_details
+        - fetch_file_diff_overlap
+        - sequence_prs
+        - repo_pack
+
+# Compose the narrowed MCP toolsets into one named grant. Each is
 # already reduced to its verified tool list by mcp_servers.*.tools.include
 # above — this just groups them; it does not do any filtering of its own.
 custom_toolsets:
   maintainer-tools:
     - mcp-github
     - mcp-slack
-    # repo-intel: a bundled plugin (plugins/repo-intel/), not an MCP server. Registers queue and item (the review
-    # queue ranked in code, and one PR or issue's card or code), the fetch tools
-    # (fetch_pr_candidates and friends: GitHub's GraphQL API called directly with this profile's own
-    # REPO_GITHUB_TOKEN, replacing N sequential pull_request_read calls with one tool call) and
-    # sequence_prs, a dependency graph over the PRs a fetch returned, taken by number. See docs/architecture.md.
-    - repo-intel
+    # The engine's MCP server (mcp_servers.repo-intel above). See docs/architecture.md.
+    - mcp-repo-intel
     # maintainer-dashboard: a bundled plugin (plugins/maintainer-dashboard/). Registers update_dashboard,
     # which writes the maintainer's dashboard tab state; no GitHub/Slack access.
     - maintainer-dashboard
@@ -258,8 +292,6 @@ skills:
 plugins:
   enabled:
     - mnemosyne
-    # repo-intel: bundled at plugins/<name>/ (not the community catalog
-    # like mnemosyne) — installed as part of this repo, not a separate `hermes plugins install`.
-    - repo-intel
+    # maintainer-dashboard: bundled at plugins/<name>/ (not the community catalog like mnemosyne).
     - maintainer-dashboard
 agent: {}
