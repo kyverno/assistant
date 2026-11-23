@@ -259,6 +259,11 @@ class Budgets(unittest.TestCase):
         self.assertLessEqual(layers.size(view), layers.QUEUE_BUDGET)
         self.assertEqual(view["pack"], "left out to fit; call queue again for it")
 
+    def test_the_last_resort_also_trims_text_and_items_in_lists(self):
+        view = layers.fit({"relations": ["r" * 400] * 200}, 3_000, [])
+        self.assertLessEqual(layers.size(view), 3_000)
+        self.assertTrue(view["relations"][-1].endswith("more left out to fit"))
+
     def test_card_fits(self):
         rec = pr(1, body="b" * 5000, labels=[f"l{i}" for i in range(30)],
                  closing_issues=[issue(i, [f"x{j}" for j in range(10)], title="t" * 100, body_excerpt="e" * 600,
@@ -361,6 +366,15 @@ class Tools(Base):
         sec["labels"] = {"nodes": [{"name": "security"}]}
         return [pr_node(1, files=["core/e.go"]), pr_node(2, files=["core/e.go"], closing=[sec]),
                 pr_node(3, files=["docs/x.md"])]
+
+    def test_a_brief_cut_to_fit_comes_again_on_the_next_call(self):
+        self.github(self.prs())
+        with mock.patch.object(layers, "QUEUE_BUDGET", 50):
+            cut = json.loads(queue_tools.handle_queue({"repo": REPO}))
+        self.assertIsInstance(cut.get("now"), str)
+        again = json.loads(queue_tools.handle_queue({"repo": REPO}))
+        self.assertIsInstance(again["now"], dict)
+        self.assertNotIn("now", json.loads(queue_tools.handle_queue({"repo": REPO})))
 
     def test_queue_ranks_with_reasons_relations_and_the_now_brief(self):
         self.github(self.prs())

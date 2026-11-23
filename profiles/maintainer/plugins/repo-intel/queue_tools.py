@@ -274,14 +274,18 @@ def queue(repo: str, focus: str = "", kind: str = "pr", limit: int = 10, prefer:
         head["gate"] = {"name": g["name"], "open_failure_issues": [f"#{i['number']} {i['title']}" for i in
                                                                    g["open_failure_issues"]],
                         "blocking": g["blocking_branches"] or (["every branch"] if g["blocks_all_branches"] else [])}
-    if repo.lower() not in _NOW_SHOWN:
-        _NOW_SHOWN.add(repo.lower())
+    brief_due = repo.lower() not in _NOW_SHOWN
+    if brief_due:
         head["now"] = _now_brief(repo, rules, state)
         head["pack"] = fetch._pack_brief(rules)
         if co_path is None:
             head["now"]["codeowners"] = "none found, so ownership and 'mine' only use review requests"
     tail = _tail(result, limit, errors, started)
-    return layers.queue_view(head, lines, tail)
+    view = layers.queue_view(head, lines, tail)
+    # Shown only once it actually went out: a brief cut to fit comes again on the next call.
+    if brief_due and isinstance(view.get("now"), dict) and isinstance(view.get("pack"), dict):
+        _NOW_SHOWN.add(repo.lower())
+    return view
 
 
 def _tail(result: dict, limit: int, errors: list[str], started: float) -> dict[str, Any]:

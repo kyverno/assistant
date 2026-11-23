@@ -41,10 +41,34 @@ def fit(view: dict, budget: int, steps: list[Callable[[dict], bool]]) -> dict:
             return view
     limit = 200
     while size(view) > budget and limit > 20:
-        view = json.loads(json.dumps(view), object_hook=lambda d: {k: _clip(v, limit) if isinstance(v, str) else v
-                                                                   for k, v in d.items()})
+        view = _clip_all(view, limit)
         limit //= 2
+    keep = 8
+    while size(view) > budget and keep >= 1:
+        view = _cut_lists(view, keep)
+        keep //= 2
     return view
+
+
+def _clip_all(obj: Any, limit: int) -> Any:
+    """Every string clipped to `limit`, in dicts and in lists."""
+    if isinstance(obj, str):
+        return _clip(obj, limit)
+    if isinstance(obj, dict):
+        return {k: _clip_all(v, limit) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_clip_all(v, limit) for v in obj]
+    return obj
+
+
+def _cut_lists(obj: Any, keep: int) -> Any:
+    """Every list cut to its first `keep` items, with a note of how many were dropped."""
+    if isinstance(obj, dict):
+        return {k: _cut_lists(v, keep) for k, v in obj.items()}
+    if isinstance(obj, list):
+        items = [_cut_lists(v, keep) for v in obj[:keep]]
+        return items + ([f"{len(obj) - keep} more left out to fit"] if len(obj) > keep else [])
+    return obj
 
 
 # -- L1 ------------------------------------------------------------------------------------------------------------
