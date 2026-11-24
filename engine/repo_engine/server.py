@@ -71,8 +71,11 @@ def handle(message: Any) -> Optional[dict[str, Any]]:
                 "error": {"code": -32600, "message": "invalid request"}}
     if "id" not in message:
         return None
-    method, params = message["method"], message.get("params") or {}
+    method, params = message["method"], message.get("params")
+    params = {} if params is None else params
     try:
+        if not isinstance(params, dict):
+            raise _RpcError(-32602, "params must be an object")
         if method == "initialize":
             asked = params.get("protocolVersion")
             result: Any = {"protocolVersion": asked if asked in PROTOCOLS else PROTOCOLS[0],
@@ -91,6 +94,16 @@ def handle(message: Any) -> Optional[dict[str, Any]]:
     return {"jsonrpc": "2.0", "id": message["id"], "result": result}
 
 
+def _safe_handle(message: Any) -> Optional[dict[str, Any]]:
+    """handle(), but a message it does not expect gets an internal error instead of stopping the server."""
+    try:
+        return handle(message)
+    except Exception:
+        traceback.print_exc(file=sys.stderr)
+        mid = message.get("id") if isinstance(message, dict) else None
+        return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32603, "message": "internal error"}}
+
+
 def serve(stdin=None, stdout=None) -> None:
     if stdin is None:
         # MCP messages are UTF-8 whatever the locale the client passes (often none at all).
@@ -107,9 +120,9 @@ def serve(stdin=None, stdout=None) -> None:
             reply: Any = {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "parse error"}}
         else:
             if isinstance(message, list):  # a batch (protocol 2025-03-26)
-                reply = [r for r in (handle(m) for m in message) if r is not None] or None
+                reply = [r for r in (_safe_handle(m) for m in message) if r is not None] or None
             else:
-                reply = handle(message)
+                reply = _safe_handle(message)
         if reply is not None:
             stdout.write(json.dumps(reply, ensure_ascii=False) + "\n")
             stdout.flush()

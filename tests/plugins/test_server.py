@@ -44,6 +44,41 @@ class Protocol(unittest.TestCase):
         self.assertEqual(server.handle({"id": 3, "method": "ping"})["error"]["code"], -32600)
         self.assertEqual(server.handle(rpc("ping"))["result"], {})
 
+    def test_params_that_are_not_an_object_are_rejected_and_the_server_goes_on(self):
+        self.assertEqual(server.handle(rpc("tools/list", []))["error"]["code"], -32602)
+        self.assertEqual(server.handle(rpc("initialize", ["2025-06-18"]))["error"]["code"], -32602)
+        out = io.StringIO()
+        lines = [rpc("tools/list", [], id_=1), rpc("ping", id_=2)]
+        server.serve(io.StringIO("".join(json.dumps(m) + "\n" for m in lines)), out)
+        replies = [json.loads(x) for x in out.getvalue().splitlines()]
+        self.assertEqual([r["id"] for r in replies], [1, 2])
+        self.assertEqual(replies[0]["error"]["code"], -32602)
+        self.assertEqual(replies[1]["result"], {})
+
+    def test_an_unexpected_failure_is_an_internal_error_not_a_crash(self):
+        out = io.StringIO()
+        lines = [rpc("ping", id_=1), rpc("ping", id_=2)]
+        real = server.handle
+        calls = []
+
+        def flaky(m):
+            calls.append(m)
+            if len(calls) == 1:
+                raise KeyError("x")
+            return real(m)
+        with mock.patch.object(server, "handle", flaky), mock.patch("sys.stderr", io.StringIO()):
+            server.serve(io.StringIO("".join(json.dumps(m) + "\n" for m in lines)), out)
+        replies = [json.loads(x) for x in out.getvalue().splitlines()]
+        self.assertEqual(replies[0], {"jsonrpc": "2.0", "id": 1, "error": {"code": -32603, "message": "internal error"}})
+        self.assertEqual(replies[1]["result"], {})
+
+    def test_the_host_installer_points_the_server_at_the_interpreter_it_picked(self):
+        # install.sh shadows python3 with a function that runs $PY, so `command -v python3` would write a bare
+        # "python3" into the profile, which may lack PyYAML.
+        text = (ROOT / "scripts/install.sh").read_text()
+        self.assertIn('python3 - "$PROFILE_DIR/config.yaml" "$PY" "$REPO_ROOT/engine"', text)
+        self.assertNotIn("command -v python3", text)
+
     def test_tools_list_matches_the_engine_and_the_profile_allowlist(self):
         tools = server.handle(rpc("tools/list"))["result"]["tools"]
         names = [t["name"] for t in tools]

@@ -155,9 +155,9 @@ s = open(path).read()
 open(path, "w").write(s.replace('command: "./hooks/', 'command: "' + profile_dir + '/hooks/'))
 PY
 
-# The engine's MCP server runs from this checkout, under the python3 this installer uses (it has PyYAML). Outside the
+# The engine's MCP server runs from this checkout, under the interpreter this installer picked ($PY, it has PyYAML). Outside the
 # sandbox there is no proxy, so any interpreter may hold the token.
-python3 - "$PROFILE_DIR/config.yaml" "$(command -v python3)" "$REPO_ROOT/engine" <<'PY'
+python3 - "$PROFILE_DIR/config.yaml" "$PY" "$REPO_ROOT/engine" <<'PY'
 import sys
 p, python, engine = sys.argv[1:4]
 s = open(p).read().replace("@HERMES_PYTHON@", python).replace("@ENGINE_DIR@", engine)
