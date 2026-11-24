@@ -38,7 +38,7 @@ def tool_list() -> list[dict[str, Any]]:
 
 def _call(params: dict[str, Any]) -> dict[str, Any]:
     name = params.get("name")
-    if name not in _BY_NAME:
+    if not isinstance(name, str) or name not in _BY_NAME:
         raise _RpcError(-32602, f"unknown tool: {name}")
     args = params.get("arguments")
     args = {} if args is None else args

@@ -95,6 +95,9 @@ class Calls(unittest.TestCase):
 
     def test_unknown_tool_is_a_protocol_error(self):
         self.assertEqual(self.call("merge_pull_request")["error"]["code"], -32602)
+        for bad in ([], {}, None, 1):  # a list or object is unhashable: it must not reach the dict lookup
+            r = server.handle(rpc("tools/call", {"name": bad, "arguments": {}}))
+            self.assertEqual(r["error"]["code"], -32602, bad)
 
     def test_arguments_that_are_not_an_object_are_rejected_even_when_empty(self):
         for bad in ([], "", 0, False, ["x"]):
