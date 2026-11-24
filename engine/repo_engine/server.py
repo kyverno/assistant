@@ -40,7 +40,8 @@ def _call(params: dict[str, Any]) -> dict[str, Any]:
     name = params.get("name")
     if name not in _BY_NAME:
         raise _RpcError(-32602, f"unknown tool: {name}")
-    args = params.get("arguments") or {}
+    args = params.get("arguments")
+    args = {} if args is None else args
     if not isinstance(args, dict):
         raise _RpcError(-32602, "arguments must be an object")
     try:
@@ -119,7 +120,9 @@ def serve(stdin=None, stdout=None) -> None:
         except ValueError:
             reply: Any = {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "parse error"}}
         else:
-            if isinstance(message, list):  # a batch (protocol 2025-03-26)
+            if message == []:  # JSON-RPC: an empty batch is an invalid request
+                reply = {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "invalid request"}}
+            elif isinstance(message, list):  # a batch (protocol 2025-03-26); only notifications → no reply
                 reply = [r for r in (_safe_handle(m) for m in message) if r is not None] or None
             else:
                 reply = _safe_handle(message)

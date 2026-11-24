@@ -96,6 +96,17 @@ class Calls(unittest.TestCase):
     def test_unknown_tool_is_a_protocol_error(self):
         self.assertEqual(self.call("merge_pull_request")["error"]["code"], -32602)
 
+    def test_arguments_that_are_not_an_object_are_rejected_even_when_empty(self):
+        for bad in ([], "", 0, False, ["x"]):
+            r = server.handle(rpc("tools/call", {"name": "queue", "arguments": bad}))
+            self.assertEqual(r["error"]["code"], -32602, bad)
+
+    def test_empty_and_notification_only_batches(self):
+        out = io.StringIO()
+        server.serve(io.StringIO("[]\n" + json.dumps([rpc("notifications/initialized", id_=None)]) + "\n"), out)
+        replies = [json.loads(x) for x in out.getvalue().splitlines()]
+        self.assertEqual(replies, [{"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "invalid request"}}])
+
     def test_a_tool_that_reports_failure_is_marked_as_an_error(self):
         with mock.patch.dict(os.environ, {}, clear=True):
             r = self.call("queue")["result"]
