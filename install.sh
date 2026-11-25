@@ -31,7 +31,14 @@ main() {
 
   dir="$(mktemp -d)"
   trap 'rm -rf "$dir"' EXIT INT TERM
+  # `docker run` alone reuses whatever copy of the tag is cached, which can be a release from before the image carried
+  # the launcher. Pull first; if the pull fails (offline, or a local-only image), go on with the cached copy.
+  docker pull -q "$image" >/dev/null || echo "could not pull $image; using the local copy" >&2
   docker run --rm "$image" tar -C /opt/kyverno -c launcher | tar -x -C "$dir"
+  if [ ! -x "$dir/launcher/assistant" ]; then
+    echo "$image has no launcher; it predates v0.2.1. Run: docker pull $image, or pass a newer --image" >&2
+    exit 1
+  fi
 
   if [ -n "$tty_in" ]; then
     ASSISTANT_IMAGE="$image" "$dir/launcher/assistant" "$@" <"$tty_in"
