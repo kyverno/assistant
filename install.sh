@@ -42,8 +42,16 @@ main() {
   fi
   # Copy into a file first, so a missing launcher reaches the check below instead of failing inside a pipeline.
   if ! docker run --rm "$image" tar -C /opt/kyverno -c launcher >"$dir/launcher.tar" \
-    || ! tar -x -C "$dir" -f "$dir/launcher.tar" || [ ! -x "$dir/launcher/assistant" ]; then
+    || [ ! -s "$dir/launcher.tar" ]; then
     echo "$image has no launcher at /opt/kyverno/launcher/assistant; pass --image ghcr.io/kyverno/assistant:latest (v0.2.1 or later)" >&2
+    exit 1
+  fi
+  if ! tar -x -C "$dir" -f "$dir/launcher.tar"; then
+    echo "could not unpack the launcher from $image into $dir" >&2
+    exit 1
+  fi
+  if [ ! -x "$dir/launcher/assistant" ]; then
+    echo "the launcher from $image has no executable launcher/assistant" >&2
     exit 1
   fi
 
