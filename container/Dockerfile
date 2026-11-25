@@ -8,7 +8,7 @@
 
 # Pinned by digest (the multi-architecture index), so a re-pushed tag cannot change what we build on.
 # Dependabot proposes new digests; see docs/container.md, "Updating dependencies". Both stages use the same one.
-FROM nvcr.io/nvidia/base/ubuntu:26.04@sha256:714d221109173e322eb73204a88cdc242b8ac269a463a80785f35d0f0e0762fb AS build
+FROM nvcr.io/nvidia/base/ubuntu:26.04@sha256:2e1009c85d72e356e3aa29fd45946bef53c5613046f466c93eeffb63da8eec62 AS build
 
 # A failure anywhere in a piped command must fail the build (a failed download must not look like success).
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -176,7 +176,7 @@ RUN export HERMES_HOME=/opt/hermes-home/.hermes \
 
 
 # ---------------------------------------------------------------------------------------------------------
-FROM nvcr.io/nvidia/base/ubuntu:26.04@sha256:714d221109173e322eb73204a88cdc242b8ac269a463a80785f35d0f0e0762fb AS final
+FROM nvcr.io/nvidia/base/ubuntu:26.04@sha256:2e1009c85d72e356e3aa29fd45946bef53c5613046f466c93eeffb63da8eec62 AS final
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
