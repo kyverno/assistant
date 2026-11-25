@@ -31,7 +31,29 @@ main() {
 
   dir="$(mktemp -d)"
   trap 'rm -rf "$dir"' EXIT INT TERM
-  docker run --rm "$image" tar -C /opt/kyverno -c launcher | tar -x -C "$dir"
+  # `docker run` alone reuses whatever copy of the tag is cached, which can be a release from before the image carried
+  # the launcher. Pull first; if the pull fails (offline, or a local-only image), go on with the cached copy.
+  if ! docker pull -q "$image" >/dev/null; then
+    if ! docker image inspect "$image" >/dev/null 2>&1; then
+      echo "could not pull $image, and there is no local copy of it" >&2
+      exit 1
+    fi
+    echo "could not pull $image; using the local copy" >&2
+  fi
+  # Copy into a file first, so a missing launcher reaches the check below instead of failing inside a pipeline.
+  if ! docker run --rm "$image" tar -C /opt/kyverno -c launcher >"$dir/launcher.tar" \
+    || [ ! -s "$dir/launcher.tar" ]; then
+    echo "$image has no launcher at /opt/kyverno/launcher/assistant; pass --image ghcr.io/kyverno/assistant:latest (v0.2.1 or later)" >&2
+    exit 1
+  fi
+  if ! tar -x -C "$dir" -f "$dir/launcher.tar"; then
+    echo "could not unpack the launcher from $image into $dir" >&2
+    exit 1
+  fi
+  if [ ! -x "$dir/launcher/assistant" ]; then
+    echo "the launcher from $image has no executable launcher/assistant" >&2
+    exit 1
+  fi
 
   if [ -n "$tty_in" ]; then
     ASSISTANT_IMAGE="$image" "$dir/launcher/assistant" "$@" <"$tty_in"
