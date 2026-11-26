@@ -14,11 +14,11 @@ import sys
 import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
-from _load import FIXTURES, ROOT, repo_intel
+from _load import FIXTURES, ROOT, engine
 
-repo_intel()
+engine()
 import yaml  # noqa: E402
-from repo_intel import pack  # noqa: E402
+from repo_engine import pack  # noqa: E402
 
 loader = importlib.machinery.SourceFileLoader("assistant_init_k", str(ROOT / "container" / "assistant-init"))
 init = importlib.util.module_from_spec(importlib.util.spec_from_loader("assistant_init_k", loader))

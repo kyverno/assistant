@@ -127,7 +127,10 @@ RUN export HERMES_HOME=/opt/hermes-home/.hermes \
     && mkdir -p /opt/hermes-home/.hermes/profiles/contributor/cache \
     && ln -s /opt/hermes-home/.hermes/profiles/maintainer/cache/fastembed /opt/hermes-home/.hermes/profiles/contributor/cache/fastembed
 
-# The rest of the one-time profile setup (skills, hook paths, terminal and Slack settings): see the script.
+# The repository engine, whose MCP server the maintainer profile runs (config.yaml, mcp_servers.repo-intel). Root-owned,
+# so read-only to the agent. Copied this late so an engine change does not rebuild the layers above.
+COPY engine /opt/kyverno/engine
+# The rest of the one-time profile setup (skills, hook paths, terminal and Slack settings, the engine): see the script.
 COPY --chmod=755 container/setup-profile.sh /usr/local/bin/kyverno-setup-profile
 RUN kyverno-setup-profile maintainer maintainer && kyverno-setup-profile contributor contributor
 

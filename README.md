@@ -541,12 +541,12 @@ repository, fork names, no limit on repositories).
 |---|---|
 | `SOUL.md` | The principles: what the agent may do, what it must never do, how it reasons |
 | **Skills** | Step-by-step procedures: `pr-queue`, `issue-triage`, `dependabot-queue`, `pr-actions`, `discussions`, `find-work`, `make-the-change`, ... |
-| **Plugins** | The deterministic tools, in plain Python: `repo-intel` (fetch, sequencing, the pack) and the dashboard for the maintainer; the contributor's knowledge, history and journey tools |
+| **Engine and plugins** | The deterministic tools, in plain Python: the repository engine (`engine/`: the ranked queue, fetch, sequencing, the pack), served to the maintainer over MCP, and the dashboard plugin; the contributor's knowledge, history and journey tools |
 | **Hooks** | Safety checks that run before a tool does: block merge-like tools, guard `git push`, keep the terminal inside the sandbox |
 | **Memory** | A long-term memory plugin, so the assistant recalls incidents, decisions and preferences between sessions |
 | **Config** | Which tools each profile may see; for example the contributor's GitHub tool list has no review or merge tool |
 
-Plugins hold the facts, skills hold the method, the model holds the judgment. See [`docs/how-it-works.md`](docs/how-it-works.md)
+The engine and plugins hold the facts, skills hold the method, the model holds the judgment. See [`docs/how-it-works.md`](docs/how-it-works.md)
 and [`docs/architecture.md`](docs/architecture.md).
 
 ## Protected by OpenShell

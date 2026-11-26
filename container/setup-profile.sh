@@ -57,6 +57,20 @@ s = s.replace('command: "./hooks/', 'command: "' + hooks_dir + '/')
 open(p, "w").write(s)
 PY
 
+if [ "$KIND" = maintainer ]; then
+  step "engine: its MCP server runs from the read-only copy in /opt/kyverno/engine, under Hermes' interpreter"
+  # The interpreter of Hermes' own environment (it has PyYAML), whose real binary is the one the proxy lets use the
+  # token. The engine copy under /opt/kyverno is read-only to the agent, like the hooks.
+  ENGINE_DIR=/opt/kyverno/engine
+  ENGINE_PY="$(HERMES_HOME="$PROFILE_DIR" "$PYTHON" -I -c 'import sys; sys.path.insert(0, "/opt/hermes"); import hermes_bootstrap, yaml; print(yaml.__file__.split("/lib/python")[0] + "/bin/python")' 2>/dev/null | tail -n 1)"
+  python3 - "$PROFILE_DIR/config.yaml" "$ENGINE_PY" "$ENGINE_DIR" <<'PY'
+import sys
+p, python, engine = sys.argv[1:4]
+s = open(p).read().replace("@HERMES_PYTHON@", python).replace("@ENGINE_DIR@", engine)
+open(p, "w").write(s)
+PY
+fi
+
 step "tools: terminal and file run locally inside the sandbox; Slack is left out for now"
 python3 - "$PROFILE_DIR/config.yaml" <<'PY'
 import re, sys
@@ -108,4 +122,13 @@ require "the terminal backend is local" grep -qE '^ +backend: *local' "$CFG"
 [ "$KIND" = maintainer ] && require "the cron pre-run check is off" grep -qE '^ +preflight: *false' "$CFG"
 require "terminal is enabled" grep -qE '^    - terminal$' "$CFG"
 require "file is enabled" grep -qE '^    - file$' "$CFG"
+if [ "$KIND" = maintainer ]; then
+  proxy_python() { case "$(readlink -f "$ENGINE_PY")" in "$HERMES_HOME"/tools/python-*/bin/python*) ;; *) return 1;; esac; }
+  engine_lists_tools() {
+    echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | "$ENGINE_PY" -I "$ENGINE_DIR/serve.py" | grep -q '"name": "queue"'
+  }
+  forbid "the engine's command is still a placeholder" grep -q '@HERMES_PYTHON@\|@ENGINE_DIR@' "$CFG"
+  require "the engine runs under the interpreter the proxy allows" proxy_python
+  require "the engine's MCP server lists its tools" engine_lists_tools
+fi
 [ "$bad" = 0 ] || exit 1

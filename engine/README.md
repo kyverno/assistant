@@ -1,20 +1,23 @@
-# repo-intel
+# The repository engine
 
-A bundled Hermes plugin, not a skill. Registers nine tools: `queue` and `item` (`queue_tools.py`, over `engine/`), five fetch tools (`fetch.py`, `fetch_tools.py`), the sequencer (`sequencer.py`, `sequence_tools.py`) and `repo_pack` (`pack_tools.py`), which returns the organisation pack's rules and facts.
+`repo_engine/` is the engine; `serve.py` serves its nine tools over MCP on stdio (`repo_engine/server.py`, standard
+library only). Try it with `python3 engine/serve.py` and an MCP client; the maintainer profile starts it as
+`mcp_servers.repo-intel`. Set `ASSISTANT_REPO` (owner/name) and `REPO_GITHUB_TOKEN`, and optionally
+`ASSISTANT_ORG_FILE`. Tools: `queue` and `item` (`queue_tools.py`, over `core/`), five fetch tools (`fetch.py`, `fetch_tools.py`), the sequencer (`sequencer.py`, `sequence_tools.py`) and `repo_pack` (`pack_tools.py`), which returns the organisation pack's rules and facts.
 
 ## Queue and item
 
 `queue(focus, kind, limit, prefer, avoid)` is where `pr-queue` starts: the top items for a focus, ranked in code, one
 line each with the reasons, the next step and who takes it, what the code changes, risk, and relations to other PRs.
 `item(number, level)` is one PR or issue: a card, or with `level="code"` the patches of the files that matter most and
-the nearest `AGENTS.md` excerpt. Each view has a character budget (`engine/layers.py`) that tests check. The engine
-(`engine/`) has no GitHub or Hermes imports; `docs/architecture.md` describes the ranking rules.
+the nearest `AGENTS.md` excerpt. Each view has a character budget (`core/layers.py`) that tests check. `core/` has
+no GitHub calls, and nothing in the engine imports Hermes; `docs/architecture.md` describes the ranking rules.
 
 ## Fetch
 
 - `fetch_pr_candidates` — what `pr-queue` calls instead of `search_pull_requests` plus one
   `pull_request_read` per candidate — the actual fix for a real session that took 15 of 107
-  PRs, fetched one at a time, ~5 minutes. The model sees one tool call; this plugin's own
+  PRs, fetched one at a time, ~5 minutes. The model sees one tool call; the engine's own
   Python code makes the real network requests (a search pass, then GraphQL detail queries
   of up to 10 candidates each, 4 at a time) directly against
   `https://api.github.com/graphql`.
@@ -42,15 +45,14 @@ Dependabot semver/security level, "superseded by a merged PR," and similar relat
 filters are the real cases.
 
 All five use the profile's own `REPO_GITHUB_TOKEN` — the same scopes already granted to the
-`github` MCP server, no new credential, no MCP server involved for any call.
+`github` MCP server, no new credential; the calls go straight to GitHub's API, not through the GitHub MCP server.
 
 Details come up to 10 PRs or issues to a query, 4 queries at a time; other requests run two at a time. Requests are retried once on a dropped connection or a 502/503/504, and a rate limit says when
 to try again. A result over 40,000 characters drops long text first, then trailing items, and names them in
 `not_shown`, so nothing spills to a file. Each closing issue lists `other_prs`, every other PR that claims it, and
 the gate's open failure issues come with every PR fetch.
 
-Ships automatically on `hermes profile install .` (see `docs/architecture.md`). Pure stdlib (`urllib.request`, `concurrent.futures`) — no
-external dependency to install.
+Standard library (`urllib.request`, `concurrent.futures`) plus PyYAML to read the organisation pack.
 
 ## Sequence
 

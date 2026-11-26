@@ -154,7 +154,16 @@ path = profile_dir + "/config.yaml"
 s = open(path).read()
 open(path, "w").write(s.replace('command: "./hooks/', 'command: "' + profile_dir + '/hooks/'))
 PY
-pass "hook scripts pinned to $PROFILE_DIR/hooks"
+
+# The engine's MCP server runs from this checkout, under the interpreter this installer picked ($PY, it has PyYAML). Outside the
+# sandbox there is no proxy, so any interpreter may hold the token.
+python3 - "$PROFILE_DIR/config.yaml" "$PY" "$REPO_ROOT/engine" <<'PY'
+import sys
+p, python, engine = sys.argv[1:4]
+s = open(p).read().replace("@HERMES_PYTHON@", python).replace("@ENGINE_DIR@", engine)
+open(p, "w").write(s)
+PY
+pass "hook scripts pinned to $PROFILE_DIR/hooks; the engine runs from $REPO_ROOT/engine"
 
 step "3. Credentials"
 

@@ -26,7 +26,7 @@ read PR content: that is `pr-queue`.
 
 - `REPO_GITHUB_TOKEN` and `ASSISTANT_REPO` (`owner/repo`) from the profile's `.env`. The `fetch_*` tools default `repo` to
   it, so omit it.
-- `repo_pack` (plugin tool, `plugins/repo-intel/`).
+- `repo_pack` (engine tool, the repo-intel MCP server).
 - `mcp-github` tools: `list_label`, `get_file_contents`, `get_team_members`, `get_teams`, `search_code`,
   `search_pull_requests`, `issue_read`.
 - `mnemosyne_recall`, for cached `AGENTS.md` and `ARCHITECTURE.md` docs (step 4).

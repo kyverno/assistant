@@ -1311,7 +1311,7 @@ def file_text(repo: str, path: str, ref: Optional[str]) -> Optional[str]:
 def codeowners(repo: str, rules: Rules, ref: Optional[str]) -> tuple[list, Optional[str]]:
     """(parsed CODEOWNERS rules, the path they came from), from the default branch. Where GitHub looks: the pack's
     path, then .github/, the root and docs/."""
-    from .engine.owners import parse_codeowners
+    from .core.owners import parse_codeowners
 
     for path in dict.fromkeys([rules.codeowners or ".github/CODEOWNERS", ".github/CODEOWNERS", "CODEOWNERS",
                                "docs/CODEOWNERS"]):

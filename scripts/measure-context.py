@@ -51,6 +51,13 @@ def plugin_schemas(profile: str) -> list[dict]:
     for directory in sorted((ROOT / "profiles" / profile / "plugins").iterdir()):
         if (directory / "__init__.py").exists():
             load_plugin(f"measure_{profile}_{directory.name.replace('-', '_')}", directory).register(Ctx())
+    # The engine's tools reach the model through its MCP server, but they are ours, so they are counted here too.
+    config = yaml.safe_load((ROOT / "profiles" / profile / "config.yaml").read_text())
+    if "repo-intel" in (config.get("mcp_servers") or {}):
+        sys.path.insert(0, str(ROOT / "engine"))
+        from repo_engine import TOOLS
+
+        schemas += [schema for schema, _ in TOOLS]
     return schemas
 
 
@@ -124,7 +131,7 @@ def report(m: dict) -> None:
     else:
         print(f"  GitHub tools     {g['count']:>3}  (sizes need --live)")
         print(f"    named by none  {len(g['unnamed']):>3}")
-    print(f"  plugin tools     {p['count']:>3}  ~{tokens(p['chars']):>6,} tokens")
+    print(f"  our tools        {p['count']:>3}  ~{tokens(p['chars']):>6,} tokens  (plugins and the engine)")
     print(f"  skills (on demand) {s['count']:>1}  ~{tokens(s['chars']):>6,} tokens, largest {s['largest'][0]} ~{tokens(s['largest'][1]):,}")
     if g["unnamed"]:
         print("  unnamed GitHub tools: " + ", ".join(g["unnamed"]))

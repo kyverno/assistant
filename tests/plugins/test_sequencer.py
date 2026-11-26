@@ -4,10 +4,10 @@ import sys
 import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
-from _load import FIXTURES, repo_intel
+from _load import FIXTURES, engine
 
-repo_intel()
-from repo_intel import pack, sequencer  # noqa: E402
+engine()
+from repo_engine import pack, sequencer  # noqa: E402
 
 RULES = pack.load(str(FIXTURES / "other-org.yaml"))
 
@@ -110,7 +110,7 @@ class WithoutAPack(unittest.TestCase):
 
 class ThroughTheTool(unittest.TestCase):
     def test_the_tool_schemas_name_no_organisation(self):
-        from repo_intel import fetch_tools, pack_tools, sequence_tools
+        from repo_engine import fetch_tools, pack_tools, sequence_tools
         schemas = [fetch_tools.FETCH_PR_CANDIDATES_SCHEMA, fetch_tools.FETCH_PR_DETAILS_SCHEMA, fetch_tools.FETCH_ISSUE_CANDIDATES_SCHEMA,
                    fetch_tools.FETCH_ISSUE_DETAILS_SCHEMA, fetch_tools.FETCH_FILE_DIFF_OVERLAP_SCHEMA, sequence_tools.SEQUENCE_PRS_SCHEMA,
                    pack_tools.REPO_PACK_SCHEMA]

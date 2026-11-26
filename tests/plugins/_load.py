@@ -1,4 +1,5 @@
-"""Load a profile plugin as a package, the way Hermes does, without Hermes installed."""
+"""Load a profile plugin as a package, the way Hermes does, without Hermes installed; and the engine package."""
+import importlib
 import importlib.util
 import pathlib
 import sys
@@ -18,8 +19,12 @@ def plugin(name: str, directory: pathlib.Path):
     return module
 
 
-def repo_intel():
-    return plugin("repo_intel", ROOT / "profiles/maintainer/plugins/repo-intel")
+def engine():
+    """The engine package (engine/repo_engine), imported the way engine/serve.py imports it."""
+    path = str(ROOT / "engine")
+    if path not in sys.path:
+        sys.path.insert(0, path)
+    return importlib.import_module("repo_engine")
 
 
 def contributor():

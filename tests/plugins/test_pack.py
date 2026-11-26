@@ -5,10 +5,10 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
-from _load import FIXTURES, ROOT, repo_intel
+from _load import FIXTURES, ROOT, engine
 
-repo_intel()
-from repo_intel import pack  # noqa: E402
+engine()
+from repo_engine import pack  # noqa: E402
 
 KYVERNO = ROOT / "container/org/kyverno/org.yaml"
 

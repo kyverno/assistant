@@ -73,12 +73,15 @@ The files below are the maintainer profile's, under `profiles/maintainer/`.
 - `profiles/maintainer/hooks/block-mnemosyne-triples.sh`: restricts the memory plugin's `triple_add` to the exact facts
   this distribution writes.
 
-**Plugins**
+**Engine**
 
-- `profiles/maintainer/plugins/repo-intel/`: `queue` and `item` (the ranked queue and one item's card or code, over
-  `engine/`), the fetch tools (`fetch_pr_candidates`, `fetch_file_diff_overlap` and the
+- `engine/repo_engine/`, served over MCP by `engine/serve.py` (`mcp_servers.repo-intel` in the maintainer config):
+  `queue` and `item` (the ranked queue and one item's card or code, over `core/`), the fetch tools (`fetch_pr_candidates`, `fetch_file_diff_overlap` and the
   issue equivalents, one batched call over GitHub's GraphQL and REST APIs) `sequence_prs` (a hard-dependency graph
   with cycle detection and topological layering into tiers), and `repo_pack` (the organisation pack's rules and facts).
+
+**Plugins**
+
 - `profiles/maintainer/plugins/maintainer-dashboard/`: the `update_dashboard` tool and the Maintainer tab in
   `hermes dashboard`.
 
